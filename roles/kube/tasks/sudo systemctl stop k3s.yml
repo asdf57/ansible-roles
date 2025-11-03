@@ -1,0 +1,13 @@
+sudo systemctl stop k3s
+sudo systemctl stop containerd
+sudo pkill -f containerd-shim
+sudo systemctl daemon-reload
+sudo systemctl start containerd
+
+curl -sfL https://get.k3s.io | INSTALL_K3S_SYMLINK=skip INSTALL_K3S_EXEC="server --write-kubeconfig /mnt/ssd/etc/rancher/k3s/k3s.yaml --cluster-init --tls-san 192.168.1.19 --bind-address 192.168.1.19 --data-dir /mnt/ssd --write-kubeconfig-mode 644" sh -
+
+
+sudo cp /mnt/ssd/etc/rancher/k3s/k3s.yaml ~/.kube/config
+sudo chmod 0644 ~/.kube/config
+
+/usr/local/bin/k3s-uninstall.sh

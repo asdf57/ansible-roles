@@ -1,0 +1,24 @@
+- name: Install Xorg packages
+  apt:
+    name: "{{ xorg_packages_by_distro[ansible_distribution] }}"
+    state: present
+    update_cache: yes
+
+- name: Install KDE Plasma and applications
+  apt:
+    name: "{{ kde_packages_by_distro[ansible_distribution] }}"
+    state: present
+    update_cache: yes
+
+- name: Install and enable SDDM
+  apt:
+    name: sddm
+    state: present
+  when: install_sddm
+
+- name: Enable SDDM service
+  systemd:
+    name: sddm
+    enabled: yes
+    state: started
+  when: install_sddm

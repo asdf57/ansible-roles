@@ -1,0 +1,63 @@
+
+image:
+  registry: docker.io
+  repository: bitnami/concourse
+  tag: 7.12.0-debian-12-r15
+  pullPolicy: IfNotPresent
+  pullSecrets: []
+
+ingress:
+    enabled: true
+    ingressClassName: "nginx"
+    hostname: concourse.ryuugu.dev
+    annotations:
+        kubernetes.io/ingress.class: "nginx"
+        cert-manager.io/cluster-issuer: "letsencrypt-dns01-issuer"
+    tls: true
+
+web:
+    enabled: true
+    externalUrl: "https://concourse.ryuugu.dev"
+    resourcesPreset: "2xlarge"
+    tls:
+        enabled: true
+    auth:
+        mainTeam:
+            localUser: "admin"
+
+worker:
+    enabled: true
+    priorityClassName: "high-priority"
+    bindIp: "0.0.0.0"
+    resources:
+        requests:
+            cpu: "1"
+            memory: "3Gi"
+            ephemeral-storage: "10Gi"
+        limits:
+            cpu: "6"
+            memory: "12Gi"
+            ephemeral-storage: "10Gi"
+    replicaCount: 2
+    nodeSelector:
+        info.kubernetes.io/node-role: "worker"
+
+secrets:
+    localAuth:
+        enabled: true
+    localUsers: "admin:admin"
+
+postgresql:
+  enabled: true
+  primary:
+    resourcesPreset: "2xlarge"
+    
+
+# externalDatabase:
+#   host: localhost
+#   port: 5432
+#   user: bn_concourse
+#   password: ""
+#   database: bitnami_concourse
+#   existingSecret: ""
+#   existingSecretPasswordKey: ""

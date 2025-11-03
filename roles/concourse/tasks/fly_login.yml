@@ -1,0 +1,7 @@
+- name: Log in to Concourse
+  ansible.builtin.shell: |
+    fly -t {{ concourse_team }} login \
+      -c {{ concourse_url }} \
+      -u {{ concourse_user }} \
+      -p {{ concourse_password }}
+  delegate_to: localhost

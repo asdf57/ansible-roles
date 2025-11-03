@@ -1,0 +1,12 @@
+
+{{% if is_first_time_coord %}}
+write-kubeconfig-mode: "0644"
+tls-san:
+  - "{{ kube_server_ip }}"
+cluster-init: true
+data-dir: "{{ k3s_data_dir }}"
+{{% elif is_coord %}}
+write-kubeconfig-mode: "0644"
+{{% elif is_worker %}}
+write-kubeconfig-mode: "0644"
+{{% endif %}}

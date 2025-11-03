@@ -1,0 +1,10 @@
+[Unit]
+Description=Set Linux as priority boot
+
+[Service]
+Type=oneshot
+RemainAfterExit=true
+ExecStart=/usr/bin/env bash -c "sudo efibootmgr -n $(efibootmgr | awk '/BootCurrent/ {print $2}')"
+
+[Install]
+WantedBy=multi-user.target

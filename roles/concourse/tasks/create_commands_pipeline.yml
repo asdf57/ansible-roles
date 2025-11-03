@@ -1,0 +1,21 @@
+- name: Log in to Concourse
+  import_tasks: fly_login.yml
+
+- name: Render the commands pipeline
+  template:
+    src: "{{ role_path }}/templates/pipelines/server_commands.yml.j2"
+    dest: "/tmp/commands_pipeline.yml"
+  delegate_to: localhost
+
+- name: Set pipeline
+  ansible.builtin.shell: |
+    fly -t {{ concourse_team }} set-pipeline \
+    -p "commands" \
+    --non-interactive \
+    -c "/tmp/commands_pipeline.yml"
+  delegate_to: localhost
+
+- name: Unpause the pipeline
+  ansible.builtin.shell: |
+    fly -t {{ concourse_team }} unpause-pipeline -p "commands"
+  delegate_to: localhost

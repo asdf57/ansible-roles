@@ -1,0 +1,77 @@
+---
+- name: Set initial start
+  set_fact:
+    start: "1MiB"
+  when: idx == 0
+
+- name: Print the start offset of partition {{ idx + 1 }}
+  debug:
+    msg: "Start offset for partition {{ idx + 1 }} is {{ start }}"
+
+- name: Set end
+  set_fact:
+    end: "{{ (start | regex_replace('MiB', '') | int) + (item.size | int) }}MiB"
+  when: item.alloc_type == "size"
+
+- name: Set end
+  set_fact:
+    end: "{{ item.size }}%"
+  when: item.alloc_type == "percentage"
+
+- name: Create EFI partition
+  community.general.parted:
+    device: "{{ disk_name }}"
+    name: "EFI System Partition"
+    label: "gpt"
+    number: "{{ idx + 1 }}"
+    state: "present"
+    part_start: "{{ start }}"
+    part_end: "{{ end }}"
+    unit: "MiB"
+    flags: "{{ item.flags }}"
+  when: item.fs_type == "efi"
+
+- name: Create swap partition
+  community.general.parted:
+    device: "{{ disk_name }}"
+    name: "Swap Partition"
+    label: "gpt"
+    number: "{{ idx + 1 }}"
+    part_type: "primary"
+    state: "present"
+    part_start: "{{ start }}"
+    part_end: "{{ end }}"
+    unit: "MiB"
+    align: "optimal"
+    flags: "{{ item.flags }}"
+  when: item.fs_type == "swap"
+
+- name: Create general partition
+  community.general.parted:
+    label: gpt
+    name: "partition{{ idx }}"
+    device: "{{ disk_name }}"
+    number: "{{ idx + 1 }}"
+    part_type: primary
+    state: "present"
+    part_start: "{{ start }}"
+    part_end: "{{ end }}"
+    unit: "MiB"
+    align: "optimal"
+    flags: "{{ item.flags }}"
+  when: item.fs_type not in ['efi', 'swap']
+
+- name: Refresh partition table info
+  community.general.parted:
+    device: "{{ disk_name }}"
+    state: info
+    unit: "MiB"
+  register: parted_info_updated
+
+- name: Update next start offset for next partition
+  set_fact:
+    next_start: "{{ (parted_info_updated.partitions | last).end | int }}"
+
+- name: Set start
+  set_fact:
+    start: "{{ (parted_info_updated.partitions | last).end | int }}MiB"

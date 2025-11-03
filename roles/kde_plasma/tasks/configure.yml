@@ -1,0 +1,3 @@
+- name: Move SDDM theme into /etc/sddm.conf
+  copy: src=/home/condor/dotfiles/sddm/sddm.conf dest=/etc/sddm.conf
+  when: install_sddm

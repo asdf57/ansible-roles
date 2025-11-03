@@ -1,0 +1,13 @@
+---
+# defaults file for kube
+ansible_python_interpreter: "/{{ ansible_user }}/.pyenv/versions/3.12.6/bin/python3"
+
+ghcr_username: "asdf57"
+required_packages_by_distro:
+  debian:
+    - apt-transport-https
+    - ca-certificates
+    - curl
+    - kubectl
+
+k3s_version: "v1.31.2+k3s1"

@@ -1,0 +1,21 @@
+- name: Check if KV version 2 secrets engine is enabled
+  ansible.builtin.shell: |
+    vault secrets list | grep -q "^kv2/"
+  register: kv2_enabled
+  ignore_errors: true
+
+- name: Enable KV version 2 secrets engine if not enabled
+  ansible.builtin.shell: |
+    vault secrets enable -path=kv2 kv || true
+  when: kv2_enabled.rc != 0
+
+- name: Check if AppRole auth is enabled
+  ansible.builtin.shell: |
+    vault auth list -format=json | jq -e '."approle/"' > /dev/null
+  register: approle_enabled
+  ignore_errors: true
+
+- name: Enable AppRole auth if not enabled
+  ansible.builtin.shell: |
+    vault auth enable approle
+  when: approle_enabled.rc != 0

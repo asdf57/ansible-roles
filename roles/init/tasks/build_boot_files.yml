@@ -1,0 +1,9 @@
+- name: Check if directory exists
+  ansible.builtin.stat:
+    path: "{{ role_path }}/files/nginx/files/{{ item.0 }}_{{ item.1 }}"
+  register: check_dir
+
+- name: Add to what to build list
+  set_fact:
+    what_to_build: "{{ what_to_build + [item] }}"
+  when: not check_dir.stat.exists

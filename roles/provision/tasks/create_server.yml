@@ -1,0 +1,30 @@
+- name: Upload the schema files to provisioning API
+  uri:
+    url: "https://server-api.ryuugu.dev/entry/"
+    method: POST
+    body: "{{ lookup('file', item) }}"
+    body_format: json
+    headers:
+      Content-Type: "application/json"
+      Accept: "application/json"
+    status_code: 200
+  register: api_response
+  ignore_errors: true
+  with_fileglob:
+    - "{{ playbook_dir }}/../../schemas/*.json"
+  tags:
+    - setup
+
+- name: Refresh the environment
+  ansible.builtin.shell:
+    cmd: |
+      cd inventory; git pull; cd -
+      ./scripts/setup_hostvars.sh {{ inventory_hostname }}
+    chdir: "../../"
+  tags:
+    - setup
+
+- name: Refresh inventory
+  meta: refresh_inventory
+  tags:
+    - setup

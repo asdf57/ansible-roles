@@ -1,0 +1,14 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: "{{ item.name }}-certificate"
+  namespace: {{ item.name }}
+spec:
+  secretName: "{{ item.name }}-tls"
+  issuerRef:
+    name: letsencrypt-dns01-issuer
+    kind: ClusterIssuer
+  commonName: "{{ domain_name }}"
+  itemNames:
+    - "{{ domain_name }}"
+    - "*.{{ domain_name }}"

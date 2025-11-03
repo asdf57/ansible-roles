@@ -1,0 +1,16 @@
+resources:
+- name: commands
+  type: git
+  source:
+    uri: {{ commands_data_repo }}
+    branch: {{ commands_data_branch }}
+
+jobs:
+  - name: commands
+    plan:
+      - get: commands
+        trigger: true
+      - task: run-commands
+        privileged: true
+        config:
+          platform: linux-[]

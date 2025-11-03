@@ -1,0 +1,9 @@
+
+
+- name: Uninstall Harbor
+  kubernetes.core.helm:
+    name: harbor
+    chart_ref: "harbor/harbor"
+    release_namespace: harbor
+    wait: true
+    state: absent

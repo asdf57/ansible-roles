@@ -1,0 +1,26 @@
+- name: Install helm
+  ansible.builtin.package:
+    name: helm
+    state: present
+  become: yes
+
+- name: Add grafana helm repo
+  kubernetes.core.helm_repository:
+    name: grafana
+    repo_url: https://grafana.github.io/helm-charts
+    state: present
+
+- name: Templates the values.yml file
+  template:
+    src: values.yml.j2
+    dest: /tmp/values.yml
+
+- name: Install Grafana using Helm
+  kubernetes.core.helm:
+    name: grafana
+    chart_ref: "grafana/grafana"
+    release_namespace: grafana
+    wait: true
+    create_namespace: true
+    values_files:
+      - /tmp/values.yml

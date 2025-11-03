@@ -1,0 +1,9 @@
+- name: Uninstall kube
+  hosts: all
+  become: yes
+  gather_facts: yes
+  tasks:
+    - name: Uninstall kube
+      include_role:
+        name: kube
+        tasks_from: uninstall

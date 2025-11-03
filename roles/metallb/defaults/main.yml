@@ -1,0 +1,11 @@
+---
+# defaults file for metallb
+ansible_python_interpreter: "/usr/local/bin/python"
+
+metallb_ip_range_start: "10.1.1.2"
+metallb_ip_range_end: "10.1.1.230"
+
+packages_by_distro:
+  debian:
+    - apt-transport-https
+    - helm

@@ -1,0 +1,21 @@
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-dns01-issuer
+spec:
+  acme:
+    externalAccountBinding:
+      keyID: "{{ zerossl_eab_kid }}"
+      keySecretRef:
+        name: zero-ssl-eabsecret
+        key: secret
+      keyAlgorithm: HS256
+    privateKeySecretRef:
+      name: cluster-issuer-account-key
+    server: https://acme.zerossl.com/v2/DV90
+    solvers:
+    - dns01:
+        cloudflare:
+          apiTokenSecretRef:
+            name: cloudflare-api-token-secret
+            key: api-token

@@ -1,0 +1,5 @@
+- name: Install Hypridle
+  community.general.pacman:
+    name: "hypridle"
+    state: present
+    update_cache: yes

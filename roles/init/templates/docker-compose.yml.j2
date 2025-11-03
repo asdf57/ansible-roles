@@ -1,0 +1,182 @@
+volumes:
+  ssl_certs:
+    driver: local
+  vault_shared:
+    driver: local
+
+services:
+  registry:
+    container_name: registry
+    restart: always
+    image: registry
+    ports:
+      - 5000:5000
+    volumes:
+      - "{{ host_roles_path }}/files/registry/config/config.yml:/etc/docker/registry/config.yml:ro"
+      - "{{ host_roles_path }}/files/registry/data:/var/lib/registry:rw"
+    networks:
+      clusternet:
+        ipv4_address: "{{ registry_ipv4 }}"
+
+  concourse-db:
+    container_name: concourse-db
+    image: postgres
+    environment:
+      POSTGRES_DB: concourse
+      POSTGRES_PASSWORD: concourse_pass
+      POSTGRES_USER: concourse_user
+      PGDATA: /database
+      POSTGRES_HOST_AUTH_METHOD: trust
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U concourse_user -d concourse"]
+      interval: 3s
+      timeout: 3s
+      retries: 5
+    networks:
+      clusternet:
+        ipv4_address: "{{ concourse_db_ipv4 }}"
+
+  concourse:
+    container_name: concourse
+    build:
+      context: ./concourse
+      args:
+        CONCOURSE_VERSION: "{{ concourse_version }}"
+    command: quickstart
+    privileged: true
+    cgroup: host
+    depends_on:
+      concourse-db:
+        condition: service_healthy
+      vault:
+        condition: service_healthy
+    ports: ["8080:8080"]
+    volumes:
+      - "{{ host_roles_path }}/files/vault/vault_stuff/stuff:/stuff"
+      - vault_shared:/shared
+    environment:
+      CONCOURSE_VAULT_URL: "{{ vault_url }}"
+      CONCOURSE_POSTGRES_HOST: "{{ concourse_db_ipv4 }}"
+      CONCOURSE_POSTGRES_USER: concourse_user
+      CONCOURSE_POSTGRES_PASSWORD: concourse_pass
+      CONCOURSE_POSTGRES_DATABASE: concourse
+      CONCOURSE_EXTERNAL_URL: "{{ concourse_url }}"
+      CONCOURSE_ADD_LOCAL_USER: test:test
+      CONCOURSE_MAIN_TEAM_LOCAL_USER: {{ concourse_team }}
+      CONCOURSE_WORKER_BAGGAGECLAIM_DRIVER: overlay
+      CONCOURSE_CLIENT_SECRET: Y29uY291cnNlLXdlYgo=
+      CONCOURSE_TSA_CLIENT_SECRET: Y29uY291cnNlLXdvcmtlcgo=
+      CONCOURSE_X_FRAME_OPTIONS: allow
+      CONCOURSE_CONTENT_SECURITY_POLICY: "frame-ancestors *;"
+      CONCOURSE_CLUSTER_NAME: homelab
+      CONCOURSE_WORKER_CONTAINERD_DNS_SERVER: "192.168.1.1"
+      CONCOURSE_WORKER_RUNTIME: "containerd"
+    restart: always
+    networks:
+      clusternet:
+        ipv4_address: "{{ concourse_ipv4 }}"
+
+  http:
+    build: ./provisioning-api
+    ports:
+      - "3000:3000"
+    secrets:
+      - git_provisioning_key
+    restart: always
+    networks:
+      clusternet:
+        ipv4_address: "{{ server_api_ipv4 }}"
+
+  vault:
+    build: ./vault
+    container_name: vault
+    ports:
+      - 8200:8200
+    cap_add:
+      - IPC_LOCK
+    restart: always
+    volumes:
+      - "{{ host_roles_path }}/files/vault/vault_stuff/internal:/vault/data"
+      - "{{ host_roles_path }}/files/vault/vault_stuff/config:/vault/config"
+      - "{{ host_roles_path }}/files/vault/vault_stuff/logs:/vault/logs"
+      - "{{ host_roles_path }}/files/vault/vault_stuff/secrets:/vault/secrets"
+      - "{{ host_roles_path }}/files/vault/vault_stuff/stuff:/stuff"
+      - vault_shared:/shared
+      - ssl_certs:/vault/ssl:ro
+    environment:
+      VAULT_ADDR: "http://127.0.0.1:8200"
+      VAULT_API_ADDR: "http://vault:8200"
+    networks:
+      clusternet:
+        ipv4_address: "{{ vault_ipv4 }}"
+    healthcheck:
+      test: ["CMD", "vault", "status"]
+      interval: 5s
+      retries: 5
+      start_period: 5s
+
+  nginx:
+    build: ./nginx
+    container_name: nginx
+    networks:
+      clusternet:
+        ipv4_address: "{{ nginx_ipv4 }}"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - "{{ host_roles_path }}/files/nginx/files:/www/data"
+      - ssl_certs:/etc/nginx/ssl:rw
+    restart: always
+    labels:
+      - sh.acme.autoload.domain={{ nginx_acme_label }}
+
+  dnsmasq:
+    build: ./dnsmasq
+    network_mode: host
+    depends_on:
+      - nginx
+    restart: always
+    cap_add:
+      - NET_ADMIN
+
+  acme:
+    build: ./acme
+    container_name: acme
+    network_mode: host
+    environment:
+      - CF_Token="{{ cloudflare_api_key }}"
+      - CF_Email="{{ cloudflare_email }}"
+      - ACME_DOMAIN={{ cloudflare_domain }}
+      - ACME_SERVER={{ cert_authority }}
+      - ZEROSSL_EAB_KID={{ zerossl_eab_kid }}
+      - ZEROSSL_EAB_HMAC_KEY={{ zerossl_eab_hmac_key }}
+      - ZEROSSL_EMAIL={{ zerossl_email }}
+      - DNS_API=dns_cf
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - "{{ host_roles_path }}/files/acme/acme.sh:/acme.sh"
+      - ssl_certs:/certs:rw
+    restart: always
+    depends_on:
+      - nginx
+    healthcheck:
+      test: ["CMD", "test", "-f", "/done"]
+      interval: 10s
+      retries: 5000
+      start_period: 10s
+
+secrets:
+  git_provisioning_key:
+    file: "{{ host_git_ssh_key_path }}"
+
+networks:
+  clusternet:
+    driver: "{{ network_driver }}"
+    driver_opts:
+      mode: "{{ ipvlan_mode if network_driver == 'ipvlan' else macvlan_mode }}"
+      parent: "{{ interface }}"
+    ipam:
+      config:
+        - subnet: "{{ ipvlan_subnet if network_driver == 'ipvlan' else macvlan_subnet }}"
+          gateway: "{{ ipvlan_gateway if network_driver == 'ipvlan' else macvlan_gateway }}"

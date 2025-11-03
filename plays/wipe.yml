@@ -1,0 +1,12 @@
+---
+- name: Wipe the disk
+  hosts: all
+  become: yes
+  vars:
+    disk_device: "{{ disk_device }}"
+
+  tasks:
+    - name: Wipe the disk partitions
+      import_role:
+        name: disk_partitioning
+        tasks_from: wipe.yml

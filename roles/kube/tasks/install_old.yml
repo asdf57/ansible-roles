@@ -1,0 +1,170 @@
+- name: Delete existing Kubernetes key files
+  ansible.builtin.shell: |
+    rm -f /etc/apt/keyrings/kubernetes-apt-keyring.gpg /tmp/kubernetes-release.key
+  when: ansible_distribution == 'Debian'
+
+- name: Download Kubernetes GPG key
+  ansible.builtin.get_url:
+    url: https://pkgs.k8s.io/core:/stable:/v1.31/deb/Release.key
+    dest: /tmp/kubernetes-release.key
+    mode: '0644'
+  when: ansible_distribution == 'Debian'
+
+- name: Convert Kubernetes GPG key to binary format
+  ansible.builtin.shell: |
+    gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg /tmp/kubernetes-release.key
+  when: ansible_distribution == 'Debian'
+
+- name: Add Kubernetes APT repository
+  ansible.builtin.apt_repository:
+    repo: "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.31/deb/ /"
+    state: present
+  when: ansible_distribution == 'Debian'
+
+- name: Install required packages
+  ansible.builtin.package:
+    name: "{{ item }}"
+    state: present
+  loop: "{{ required_packages_by_distro[ansible_distribution | lower] | list }}"
+
+- name: Run checks
+  block:
+    - name: Check if k3s binary exists
+      ansible.builtin.stat:
+        path: /usr/local/bin/k3s
+      register: k3s_binary
+
+    - name: Check if we can access kube from first coord
+      ansible.builtin.shell: |
+        kubectl get nodes
+      delegate_to: "{{ groups['kube_coords'][0] }}"
+      register: kubectl_output
+      ignore_errors: true
+
+    - name: Check if k3s uninstall script exists
+      ansible.builtin.stat:
+        path: /usr/local/bin/k3s-uninstall.sh
+      register: k3s_uninstall_script
+
+- name: Print the k3s_data_dir
+  debug:
+    var: k3s_data_dir
+
+- name: Set facts
+  block:
+    - name: Set fact on whether or not we can access kube from first coord
+      set_fact:
+        can_access_kube: "{{ kubectl_output.rc == 0 }}"
+      when: kubectl_output.rc == 0
+
+    - name: Set fact if k3s binary exists
+      set_fact:
+        k3s_binary_exists: "{{ k3s_binary.stat.exists }}"
+
+- name: First coord can access kube
+  debug:
+    msg: "It was determined that the first coord can access kube. This implies that the cluster has already been initialized."
+  when: can_access_kube is defined
+
+- name: First coord cannot access kube
+  debug:
+    msg: "It was determined that the first coord cannot access kube. This implies that the cluster has not been initialized yet."
+  when: can_access_kube is not defined
+
+- name: Download the k3s install script
+  ansible.builtin.get_url:
+    url: "https://get.k3s.io"
+    dest: /tmp/install-k3s.sh
+    mode: "0755"
+
+- name: Setup coord
+  block:
+    - name: First-time setup
+      block:
+        - name: Initialize the cluster
+          ansible.builtin.shell: |
+            /tmp/install-k3s.sh
+          environment:
+            INSTALL_K3S_SYMLINK: skip
+            INSTALL_K3S_FORCE_RESTART: true
+            INSTALL_K3S_EXEC: "server --write-kubeconfig {{ k3s_data_dir }}/etc/rancher/k3s/k3s.yaml --cluster-init --tls-san {{ hostvars[groups['kube_coords'][0]].ansible_host }} --bind-address {{ hostvars[groups['kube_coords'][0]].ansible_host }} --data-dir {{ k3s_data_dir }} --write-kubeconfig-mode 644"
+
+        - name: Move kube config to ~/.kube/config
+          ansible.builtin.copy:
+            src: "{{ k3s_data_dir }}/etc/rancher/k3s/k3s.yaml"
+            dest: /home/{{ ansible_user }}/.kube/config
+            mode: "0644"
+      when:
+        - can_access_kube is not defined
+
+    - name: Regular setup
+      block:
+        - name: Get the k3s token
+          ansible.builtin.shell: "cat {{ k3s_data_dir }}/server/node-token"
+          register: k3s_token
+          no_log: true
+          delegate_to: "{{ groups['kube_coords'][0] }}"
+
+        - name: Join the cluster
+          ansible.builtin.shell: |
+            /tmp/install-k3s.sh
+          environment:
+            INSTALL_K3S_SYMLINK: skip
+            INSTALL_K3S_EXEC: "server --server https://{{ hostvars[groups['kube_coords'][0]].ansible_host }}:6443 --token {{ k3s_token.stdout }} --data-dir={{ k3s_data_dir }} --write-kubeconfig {{ k3s_data_dir }}/etc/rancher/k3s/k3s.yaml --tls-san {{ hostvars[groups['kube_coords'][0]].ansible_host }}"
+      when:
+        - can_access_kube is defined
+  when:
+    - "'kube_coords' in group_names"
+
+- name: Setup worker
+  block:
+    - name: Fail if the first coord cannot access kube
+      fail:
+        msg: "The first coord cannot access kube. This implies that the cluster is in a bad state."
+      when: can_access_kube is not defined
+
+    - name: Check if worker is in the cluster
+      ansible.builtin.shell: k3s kubectl get nodes | grep {{ inventory_hostname }}
+      delegate_to: "{{ groups['kube_coords'][0] }}"
+      register: k3s_node_check
+      ignore_errors: true
+
+    - name: Stuff to do if worker is not in cluster but k3s is installed
+      block:
+        - name: Remove k3s-agent.service if it exists
+          ansible.builtin.shell: |
+            systemctl stop k3s-agent
+            systemctl disable k3s-agent
+            rm -f /etc/systemd/system/k3s-agent.service
+
+        - name: Remove any existing k3s data
+          ansible.builtin.file:
+            state: absent
+            path: /etc/rancher/k3s
+      when:
+        - k3s_node_check.rc == 1
+        - k3s_binary_exists
+
+    - name: Add worker to the cluster
+      block:
+        - name: Get the k3s token
+          ansible.builtin.shell: "cat {{ hostvars[groups['kube_coords'][0]].k3s_data_dir }}/server/node-token"
+          register: k3s_token
+          no_log: true
+          delegate_to: "{{ groups['kube_coords'][0] }}"
+
+        - name: Install K3s agent on worker node
+          ansible.builtin.shell: |
+            /tmp/install-k3s.sh
+          environment:
+            INSTALL_K3S_SYMLINK: skip
+            INSTALL_K3S_FORCE_RESTART: true
+            INSTALL_K3S_EXEC: "agent --server https://{{ hostvars[groups['kube_coords'][0]].ansible_host }}:6443 --token {{ k3s_token.stdout }} --data-dir {{ k3s_data_dir }} --node-name {{ inventory_hostname }}"
+
+        - name: Label the node as a worker
+          ansible.builtin.shell: |
+            kubectl label node {{ inventory_hostname }} node-role.kubernetes.io/worker=
+          delegate_to: "{{ groups['kube_coords'][0] }}"
+      when: k3s_node_check.rc == 1
+  when:
+    - "'kube_workers' in group_names"

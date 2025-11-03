@@ -1,0 +1,7 @@
+- name: Install harbor
+  hosts: localhost
+  tasks:
+    - name: Install harbor
+      include_role:
+        name: harbor
+        tasks_from: install

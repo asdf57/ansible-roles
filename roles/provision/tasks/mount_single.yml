@@ -1,0 +1,51 @@
+---
+- name: Set fs type
+  set_fact:
+    fstype: "{{ item.fs_type }}"
+
+- name: Set fs type for EFI partition
+  set_fact:
+    fstype: "vfat"
+  when: item.fs_type == "efi"
+
+- name: EFI partition setup
+  block:
+  - name: Create mount point for EFI partition
+    ansible.builtin.file:
+      path: /mnt/boot/efi
+      state: directory
+
+  - name: Mount the EFI partition to /boot/efi
+    ansible.posix.mount:
+      src: "{{ disk_name }}{{ idx + 1 }}"
+      path: /mnt/boot/efi
+      state: mounted
+      fstype: "{{ fstype }}"
+  when: item.fs_type == "efi"
+
+- name: Enable swap partition
+  ansible.builtin.command:
+    cmd: swapon {{ disk_name }}{{ idx + 1 }}
+  when: item.fs_type == "swap"
+
+- name: Block mount general partitions
+  block:
+    - name: Set general mount point idx
+      set_fact:
+        general_mount_idx: "{{ 0 if general_partitions is undefined else general_mount_idx + 1 }}"
+
+    - name: Set mount point
+      set_fact:
+        gen_mnt_point: "/mnt{{ general_mount_idx if general_mount_idx | int > 0 else '' }}"
+
+    - name: Mount general partitions to /mnt, /mnt1, etc.
+      ansible.posix.mount:
+        src: "{{ disk_name }}{{ idx + 1 }}"
+        path: "{{ gen_mnt_point }}"
+        state: mounted
+        fstype: "{{ fstype }}"
+
+    - name: Print general partition mount
+      debug:
+        msg: "Mounted {{ disk_name }}{{ idx + 1 }} to {{ gen_mnt_point }}"
+  when: item.fs_type not in ['efi', 'swap']

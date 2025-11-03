@@ -1,0 +1,148 @@
+- name: Download K3s install script
+  ansible.builtin.get_url:
+    url: "https://get.k3s.io"
+    dest: /usr/local/bin/k3s-install.sh
+    mode: "0755"
+
+- name: Download K3s binary
+  ansible.builtin.command:
+    cmd: /usr/local/bin/k3s-install.sh
+  environment:
+    INSTALL_K3S_SKIP_START: "true"
+    INSTALL_K3S_VERSION: "{{ k3s_version }}"
+  changed_when: true
+
+- name: Set fact for kube_server_ip
+  set_fact:
+    kube_server_ip: "{{ hostvars[groups['kube_coords'][0]].ansible_host }}"
+
+- name: Print the kube coord ip
+  debug:
+    msg: "{{ kube_server_ip }}"
+
+- name: Make config directory
+  ansible.builtin.file:
+    path: "/etc/rancher/k3s"
+    mode: "0755"
+    state: directory
+
+- name: Check if first coord is in the cluster
+  ansible.builtin.shell: |
+    kubectl get no
+  register: is_first_coord_in_cluster
+  delegate_to: "{{ groups['kube_coords'][0] }}"
+  ignore_errors: true
+
+- name: Check if node is in the cluster
+  ansible.builtin.shell:
+    cmd: "kubectl get nodes | grep {{ inventory_hostname }}"
+  register: is_node_in_cluster
+  delegate_to: "{{ groups['kube_coords'][0] }}"
+  ignore_errors: true
+
+- name: Set fact for is_first_coord_in_cluster
+  set_fact:
+    is_first_coord_in_cluster: "{{ is_first_coord_in_cluster.rc == 0 }}"
+
+- name: Set fact for is_node_in_cluster
+  set_fact:
+    is_node_in_cluster: "{{ is_node_in_cluster.rc == 0 }}"
+
+- name: Init the first coord
+  block:
+    - name: Template the k3s server service file
+      ansible.builtin.template:
+        src: k3s.service.j2
+        dest: /etc/systemd/system/k3s.service
+        mode: "0644"
+      vars:
+        # k3s_args: "server --server --cluster-init --data-dir {{ k3s_data_dir }} --tls-san {{ kube_server_ip }} --bind-address {{ kube_server_ip }} --node-ip {{ kube_server_ip }} --write-kubeconfig-mode 644 --node-name {{ inventory_hostname }}"
+        k3s_args: "server --disable servicelb --cluster-init --data-dir {{ k3s_data_dir }} --bind-address {{ kube_server_ip }} --write-kubeconfig-mode 644 --node-name {{ inventory_hostname }}"
+
+    - name: Start the K3s server service
+      ansible.builtin.systemd:
+        name: k3s
+        state: started
+        daemon_reload: true
+        enabled: true
+
+    - name: Create the kube config directory
+      ansible.builtin.file:
+        name: "/home/{{ ansible_user }}/.kube"
+        state: directory
+
+    - name: Move kube config to ~/.kube/config
+      ansible.builtin.copy:
+        src: "/etc/rancher/k3s/k3s.yaml"
+        dest: /home/{{ ansible_user }}/.kube/config
+        mode: "0644"
+        remote_src: true
+
+    - name: Fetch the remote kube config
+      ansible.builtin.fetch:
+        src: /home/root/.kube/config
+        dest: /home/condor/.kube/config
+        flat: yes
+        validate_certs: no
+      delegate_to: "{{ groups['kube_coords'][0] }}"
+
+  when:
+    - inventory_hostname == groups['kube_coords'][0]
+    - not is_node_in_cluster
+
+- name: Init coord
+  block:
+    - name: Template the k3s server service file
+      ansible.builtin.template:
+        src: k3s.service.j2
+        dest: /etc/systemd/system/k3s.service
+        mode: "0644"
+      vars:
+        # k3s_args: "server --server --data-dir {{ k3s_data_dir }} --tls-san {{ kube_server_ip }} --bind-address {{ kube_server_ip }} --node-ip {{ kube_server_ip }} --write-kubeconfig-mode 644 --node-name {{ inventory_hostname }}"
+        k3s_args: "server --disable servicelb --server https://{{ kube_server_ip }}:6443 --data-dir {{ k3s_data_dir }} --write-kubeconfig-mode 644 --node-name {{ inventory_hostname }}"
+
+    - name: Start the K3s server service
+      ansible.builtin.systemd:
+        name: k3s
+        state: started
+        daemon_reload: true
+        enabled: true
+
+    - name: Move kube config to ~/.kube/config
+      ansible.builtin.copy:
+        src: "/etc/rancher/k3s/k3s.yaml"
+        dest: /home/{{ ansible_user }}/.kube/config
+        mode: "0644"
+  when:
+    - inventory_hostname in groups['kube_coords'][1:]
+    - is_first_coord_in_cluster and not is_node_in_cluster
+
+- name: Init worker
+  block:
+    - name: Get the k3s token
+      ansible.builtin.shell: "cat {{ hostvars[groups['kube_coords'][0]].k3s_data_dir }}/server/node-token"
+      register: k3s_token
+      no_log: true
+      delegate_to: "{{ groups['kube_coords'][0] }}"
+
+    - name: Template the k3s agent service file
+      ansible.builtin.template:
+        src: k3s.service.j2
+        dest: /etc/systemd/system/k3s.service
+        mode: "0644"
+      vars:
+        k3s_args: "agent --data-dir {{ k3s_data_dir }} --server https://{{ kube_server_ip }}:6443 --token {{ k3s_token.stdout }} --node-name {{ inventory_hostname }}"
+
+    - name: Start the K3s server service
+      ansible.builtin.systemd:
+        name: k3s
+        state: started
+        daemon_reload: true
+        enabled: true
+
+    - name: Add worker label to the node
+      ansible.builtin.shell: "kubectl label node {{ inventory_hostname }} info.kubernetes.io/node-role=worker"
+      delegate_to: "{{ groups['kube_coords'][0] }}"
+  when:
+    - inventory_hostname in groups['kube_workers']
+    - is_first_coord_in_cluster and not is_node_in_cluster

@@ -1,0 +1,7 @@
+- name: Uninstall concourse
+  hosts: localhost
+  tasks:
+    - name: Uninstall concourse
+      include_role:
+        name: concourse
+        tasks_from: uninstall

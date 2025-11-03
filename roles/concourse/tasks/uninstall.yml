@@ -1,0 +1,27 @@
+- name: Uninstall concourse
+  kubernetes.core.helm:
+    name: concourse
+    chart_ref: concourse/concourse
+    release_namespace: concourse
+    wait: true
+    create_namespace: true
+    state: absent
+
+- name: Delete the concourse postgresql PVC
+  kubernetes.core.k8s:
+    state: absent
+    definition:
+      apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
+        name: data-concourse-postgresql-0
+        namespace: concourse
+
+- name: Delete the high-priority priority class
+  kubernetes.core.k8s:
+    state: absent
+    definition:
+      apiVersion: scheduling.k8s.io/v1
+      kind: PriorityClass
+      metadata:
+        name: high-priority

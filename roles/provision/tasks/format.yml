@@ -1,0 +1,26 @@
+- name: Format EFI partition
+  ansible.builtin.filesystem:
+    fstype: "vfat"
+    dev: "{{ partition_base }}{{ efi_partition_number }}"
+
+- name: Check if swap is already enabled
+  ansible.builtin.shell: "swapon --show=NAME | grep -w '{{ partition_base }}{{ swap_partition_number }}'"
+  register: swap_status
+  changed_when: false
+  failed_when: swap_status.rc not in [0, 1]
+
+- name: Format the swap partition
+  ansible.builtin.command:
+    cmd: mkswap "{{ partition_base }}{{ swap_partition_number }}"
+  when: has_swap_partition and swap_status.rc != 0
+
+- name: Enable the swap partition
+  ansible.builtin.command:
+    cmd: swapon "{{ partition_base }}{{ swap_partition_number }}"
+  when: has_swap_partition and swap_status.rc != 0
+
+- name: Format general partitions
+  ansible.builtin.filesystem:
+    fstype: "{{ item.fs }}"
+    dev: "{{ partition_base }}{{ item.number }}"
+  loop: "{{ general_partitions }}"

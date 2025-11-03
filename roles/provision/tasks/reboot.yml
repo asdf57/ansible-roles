@@ -1,0 +1,21 @@
+---
+- name: Prime the NIC
+  include_tasks: prime_nic.yml
+
+- name: Reboot to iPXE
+  ansible.builtin.shell:
+    cmd: "grub-reboot 'Network Boot (iPXE)' && reboot"
+  ignore_unreachable: yes
+  ignore_errors: yes
+  when: reboot_to_ipxe | default(false) | bool
+
+- name: Reboot
+  ansible.builtin.reboot:
+    reboot_timeout: 600
+    test_command: whoami
+  when: not reboot_to_ipxe | default(false) | bool
+
+- name: Wait for the server to come back after reboot
+  ansible.builtin.wait_for_connection:
+    timeout: 600
+  ignore_unreachable: yes

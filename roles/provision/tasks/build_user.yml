@@ -1,0 +1,26 @@
+- name: Check if users exist
+  ansible.builtin.shell: |
+    {{ chroot_name }} /mnt id -u "{{ item.username }}"
+  changed_when: false
+  register: user_exists
+  failed_when: user_exists.rc not in [0, 1]
+
+- name: Create a password for the user
+  ansible.builtin.set_fact:
+    password: "{{ lookup('password', '/dev/null', chars=['ascii_letters', 'digits'], length=15) }}"
+  register: password_result
+
+- name: Extract the password
+  ansible.builtin.set_fact:
+    password: "{{ root_password_result.ansible_facts.root_password }}"
+
+- name: Print the password
+  debug:
+    msg: "password: {{ root_password }}"
+
+- name: Create users that do not exist
+  ansible.builtin.shell: |
+    echo "{{ item.item.password }}" | {{ chroot_name }} /mnt useradd -m -p "$(openssl passwd -6 -stdin)" -s "{{ item.item.shell }}" -G "{{ item.item.groups | join(',') }}" "{{ item.item.username }}"
+  when: item.rc == 1
+  loop: "{{ user_exists.results }}"
+

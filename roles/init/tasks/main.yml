@@ -1,0 +1,322 @@
+---
+# provisioning API, nginx reverse proxy, create cert, ipxe
+
+- name: Template the docker-compose file
+  template:
+    src: docker-compose.yml.j2
+    dest: "{{ host_roles_path }}/files/docker-compose.yml"
+
+- name: Clone the provisoning API repo
+  git:
+    repo: "{{ provisioning_api_repo }}"
+    dest: "{{ host_roles_path }}/files/provisioning-api"
+    version: "{{ provisioning_api_version }}"
+    force: yes
+
+- name: Template dnsmasq.conf
+  template:
+    src: dnsmasq.conf.j2
+    dest: "{{ host_roles_path }}/files/dnsmasq/dnsmasq.conf"
+
+- name: Template the registry config
+  template:
+    src: config.yml.j2
+    dest: "{{ host_roles_path }}/files/registry/config/config.yml"
+
+- name: Template nginx.conf
+  template:
+    src: default.conf.j2
+    dest: "{{ host_roles_path }}/files/nginx/default.conf"
+
+- name: Setup nginx mounts
+  block:
+    - name: Create the files directory
+      ansible.builtin.file:
+        path: "{{ host_roles_path }}/files/nginx/files"
+        state: directory
+
+- name: Setup acme.sh mounts
+  block:
+    - name: Create the acme.sh directory
+      ansible.builtin.file:
+        path: "{{ host_roles_path }}/files/acme/acme.sh"
+        state: directory
+
+- name: Setup vault mounts
+  block:
+    - name: Create the internal directory
+      ansible.builtin.file:
+        path: "{{ host_roles_path }}/files/vault/internal"
+        state: directory
+
+- name: Download iPXE efi binary
+  ansible.builtin.get_url:
+    url: https://boot.ipxe.org/ipxe.efi
+    dest: "{{ host_roles_path }}/files/nginx/files/ipxe.efi"
+
+- name: Download iPXE iso
+  ansible.builtin.get_url:
+    url: https://boot.ipxe.org/ipxe.iso
+    dest: "{{ host_roles_path }}/files/nginx/files/ipxe.iso"
+
+- name: Delete the ipvlan network
+  community.docker.docker_network:
+    name: ipvlan
+    state: absent
+  ignore_errors: yes
+
+- name: Build the docker-compose
+  community.docker.docker_compose_v2:
+    project_src: "{{ host_roles_path }}/files"
+    project_name: infra
+    state: present
+    build: always
+  register: docker_compose_result
+  failed_when: docker_compose_result.failed
+  ignore_errors: true
+  retries: 5
+  delay: 5
+
+- name: Print Docker Compose error
+  debug:
+    msg: "{{ docker_compose_result.stderr | default('No error message available') }}"
+  when: docker_compose_result.failed
+
+- name: Wait for the acme.sh container to become healthy
+  shell: "{% raw %}docker inspect --format='{{.State.Health.Status}}' acme{% endraw %}"
+  register: acme_health
+  until: acme_health.stdout == "healthy"
+  retries: 1000
+
+- name: macvlan shim
+  when: network_driver == "macvlan" and ansible_os_family not in ["Darwin", "Windows"]
+  block:
+    - name: Is the macvlan network already created?
+      ansible.builtin.command: ip link show macvlan-shim
+      register: macvlan_check
+      ignore_errors: true
+
+    - name: Create macvlan shim (linux only)
+      ansible.builtin.shell: |
+        nsenter --target 1 --net --mount ip link add macvlan-shim link {{ interface }} type macvlan mode bridge
+        nsenter --target 1 --net --mount ip addr add {{ macvlan_host_ip }} dev macvlan-shim
+        nsenter --target 1 --net --mount ip link set macvlan-shim up
+        nsenter --target 1 --net --mount ip route add {{ macvlan_subnet }} dev macvlan-shim || true
+      when: macvlan_check.rc != 0
+      become: true
+
+- name: Wait for the vault root password file to generate
+  ansible.builtin.wait_for:
+    path: "{{ host_roles_path }}/files/vault/vault_stuff/stuff/root_token"
+    state: present
+    timeout: 120
+
+- name: Set the vault root password
+  ansible.builtin.set_fact:
+    vault_root_password: "{{ lookup('file', host_roles_path + '/files/vault/vault_stuff/stuff/root_token') | trim }}"
+
+- name: Print the vault root password
+  debug:
+    msg: "{{ vault_root_password }}"
+
+- name: Upload the vault root token to vault
+  community.hashi_vault.vault_write:
+    url: "https://vault.ryuugu.dev"
+    path: "kv2/vault/root_token"
+    data:
+      key: "{{ vault_root_password }}"
+    token: "{{ vault_root_password }}"
+    validate_certs: true
+  retries: 50
+  delay: 5
+
+# - name: Create git id25519 SSH key
+#   community.crypto.openssh_keypair:
+#     path: "{{ git_ssh_key_path }}"
+#     type: "ed25519"
+
+# - name: Create provisioning id25519 SSH key
+#   community.crypto.openssh_keypair:
+#     path: "{{ provisioning_ssh_key_path }}"
+#     type: "ed25519"
+
+- name: Store the git provisioning key
+  set_fact:
+    git_prov_key: "{{ lookup('file', '/etc/ssh/git_provisioning_key') }}"
+
+- name: Store the provisioning key
+  set_fact:
+    prov_key: "{{ lookup('file', '/etc/ssh/provisioning_key') }}"
+
+- name: Generate the public key from the git provisioning private key
+  ansible.builtin.shell:
+    cmd: |
+      echo "{{ git_prov_key }}" > /tmp/temp_key && chmod 600 /tmp/temp_key && ssh-keygen -y -f /tmp/temp_key
+  register: git_ssh_public_key
+
+- name: Generate the public key from the public key
+  ansible.builtin.shell:
+    cmd: |
+      echo "{{ prov_key }}" > /tmp/temp_key && chmod 600 /tmp/temp_key && ssh-keygen -y -f /tmp/temp_key
+  register: prov_ssh_public_key
+
+- name: Upload the git public SSH key to vault
+  community.hashi_vault.vault_write:
+    url: "https://vault.ryuugu.dev"
+    path: "kv2/github/ssh/public"
+    data:
+      key: "{{ git_ssh_public_key.stdout }}"
+    token: "{{ vault_root_password }}"
+    validate_certs: true
+  retries: 50
+  delay: 5
+
+- name: Upload the git private SSH key to vault
+  community.hashi_vault.vault_write:
+    url: "https://vault.ryuugu.dev"
+    path: "kv2/github/ssh/private"
+    data:
+      key: "{{ git_prov_key }}"
+    token: "{{ vault_root_password }}"
+    validate_certs: true
+  retries: 50
+  delay: 5
+
+- name: Upload the provisioning public SSH key to vault
+  community.hashi_vault.vault_write:
+    url: "https://vault.ryuugu.dev"
+    path: "kv2/provisioning/ssh/public"
+    data:
+      key: "{{ prov_ssh_public_key.stdout }}"
+    token: "{{ vault_root_password }}"
+    validate_certs: true
+  retries: 50
+  delay: 5
+
+- name: Upload the provisioning private SSH key vault
+  community.hashi_vault.vault_write:
+    url: "https://vault.ryuugu.dev"
+    path: "kv2/provisioning/ssh/private"
+    data:
+      key: "{{ prov_key }}"
+    token: "{{ vault_root_password }}"
+    validate_certs: true
+
+- name: Upload the root vault token to vault
+  community.hashi_vault.vault_kv2_write:
+    url: "https://vault.ryuugu.dev"
+    engine_mount_point: "concourse"
+    path: "main/root_token"
+    data:
+      key: "{{ vault_root_password }}"
+    token: "{{ vault_root_password }}"
+    validate_certs: true  
+
+- name: Initialize what to build tuple list
+  set_fact:
+    what_to_build: []
+
+- name: Get files in each build directory
+  include_tasks: build_boot_files.yml
+  with_nested:
+    - [arch, debian]
+    - [netboot, iso]
+
+- name: Here's what we need to build
+  debug:
+    var: what_to_build
+
+- name: Build ISOs in parallel
+  ansible.builtin.shell:
+    cmd: |
+      VAULT_TOKEN="{{ vault_root_password }}" ./scripts/os/build.sh -o {{ host_roles_path }}/files/nginx/files/{{ item[0] }}_{{ item[1] }} -p "{{ provisioning_ssh_key_path }}" {{ item[0] }} -t {{ item[1] }}
+    chdir: "../../"
+  loop: "{{ what_to_build }}"
+  async: 600
+  poll: 0
+  register: iso_build_jobs
+
+- name: Wait for ISO builds to complete
+  ansible.builtin.async_status:
+    jid: "{{ item.ansible_job_id }}"
+  loop: "{{ iso_build_jobs.results }}"
+  register: job_result
+  until: job_result.finished 
+  retries: 500
+  delay: 10
+
+- name: Show vault URL
+  debug:
+    var: vault_url
+
+- name: Push the prov image to the registry
+  ansible.builtin.shell:
+    cmd: |
+      docker tag prov:latest registry.ryuugu.dev/prov:latest
+      docker push registry.ryuugu.dev/prov:latest
+  register: prov_push
+  retries: 5
+  delay: 5
+
+- name: Initialize infra pipelines
+  import_role:
+    name: concourse
+    tasks_from: create_commands_pipeline
+
+# - name: Check if nebula CA private key exists in Vault
+#   community.hashi_vault.vault_read:
+#     url: "https://vault.ryuugu.dev"
+#     path: "kv2/nebula/ca/private_key"
+#     token: "{{ vault_root_password }}"
+#     validate_certs: true
+#   register: nebula_ca_check
+#   failed_when: false
+#   ignore_errors: true
+#   retries: 3
+#   delay: 2
+
+# - name: Init the nebula CA
+#   block:
+#     - name: Create the nebula CA
+#       ansible.builtin.shell: nebula-cert ca -name "homelab"
+#       args:
+#         chdir: "{{ host_roles_path }}/files/nebula"
+#       when: nebula_ca_check is failed or nebula_ca_check.data is not defined
+
+#     - name: Upload the nebula private key to Vault
+#       community.hashi_vault.vault_write:
+#         url: "https://vault.ryuugu.dev"
+#         path: "kv2/nebula/private_key"
+#         data:
+#           key: "{{ lookup('file', '{{ host_roles_path }}/files/nebula/ca.key') }}"
+#         token: "{{ vault_root_password }}"
+#         validate_certs: true
+
+#     - name: Upload the nebula certificate to Vault
+#       community.hashi_vault.vault_write:
+#         url: "https://vault.ryuugu.dev"
+#         path: "kv2/nebula/private_key"
+#         data:
+#           key: "{{ lookup('file', '{{ host_roles_path }}/files/nebula/ca.key') }}"
+#         token: "{{ vault_root_password }}"
+#         validate_certs: true
+
+#     - name: Remove the generated files from host
+#       ansible.builtin.file:
+#         path: "{{ host_roles_path }}/files/nebula/{{ item }}"
+#         state: absent
+#       with_items:
+#         - ca.key
+#         - ca.crt
+#   when: nebula_ca_check is failed or nebula_ca_check.data is not defined
+
+
+# - name: Build Droplet lighthouse cert
+  
+
+# - name: Build the hss image
+#   ansible.builtin.shell:
+#     cmd: |
+#       docker build -t hss:latest -f Dockerfile.hss .
+#     chdir: "{{ host_roles_path }}/files/provisioning-api"
+#   register: hss_build

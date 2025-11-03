@@ -1,0 +1,15 @@
+expose:
+  type: ingress
+  ingress:
+    className: "nginx"
+    hosts:
+      core: "harbor.ryuugu.dev"
+    annotations:
+      cert-manager.io/cluster-issuer: "letsencrypt-dns01-issuer"
+      nginx.ingress.kubernetes.io/ssl-redirect: "true"
+      nginx.ingress.kubernetes.io/proxy-body-size: "0"
+  tls:
+    enabled: true
+    certSource: auto
+
+externalURL: "https://harbor.ryuugu.dev"

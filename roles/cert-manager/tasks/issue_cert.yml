@@ -1,0 +1,17 @@
+- name: Template the cert file
+  template:
+    src: cert.yml.j2
+    dest: /tmp/cert.yml
+
+- name: Template the issuer secret
+  template:
+    src: issuer_secret.yml.j2
+    dest: /tmp/issuer_secret.yml
+
+- name: Install the secret
+  ansible.builtin.shell: kubectl apply -f /tmp/issuer_secret.yml -n "{{ item.name }}"
+
+- name: Install the cert
+  kubernetes.core.k8s:
+    state: present
+    definition: "{{ lookup('file', '/tmp/cert.yml') | from_yaml_all }}"

@@ -1,0 +1,7 @@
+- name: Install concourse
+  hosts: localhost
+  tasks:
+    - name: Install concourse
+      include_role:
+        name: concourse
+        tasks_from: install

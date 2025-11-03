@@ -1,0 +1,26 @@
+- name: Delete the cloudflare api secret
+  kubernetes.core.k8s:
+    state: absent
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: cloudflare-api-token-secret
+        namespace: cert-manager
+
+- name: Delete the zero ssl eab secret
+  kubernetes.core.k8s:
+    state: absent
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: zero-ssl-eabsecret
+        namespace: cert-manager
+
+- name: Uninstall cert-manager
+  kubernetes.core.helm:
+    name: cert-manager
+    state: absent
+    release_namespace: infra
+    wait: true

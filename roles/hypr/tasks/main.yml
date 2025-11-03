@@ -1,0 +1,16 @@
+---
+# tasks file for hypr
+- import_tasks: install_hyprland.yml
+  when: install_hyprland
+
+- import_tasks: install_hyprcursor.yml
+  when: install_hyprcursor
+
+- import_tasks: install_hyprlock.yml
+  when: install_hyprlock
+
+- import_tasks: install_hypridle.yml
+  when: install_hypridle
+
+- import_tasks: install_hyprpaper.yml
+  when: install_hyprpaper

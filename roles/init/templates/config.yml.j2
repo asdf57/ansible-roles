@@ -1,0 +1,21 @@
+version: 0.1
+log:
+  level: debug
+  formatter: text
+  fields:
+    service: registry
+storage:
+  filesystem:
+    rootdirectory: /var/lib/registry
+  cache:
+    blobdescriptor: inmemory
+    maintenance:
+      uploadpurging:
+        enabled: true
+        age: 168h
+        interval: 24h
+        dryrun: false
+http:
+  addr: "{{ registry_ipv4 }}:5000"
+  headers:
+    X-Content-Type-Options: [nosniff]

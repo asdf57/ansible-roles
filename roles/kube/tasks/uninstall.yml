@@ -1,0 +1,106 @@
+---
+- name: Check if we're trying to remove the first coord
+  set_fact:
+    is_first_coord_in_cluster: "{{ inventory_hostname == groups['kube_coords'][0] }}"
+
+- name: Check if node is in cluster
+  ansible.builtin.shell:
+    cmd: "kubectl get node {{ inventory_hostname }}"
+  delegate_to: "{{ groups['kube_coords'][0] }}"
+  register: is_node_in_cluster
+  ignore_errors: true
+
+- name: Set fact for is_node_in_cluster
+  set_fact:
+    is_node_in_cluster: "{{ is_node_in_cluster.rc == 0 }}"
+
+- name: Get number of nodes in the cluster
+  ansible.builtin.shell:
+    cmd: "kubectl get nodes --no-headers | wc -l"
+  delegate_to: "{{ groups['kube_coords'][0] }}"
+  register: num_nodes_in_cluster
+  ignore_errors: true
+
+- name: Set fact for can_remove_node
+  set_fact:
+    can_remove_node: "{{ not is_first_coord_in_cluster or (is_first_coord_in_cluster and num_nodes_in_cluster.stdout == '1') }}"
+
+# There's a chance the cluster was destroyed while the node was in it.
+# If that's the case, we can skip this logic and just remove the k3s
+# configuration data.
+- name: Uninstall logic
+  block:
+  - name: Cluster uninstall logic
+    block:
+    - name: Cordon the node
+      kubernetes.core.k8s_drain:
+        name: "{{ inventory_hostname }}"
+        kubeconfig: /etc/rancher/k3s/k3s.yaml
+        state: cordon
+      delegate_to: "{{ groups['kube_coords'][0] }}"
+
+    - name: Drain the node
+      kubernetes.core.k8s_drain:
+        name: "{{ inventory_hostname }}"
+        delete_options:
+          delete_emptydir_data: true
+          force: true
+          terminate_grace_period: 120
+          ignore_daemonsets: true
+        kubeconfig: /etc/rancher/k3s/k3s.yaml
+        state: drain
+      delegate_to: "{{ groups['kube_coords'][0] }}"
+
+    - name: Remove the node from the cluster
+      kubernetes.core.k8s:
+        name: "{{ inventory_hostname }}"
+        kind: Node
+        state: absent
+        kubeconfig: /etc/rancher/k3s/k3s.yaml
+      delegate_to: "{{ groups['kube_coords'][0] }}"
+    when: is_node_in_cluster
+
+  - name: Delete config directory
+    ansible.builtin.file:
+      path: "/etc/rancher/k3s/"
+      mode: "0755"
+      state: absent
+
+  - name: Stop the K3s service
+    ansible.builtin.systemd:
+      name: k3s
+      state: stopped
+      daemon_reload: true
+      enabled: false
+    ignore_errors: true
+
+  - name: Remove the K3s service file
+    ansible.builtin.file:
+      name: /etc/systemd/system/k3s.service
+      state: absent
+
+  - name: Remove the K3s service env file
+    ansible.builtin.file:
+      name: /etc/systemd/system/k3s.service.env
+      state: absent
+
+  - name: Remove state directory
+    ansible.builtin.file:
+      name: "{{ k3s_data_dir }}"
+      state: absent
+
+  - name: Remove copied kube config
+    ansible.builtin.file:
+      name: "/home/{{ ansible_user }}/.kube/config"
+      state: absent
+
+  - name: Delete k3s binary
+    ansible.builtin.file:
+      name: /usr/local/bin/k3s
+      state: absent
+
+  - name: Delete k3s install script
+    ansible.builtin.file:
+      name: /usr/local/bin/k3s-install.sh
+      state: absent
+  when: can_remove_node

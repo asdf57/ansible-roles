@@ -1,0 +1,7 @@
+- name: Install grafana
+  hosts: localhost
+  tasks:
+    - name: Install grafana
+      include_role:
+        name: grafana
+        tasks_from: install

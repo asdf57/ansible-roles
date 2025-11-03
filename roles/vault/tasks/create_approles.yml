@@ -1,0 +1,22 @@
+# - name: 
+
+# - name: Create the Concourse policy
+#   block:
+#     - name: Create approle
+#       ansible.builtin.shell: |
+#         vault write auth/approle/role/concourse policies=concourse period=1h
+#       register: create_approle_result
+#       failed_when: create_approle_result.rc != 0
+
+#     - name: Get the RoleID
+#       ansible.builtin.shell: |
+#         vault read -field=role_id auth/approle/role/concourse/role-id
+#       register: role_id_result
+#       failed_when: role_id_result.rc != 0
+#       changed_when: false
+
+#     - name: Get the SecretID
+
+# - name: Write the Concourse policy to Vault
+#   ansible.builtin.shell: |
+#     vault policy write concourse ./concourse-policy.hcl

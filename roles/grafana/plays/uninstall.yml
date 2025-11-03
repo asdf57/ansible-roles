@@ -1,0 +1,7 @@
+- name: Uninstall grafana
+  hosts: localhost
+  tasks:
+    - name: Uninstall grafana
+      include_role:
+        name: grafana
+        tasks_from: uninstall

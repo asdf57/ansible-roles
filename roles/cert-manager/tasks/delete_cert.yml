@@ -1,0 +1,12 @@
+- name: Delete the cert
+  kubernetes.core.k8s:
+    state: absent
+    definition:
+      apiVersion: cert-manager.io/v1
+      kind: Certificate
+      metadata:
+        name: "{{ item.name }}-certificate"
+        namespace: "{{ item.name }}"
+
+- name: Delete the secret
+  ansible.builtin.shell: kubectl delete secret cloudflare-api-token-secret -n "{{ item.name }}"

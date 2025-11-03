@@ -1,0 +1,18 @@
+
+xorg_packages_by_distro:
+  Archlinux:
+    - xorg-server
+    - xorg-xinit
+  Debian:
+    - xserver-xorg
+    - xinit
+
+kde_packages_by_distro:
+  Archlinux:
+    - plasma
+    - kde-applications
+  Debian:
+    - kde-standard
+
+install_sddm: true
+additional_packages: []

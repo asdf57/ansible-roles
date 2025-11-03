@@ -1,0 +1,10 @@
+---
+# defaults file for grub
+
+required_packages_by_distro:
+  debian:
+    - ethtool
+  archlinux: 
+    - ethtool
+
+required_packages: "{{ required_packages_by_distro[ansible_distribution | lower] }}"

@@ -1,0 +1,69 @@
+---
+- name: Received storage details
+  debug:
+    var: storage
+
+- name: Set disk name
+  set_fact:
+    disk_name: "/dev/{{ storage.disk_name }}"
+
+- name: Grab info about the disk
+  community.general.parted:
+    device: "/dev/{{ storage.disk_name }}"
+    unit: "MiB"
+    state: "info"
+  register: storage_info
+
+- name: Assert that there are no active partitions
+  assert:
+    that: storage_info.partitions | length == 0
+    fail_msg: "There are active partitions on the disk ({{ storage_info.partitions | length }} partitions found)"
+    success_msg: "No active partitions found on the disk ({{ storage_info.partitions | length }} partitions found)"
+
+- name: Print storage details
+  debug:
+    var: storage_info
+
+- name: Display partitions
+  debug:
+    var: storage.partitions
+
+- name: Create the partitions
+  include_tasks: partition_single.yml
+  loop: "{{ storage.partitions }}"
+  loop_control:
+    loop_var: item
+    index_var: idx
+
+- name: Post check for partitions
+  block:
+    - name: Get the disk partition info
+      community.general.parted:
+        state: info
+        device: "{{ disk_name }}"
+        unit: "MiB"
+      register: disk_partitions
+
+    - name: Partition info for disk
+      debug:
+        var: disk_partitions
+
+    - name: Check that correct number of partitions were created
+      assert:
+        that: "disk_partitions.partitions | length == storage.partitions | length"
+        fail_msg: "Incorrect number of partitions created ({{ disk_partitions.partitions | length }} partitions created)"
+        success_msg: "Correct number of partitions created ({{ disk_partitions.partitions | length }} partitions created)"
+
+- name: Create the filesystems
+  include_tasks: initfs_single.yml
+  loop: "{{ storage.partitions }}"
+  loop_control:
+    loop_var: item
+    index_var: idx
+
+- name: Mount the filesystems
+  include_tasks: mount_single.yml
+  loop: "{{ storage.partitions }}"
+  loop_control:
+    loop_var: item
+    index_var: idx

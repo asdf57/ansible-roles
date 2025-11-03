@@ -1,0 +1,89 @@
+- name: Grab info about the disk
+  community.general.parted:
+    device: "/dev/{{ storage.disk_name }}"
+    unit: "MiB"
+    state: "info"
+  register: storage_info
+
+- name: Check if partitions exist
+  set_fact:
+    do_partitions_exist: "{{ (storage_info.partitions | length) > 0 }}"
+
+- name: Wipe the disk
+  block:
+    - name: Set disk name
+      set_fact:
+        disk_name: "/dev/{{ storage.disk_name }}"
+
+    - name: Gather mounted devices
+      set_fact:
+        mounted_devices: "{{ ansible_mounts | selectattr('device', 'contains', disk_name) | list }}"
+
+    - name: Print mounts
+      debug:
+        msg: "{{ item }}"
+      loop: "{{ mounted_devices }}"
+
+    - name: Install parted
+      package:
+        name: parted
+        state: present
+        update_cache: yes
+
+    - name: Find mounts on the disk
+      ansible.builtin.shell:
+        cmd: "findmnt -rno SOURCE,TARGET | grep '{{ disk_name }}'"
+      register: findmnt_result
+      ignore_errors: true
+
+    - name: Safely unmount all partitions (starting from the deepest mount)
+      ansible.builtin.shell:
+        cmd: "umount -fl '{{ item.split()[1] }}'"
+      loop: "{{ findmnt_result.stdout_lines | reverse }}"
+      when: findmnt_result.stdout_lines | length > 0
+
+    - name: Disable swap if active
+      ansible.builtin.command:
+        cmd: "swapoff -a"
+      when: ansible_swaptotal_mb > 0
+
+    - name: Wipe the disk using blkdiscard for SSD/flash drives
+      ansible.builtin.command:
+        cmd: "blkdiscard -f {{ disk_name }}"
+      when: ansible_devices[disk_name.split('/')[-1]].rotational == '0'
+
+    - name: Wipe the disk using dd for HDDs
+      ansible.builtin.shell:
+        cmd: "dd if=/dev/zero of={{ disk_name }} bs=4M status=progress"
+      register: dd_result
+      when: ansible_devices[disk_name.split('/')[-1]].rotational == '1'
+      failed_when: "'No space left on device' not in dd_result.stderr and dd_result.rc != 0"
+      changed_when: false
+
+    - name: Rescan the disk to update kernel partition info
+      ansible.builtin.command:
+        cmd: "partprobe {{ disk_name }}"
+
+    - name: Check if disk has no partitions
+      community.general.parted:
+        device: "{{ disk_name }}"
+        state: info
+      register: disk_info
+
+    - name: Ensure that no partitions exist
+      assert:
+        that:
+          - "disk_info.partitions | length == 0"
+        fail_msg: "Partitions still exist on the disk ({{ disk_info.partitions | length }} partitions exist)"
+
+    - name: Refresh system mount facts
+      ansible.builtin.setup:
+        gather_subset:
+          - mounts
+
+    - name: Ensure no mounted devices exist
+      assert:
+        that:
+          - "ansible_mounts | selectattr('device', 'contains', disk_name) | list | length == 0"
+        fail_msg: "Mounted devices still exist on the disk."
+  when: do_partitions_exist | bool

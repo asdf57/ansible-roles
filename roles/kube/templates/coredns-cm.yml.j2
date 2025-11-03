@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: coredns-overrides
+  namespace: kube-system
+data:
+  Corefile.custom: |
+    hosts {
+        10.1.1.4 harbor.ryuugu.dev
+        fallthrough
+    }

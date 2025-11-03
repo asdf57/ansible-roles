@@ -1,0 +1,30 @@
+- name: Add the concourse helm repo
+  kubernetes.core.helm_repository:
+    name: bitnami
+    repo_url: https://charts.bitnami.com/bitnami
+    state: present
+
+- name: Templates the values.yml file
+  template:
+    src: values.yml.j2
+    dest: /tmp/values.yml
+
+- name: Templates the priority_class.yml file
+  template:
+    src: priority_class.yml.j2
+    dest: /tmp/priority_class.yml
+
+- name: Apply the priority class
+  kubernetes.core.k8s:
+    state: present
+    src: /tmp/priority_class.yml
+
+- name: Install concourse
+  kubernetes.core.helm:
+    name: concourse
+    chart_ref: bitnami/concourse
+    release_namespace: concourse
+    wait: true
+    create_namespace: true
+    values_files:
+      - /tmp/values.yml

@@ -1,0 +1,43 @@
+- name: Install helm
+  ansible.builtin.package:
+    name: helm
+    state: present
+  become: yes
+
+- name: Add metallb helm repo
+  kubernetes.core.helm_repository:
+    name: metallb
+    repo_url: https://metallb.github.io/metallb
+    state: present
+
+# - name: Templates the values.yml file
+#   template:
+#     src: values.yml.j2
+#     dest: /tmp/values.yml
+
+- name: Templates the configmap.yml file
+  template:
+    src: configmap.yml.j2
+    dest: /tmp/configmap.yml
+
+- name: Templates the l2-advertisement.yml file
+  template:
+    src: l2-advertisement.yml.j2
+    dest: /tmp/l2-advertisement.yml
+
+- name: Install MetalLB using Helm
+  kubernetes.core.helm:
+    name: metallb
+    chart_ref: "metallb/metallb"
+    release_namespace: metallb-system
+    wait: true
+    create_namespace: true
+    # values_files:
+    #   - /tmp/values.yml
+
+- name: Create the metallb configmap from file 
+  shell: "kubectl apply -f /tmp/configmap.yml"
+
+- name: Create the metallb l2-advertisement from file 
+  shell: "kubectl apply -f /tmp/l2-advertisement.yml"
+  

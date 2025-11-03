@@ -1,0 +1,87 @@
+- name: Add jetstack helm repo
+  kubernetes.core.helm_repository:
+    name: jetstack
+    repo_url: https://charts.jetstack.io
+    state: present
+
+- name: Templates the values.yml file
+  template:
+    src: values.yml.j2
+    dest: /tmp/values.yml
+
+- name: Template the cluster issuer
+  template:
+    src: cluster_issuer.yml.j2
+    dest: /tmp/cluster_issuer.yml
+
+- name: Template the cloudflare api secret
+  template:
+    src: cloudflare_api_secret.yml.j2
+    dest: /tmp/cloudflare_api_secret.yml
+
+- name: Template the zero ssl eab secret
+  template:
+    src: zerossl_eab_secret.yml.j2
+    dest: /tmp/zerossl_eab_secret.yml
+
+- name: Install cert-manager
+  kubernetes.core.helm:
+    name: cert-manager
+    chart_ref: jetstack/cert-manager
+    release_namespace: cert-manager
+    wait: true
+    create_namespace: true
+    values_files:
+      - /tmp/values.yml
+
+- name: Install the cloudflare api secret
+  ansible.builtin.shell: kubectl apply -f /tmp/cloudflare_api_secret.yml -n cert-manager
+
+- name: Install the zero ssl eab secret
+  ansible.builtin.shell: kubectl apply -f /tmp/zerossl_eab_secret.yml -n cert-manager
+
+- name: Install the cluster issuer
+  ansible.builtin.shell: kubectl apply -f /tmp/cluster_issuer.yml -n cert-manager
+
+# - name: Issue cert in each namespace
+#   include_tasks: issue_cert.yml
+#   loop: "{{ namespaces }}"
+
+####
+
+# - name: Ensure cert directory exists
+#   ansible.builtin.file:
+#     path: "{{ cert_base_dir }}"
+#     state: directory
+#   delegate_to: "{{ groups['kube_coords'][0] }}"
+#   become: true
+
+# - name: Generate CA Private Key on the first coordinator
+#   community.crypto.openssl_privatekey:
+#     path: "{{ cert_base_dir }}/ca.key"
+#     size: 4096
+#   delegate_to: "{{ groups['kube_coords'][0] }}"
+#   become: true
+
+# - name: Generate CA Certificate Signing Request on the first coordinator
+#   community.crypto.openssl_csr:
+#     path: "{{ cert_base_dir }}/ca.csr"
+#     privatekey_path: "{{ cert_base_dir }}/ca.key"
+#     common_name: "{{ ca_common_name }}"
+#     subject_alt_name:
+#       - "IP:10.1.1.6"
+#   delegate_to: "{{ groups['kube_coords'][0] }}"
+#   become: true
+
+# - name: Generate a Self Signed OpenSSL certificate on the first coordinator
+#   openssl_certificate:
+#     path: "{{ cert_base_dir }}/ca.crt"
+#     privatekey_path: "{{ cert_base_dir }}/ca.key"
+#     provider: selfsigned
+#     csr_path: "{{ cert_base_dir }}/ca.csr"
+#   delegate_to: "{{ groups['kube_coords'][0] }}"
+#   become: true
+
+# - name: Create CA ClusterIssuer in namespaces
+#   include_tasks: create_ca_issuers.yml
+#   loop: "{{ namespaces }}"

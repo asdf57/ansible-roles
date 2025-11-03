@@ -1,0 +1,12 @@
+---
+- name: Install required packages
+  ansible.builtin.package:
+    name: "ethtool"
+    state: present
+
+- name: Enable Wake-on-LAN on all interfaces
+  shell: |
+    for iface in $(ls /sys/class/net/); do
+      ethtool -s "$iface" wol g 2>/dev/null
+    done
+  ignore_errors: yes

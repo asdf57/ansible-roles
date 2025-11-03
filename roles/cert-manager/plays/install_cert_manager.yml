@@ -1,0 +1,7 @@
+- name: Install cert manager
+  hosts: localhost
+  tasks:
+    - name: Install cert manager
+      include_role:
+        name: cert-manager
+        tasks_from: install

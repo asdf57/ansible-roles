@@ -1,0 +1,59 @@
+#SPDX-License-Identifier: MIT-0
+---
+    # defaults file for init
+    
+    host_roles_path: "{{ lookup('env', 'HOST_ROLES_PATH') }}"
+    
+    host_git_ssh_key_path: "{{ lookup('env', 'HOST_GIT_PROVISIONING_KEY_PATH') }}"
+    git_ssh_key_path: "/etc/ssh/git_provisioning_key"
+    provisioning_ssh_key_path: "/etc/ssh/provisioning_key"
+    provisioning_api_repo: "{{ lookup('env', 'GIT_PROVISIONING_API_REPO') }}"
+    provisioning_api_ipv4: "10.0.2.2"
+    inventory_repo: "{{ lookup('env', 'GIT_INVENTORY_REPO') }}"
+    provisioning_api_version: "{{ lookup('env', 'GIT_PROVISIONING_API_BRANCH') | default('main') }}"
+    inventory_version: "{{ lookup('env', 'GIT_INVENTORY_BRANCH') | default('main') }}"
+    
+    # Docker network driver (ipvlan or macvlan)
+    network_driver: "macvlan"
+    
+    interface: "enp7s0"
+    
+    # Concourse
+    concourse_version: 7.12.1
+    concourse_team: "test"
+    concourse_ipv4: "10.0.2.126"
+    concourse_db_ipv4: "10.0.2.127"
+    concourse_user: "{{ lookup('env', 'CONCOURSE_USER') }}"
+    concourse_password: "{{ lookup('env', 'CONCOURSE_PASSWORD') }}"
+    concourse_url: "http://{{ concourse_ipv4 }}:8080"
+    
+    # IPVLAN driver settings
+    ipvlan_subnet: "10.0.2.0/24"
+    ipvlan_gateway: "10.0.2.1"
+    ipvlan_mode: "l2"
+    
+    # MACVLAN driver settings
+    macvlan_subnet: "10.0.2.0/24"
+    macvlan_gateway: "10.0.2.1"
+    macvlan_host_ip: "10.0.2.173/24"
+    macvlan_mode: "bridge"
+    
+    cloudflare_domain: "{{ lookup('env'), "CLOUDFLARE_DOMAIN" }}"
+    cloudflare_api_key: "{{ lookup('env', 'CLOUDFLARE_API_KEY') }}"
+    cloudflare_email: "{{ lookup('env', 'CLOUDFLARE_EMAIL') }}"
+    zerossl_email: "{{ lookup('env', 'ZEROSSL_EMAIL') }}"
+    zerossl_eab_kid: "{{ lookup('env', 'ZEROSSL_EAB_KID') }}"
+    zerossl_eab_hmac_key: "{{ lookup('env', 'ZEROSSL_EAB_HMAC_KEY') }}"
+    cert_authority: "{{ lookup('env', 'CERT_AUTHORITY') | default('zerossl') }}"
+    
+    nginx_ipv4: "10.0.2.123"
+    nginx_acme_label: "nginx.ryuugu.dev"
+    
+    server_api_ipv4: "10.0.2.124"
+    
+    vault_ipv4: "10.0.2.125"
+    vault_url: "https://vault.ryuugu.dev"
+    vault_acme_label: "vault.ryuugu.dev"
+    
+    registry_ipv4: "10.0.2.122"
+    

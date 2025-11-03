@@ -1,0 +1,6 @@
+port=0
+dhcp-range={{ ansible_default_ipv4.address }},proxy
+pxe-service=7, "Boot From Network, (UEFI)", http://nginx.ryuugu.dev/boot.ipxe
+log-queries
+log-dhcp
+log-facility=-

@@ -1,0 +1,35 @@
+---
+- name: Set defaults
+  set_fact:
+    opts: ""
+    fstype: ""
+
+- name: Set flags based on fs type
+  block:
+    - name: EFI flags
+      set_fact:
+        opts: "-F 32"
+        fstype: "vfat"
+      when: item.fs_type == "efi"
+
+    - name: Swap flags
+      set_fact:
+        opts: ""
+        fstype: "swap"
+      when: item.fs_type == "swap"
+
+    - name: General partition flags
+      set_fact:
+        opts: ""
+        fstype: "{{ item.fs_type }}"
+      when: item.fs_type not in ['efi', 'swap']
+
+- name: Print filesystem details
+  debug:
+    msg: "Creating filesystem of type {{ fstype }} on {{ disk_name }}{{ idx + 1 }} with options {{ opts }}"
+
+- name: Create filesystem
+  community.general.filesystem:
+    fstype: "{{ fstype }}"
+    dev: "{{ disk_name }}{{ idx + 1 }}"
+    opts: "{{ opts }}"

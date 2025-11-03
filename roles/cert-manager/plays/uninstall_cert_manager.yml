@@ -1,0 +1,7 @@
+- name: Uninstall cert manager
+  hosts: localhost
+  tasks:
+    - name: Uninstall cert manager
+      include_role:
+        name: cert-manager
+        tasks_from: uninstall

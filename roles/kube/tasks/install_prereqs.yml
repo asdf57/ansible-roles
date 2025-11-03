@@ -1,0 +1,12 @@
+# - name: Install prereqs
+#   ansible.builtin.pip:
+#     executable: /root/.pyenv/versions/3.12.6/bin/pip3
+#     name:
+#       - packaging
+#       - kubernetes
+
+- name: Install prereqs
+  ansible.builtin.package:
+    name: "{{ item }}"
+    state: present
+  loop: "{{ required_packages_by_distro[ansible_facts['distribution'] | lower] }}"

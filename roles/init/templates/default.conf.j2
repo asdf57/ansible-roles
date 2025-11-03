@@ -1,0 +1,217 @@
+# server block for nginx.ryuugu.dev
+server {
+    listen 80;
+    listen 443 ssl;
+    server_name nginx.ryuugu.dev;
+
+    ssl_certificate /etc/nginx/ssl/ryuugu.dev/full.pem;
+    ssl_certificate_key /etc/nginx/ssl/ryuugu.dev/key.pem;
+    ssl_trusted_certificate /etc/nginx/ssl/ryuugu.dev/ca.pem;
+
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+
+    root /www/data;
+
+    location / {
+        autoindex on;
+        try_files $uri $uri/ =404;
+    }
+
+    location /ipxe/ {
+        set $mac "";
+        if ($uri ~ ^/ipxe/(.+)) {
+            set $mac $1;
+        }
+
+        access_by_lua_block {
+            local mac = ngx.var.mac
+            if not mac or mac == "" then
+                ngx.log(ngx.ERR, "missing mac address")
+                ngx.exit(ngx.HTTP_BAD_REQUEST)
+                return
+            end
+
+            local http = require "resty.http"
+            local httpc = http.new()
+
+            -- encode the MAC address to a proper query string
+            mac = string.gsub(mac, ":", "%%3A")
+
+            ngx.log(ngx.INFO, "Querying API for MAC: ", mac)
+
+            local res, err = httpc:request_uri("http://{{ server_api_ipv4 }}:3000/ipxe/" .. mac, {
+                method = "GET"
+            })
+
+            if not res then
+                ngx.log(ngx.ERR, "failed to query API: ", err)
+                ngx.exit(ngx.HTTP_INTERNAL_SERVER_ERROR)
+                ngx.say("Failed to query API: ", err)
+                return ngx.exit(ngx.HTTP_INTERNAL_SERVER_ERROR)
+            end
+
+            if res.status ~= 200 then
+                ngx.log(ngx.ERR, "API returned status: ", res.status)
+                ngx.say("API returned status: ", res.status)
+                return ngx.exit(ngx.HTTP_INTERNAL_SERVER_ERROR)
+            end
+
+            local os_type = res.body
+            ngx.header.content_type = "text/plain"
+            ngx.redirect("/" .. os_type .. "_boot.ipxe")
+        }
+    }
+}
+
+server {
+    listen 80;
+    server_name server-api.ryuugu.dev;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    server_name server-api.ryuugu.dev;
+
+    ssl_certificate /etc/nginx/ssl/ryuugu.dev/full.pem;
+    ssl_certificate_key /etc/nginx/ssl/ryuugu.dev/key.pem;
+    ssl_trusted_certificate /etc/nginx/ssl/ryuugu.dev/ca.pem;
+
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+
+    location / {
+        proxy_pass http://{{ server_api_ipv4 }}:3000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+
+
+server {
+    listen 80;
+    server_name vault.ryuugu.dev;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    server_name vault.ryuugu.dev;
+
+    ssl_certificate /etc/nginx/ssl/ryuugu.dev/full.pem;
+    ssl_certificate_key /etc/nginx/ssl/ryuugu.dev/key.pem;
+    ssl_trusted_certificate /etc/nginx/ssl/ryuugu.dev/ca.pem;
+
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+
+    location / {
+        proxy_pass http://{{ vault_ipv4 }}:8200;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+
+}
+
+server {
+    listen 80;
+    server_name vault-api.ryuugu.dev;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    server_name vault-api.ryuugu.dev;
+
+    ssl_certificate /etc/nginx/ssl/ryuugu.dev/full.pem;
+    ssl_certificate_key /etc/nginx/ssl/ryuugu.dev/key.pem;
+    ssl_trusted_certificate /etc/nginx/ssl/ryuugu.dev/ca.pem;
+
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+
+    location / {
+        proxy_pass http://{{ vault_ipv4 }}:8200;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_read_timeout 900s;
+        proxy_send_timeout 900s;
+    }
+}
+
+server {
+    listen 80;
+    server_name ci.ryuugu.dev;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    server_name ci.ryuugu.dev;
+
+    ssl_certificate /etc/nginx/ssl/ryuugu.dev/full.pem;
+    ssl_certificate_key /etc/nginx/ssl/ryuugu.dev/key.pem;
+    ssl_trusted_certificate /etc/nginx/ssl/ryuugu.dev/ca.pem;
+
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+
+    location / {
+        proxy_pass http://{{ concourse_ipv4 }}:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+
+}
+
+server {
+    listen 80;
+    server_name registry.ryuugu.dev;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    server_name registry.ryuugu.dev;
+
+    ssl_certificate /etc/nginx/ssl/ryuugu.dev/full.pem;
+    ssl_certificate_key /etc/nginx/ssl/ryuugu.dev/key.pem;
+    ssl_trusted_certificate /etc/nginx/ssl/ryuugu.dev/ca.pem;
+
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+
+    client_max_body_size 5G;
+
+    location / {
+        proxy_pass http://{{ registry_ipv4 }}:5000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+
+}
+

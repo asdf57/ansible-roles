@@ -1,0 +1,20 @@
+- name: Add harbor helm repo
+  kubernetes.core.helm_repository:
+    name: harbor
+    repo_url: https://helm.goharbor.io
+    state: present
+
+- name: Templates the values.yml file
+  template:
+    src: values.yml.j2
+    dest: /tmp/values.yml
+
+- name: Install Harbor
+  kubernetes.core.helm:
+    name: harbor
+    chart_ref: "harbor/harbor"
+    release_namespace: harbor
+    wait: true
+    create_namespace: true
+    values_files:
+      - /tmp/values.yml

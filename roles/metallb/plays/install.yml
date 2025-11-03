@@ -1,0 +1,7 @@
+- name: Install metallb
+  hosts: localhost
+  tasks:
+    - name: Install metallb
+      include_role:
+        name: metallb
+        tasks_from: install

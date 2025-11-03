@@ -1,0 +1,7 @@
+- name: Uninstall harbor
+  hosts: localhost
+  tasks:
+    - name: Uninstall harbor
+      include_role:
+        name: harbor
+        tasks_from: uninstall
