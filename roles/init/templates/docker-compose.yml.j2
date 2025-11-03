@@ -6,14 +6,14 @@ volumes:
 
 services:
   registry:
+    build:
+      context: ./registry
     container_name: registry
     restart: always
-    image: registry
     ports:
       - 5000:5000
     volumes:
-      - "{{ host_roles_path }}/files/registry/config/config.yml:/etc/docker/registry/config.yml:ro"
-      - "{{ host_roles_path }}/files/registry/data:/var/lib/registry:rw"
+      - "{{ host_data_path }}/registry/data:/var/lib/registry:rw"
     networks:
       clusternet:
         ipv4_address: "{{ registry_ipv4 }}"
@@ -52,7 +52,7 @@ services:
         condition: service_healthy
     ports: ["8080:8080"]
     volumes:
-      - "{{ host_roles_path }}/files/vault/vault_stuff/stuff:/stuff"
+      - "{{ host_data_path }}/vault/vault_stuff/stuff:/stuff"
       - vault_shared:/shared
     environment:
       CONCOURSE_VAULT_URL: "{{ vault_url }}"
@@ -96,11 +96,11 @@ services:
       - IPC_LOCK
     restart: always
     volumes:
-      - "{{ host_roles_path }}/files/vault/vault_stuff/internal:/vault/data"
-      - "{{ host_roles_path }}/files/vault/vault_stuff/config:/vault/config"
-      - "{{ host_roles_path }}/files/vault/vault_stuff/logs:/vault/logs"
-      - "{{ host_roles_path }}/files/vault/vault_stuff/secrets:/vault/secrets"
-      - "{{ host_roles_path }}/files/vault/vault_stuff/stuff:/stuff"
+      - "{{ host_data_path }}/vault/vault_stuff/internal:/vault/data"
+      - "{{ host_data_path }}/vault/vault_stuff/config:/vault/config"
+      - "{{ host_data_path }}/vault/vault_stuff/logs:/vault/logs"
+      - "{{ host_data_path }}/vault/vault_stuff/secrets:/vault/secrets"
+      - "{{ host_data_path }}/vault/vault_stuff/stuff:/stuff"
       - vault_shared:/shared
       - ssl_certs:/vault/ssl:ro
     environment:
@@ -125,7 +125,7 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - "{{ host_roles_path }}/files/nginx/files:/www/data"
+      - "{{ host_data_path }}/nginx/files:/www/data"
       - ssl_certs:/etc/nginx/ssl:rw
     restart: always
     labels:
@@ -155,7 +155,7 @@ services:
       - DNS_API=dns_cf
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - "{{ host_roles_path }}/files/acme/acme.sh:/acme.sh"
+      - "{{ host_data_path }}/acme/acme.sh:/acme.sh"
       - ssl_certs:/certs:rw
     restart: always
     depends_on:

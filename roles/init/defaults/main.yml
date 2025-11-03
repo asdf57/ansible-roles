@@ -1,9 +1,9 @@
 #SPDX-License-Identifier: MIT-0
 ---
     # defaults file for init
-    
-    host_roles_path: "{{ lookup('env', 'HOST_ROLES_PATH') }}"
-    
+
+    host_data_path: "{{ lookup('env', 'HOST_DATA_PATH') }}"
+
     host_git_ssh_key_path: "{{ lookup('env', 'HOST_GIT_PROVISIONING_KEY_PATH') }}"
     git_ssh_key_path: "/etc/ssh/git_provisioning_key"
     provisioning_ssh_key_path: "/etc/ssh/provisioning_key"
@@ -38,7 +38,7 @@
     macvlan_host_ip: "10.0.2.173/24"
     macvlan_mode: "bridge"
     
-    cloudflare_domain: "{{ lookup('env'), "CLOUDFLARE_DOMAIN" }}"
+    cloudflare_domain: "{{ lookup('env', 'CLOUDFLARE_DOMAIN') }}"
     cloudflare_api_key: "{{ lookup('env', 'CLOUDFLARE_API_KEY') }}"
     cloudflare_email: "{{ lookup('env', 'CLOUDFLARE_EMAIL') }}"
     zerossl_email: "{{ lookup('env', 'ZEROSSL_EMAIL') }}"
