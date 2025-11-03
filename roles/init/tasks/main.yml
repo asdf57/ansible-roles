@@ -4,89 +4,89 @@
 - name: Template the docker-compose file
   template:
     src: docker-compose.yml.j2
-    dest: "{{ host_data_path }}/docker-compose.yml"
+    dest: "{{ mounted_data_path }}/docker-compose.yml"
 
 - name: Clone the provisioning API repo
   git:
     repo: "{{ provisioning_api_repo }}"
-    dest: "{{ host_data_path }}/provisioning-api"
+    dest: "{{ mounted_data_path }}/provisioning-api"
     version: "{{ provisioning_api_version }}"
     force: yes
 
 - name: Copy acme Dockerfile
   copy:
     src: acme/Dockerfile
-    dest: "{{ host_data_path }}/acme/Dockerfile"
+    dest: "{{ mounted_data_path }}/acme/Dockerfile"
 
 - name: Copy acme entrypoint.sh
   copy:
     src: acme/entrypoint.sh
-    dest: "{{ host_data_path }}/acme/entrypoint.sh"
+    dest: "{{ mounted_data_path }}/acme/entrypoint.sh"
     mode: '0755'
 
 - name: Copy concourse Dockerfile
   copy:
     src: concourse/Dockerfile
-    dest: "{{ host_data_path }}/concourse/Dockerfile"
+    dest: "{{ mounted_data_path }}/concourse/Dockerfile"
 
 - name: Copy concourse entrypoint.sh
   copy:
     src: concourse/entrypoint.sh
-    dest: "{{ host_data_path }}/concourse/entrypoint.sh"
+    dest: "{{ mounted_data_path }}/concourse/entrypoint.sh"
     mode: '0755'
 
 - name: Copy dnsmasq Dockerfile
   copy:
     src: dnsmasq/Dockerfile
-    dest: "{{ host_data_path }}/dnsmasq/Dockerfile"
+    dest: "{{ mounted_data_path }}/dnsmasq/Dockerfile"
 
 - name: Template dnsmasq.conf
   template:
     src: dnsmasq.conf.j2
-    dest: "{{ host_data_path }}/dnsmasq/dnsmasq.conf"
+    dest: "{{ mounted_data_path }}/dnsmasq/dnsmasq.conf"
 
 - name: Copy nginx Dockerfile
   copy:
     src: nginx/Dockerfile
-    dest: "{{ host_data_path }}/nginx/Dockerfile"
+    dest: "{{ mounted_data_path }}/nginx/Dockerfile"
 
 - name: Copy nginx entrypoint.sh
   copy:
     src: nginx/entrypoint.sh
-    dest: "{{ host_data_path }}/nginx/entrypoint.sh"
+    dest: "{{ mounted_data_path }}/nginx/entrypoint.sh"
     mode: '0755'
 
 - name: Template nginx.conf
   template:
     src: default.conf.j2
-    dest: "{{ host_data_path }}/nginx/default.conf"
+    dest: "{{ mounted_data_path }}/nginx/default.conf"
 
 - name: Copy vault Dockerfile
   copy:
     src: vault/Dockerfile
-    dest: "{{ host_data_path }}/vault/Dockerfile"
+    dest: "{{ mounted_data_path }}/vault/Dockerfile"
 
 - name: Copy vault entrypoint.sh
   copy:
     src: vault/entrypoint.sh
-    dest: "{{ host_data_path }}/vault/entrypoint.sh"
+    dest: "{{ mounted_data_path }}/vault/entrypoint.sh"
     mode: '0755'
 
 - name: Copy vault.hcl config
   copy:
     src: vault/vault.hcl
-    dest: "{{ host_data_path }}/vault/vault.hcl"
+    dest: "{{ mounted_data_path }}/vault/vault.hcl"
 
 - name: Template the registry config
   template:
     src: config.yml.j2
-    dest: "{{ host_data_path }}/registry/config/config.yml"
+    dest: "{{ mounted_data_path }}/registry/config/config.yml"
 
 - name: Setup nginx mounts
   block:
     - name: Create the files directory
       ansible.builtin.file:
-        path: "{{ host_data_path }}/nginx/files"
+        path: "{{ mounted_data_path }}/nginx/files"
         state: directory
 
 - name: Setup acme.sh mounts
