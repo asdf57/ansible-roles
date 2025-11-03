@@ -13,6 +13,11 @@
     version: "{{ provisioning_api_version }}"
     force: yes
 
+- name: Create acme directory
+  file:
+    path: "{{ mounted_data_path }}/acme"
+    state: directory
+
 - name: Copy acme Dockerfile
   copy:
     src: acme/Dockerfile
@@ -23,6 +28,11 @@
     src: acme/entrypoint.sh
     dest: "{{ mounted_data_path }}/acme/entrypoint.sh"
     mode: '0755'
+
+- name: Create concourse directory
+  file:
+    path: "{{ mounted_data_path }}/concourse"
+    state: directory
 
 - name: Copy concourse Dockerfile
   copy:
@@ -35,6 +45,11 @@
     dest: "{{ mounted_data_path }}/concourse/entrypoint.sh"
     mode: '0755'
 
+- name: Create dnsmasq directory
+  file:
+    path: "{{ mounted_data_path }}/dnsmasq"
+    state: directory
+
 - name: Copy dnsmasq Dockerfile
   copy:
     src: dnsmasq/Dockerfile
@@ -44,6 +59,11 @@
   template:
     src: dnsmasq.conf.j2
     dest: "{{ mounted_data_path }}/dnsmasq/dnsmasq.conf"
+
+- name: Create nginx directory
+  file:
+    path: "{{ mounted_data_path }}/nginx"
+    state: directory
 
 - name: Copy nginx Dockerfile
   copy:
@@ -61,6 +81,11 @@
     src: default.conf.j2
     dest: "{{ mounted_data_path }}/nginx/default.conf"
 
+- name: Create vault directory
+  file:
+    path: "{{ mounted_data_path }}/vault"
+    state: directory
+
 - name: Copy vault Dockerfile
   copy:
     src: vault/Dockerfile
@@ -76,6 +101,11 @@
   copy:
     src: vault/vault.hcl
     dest: "{{ mounted_data_path }}/vault/vault.hcl"
+
+- name: Create registry directory
+  file:
+    path: "{{ mounted_data_path }}/registry"
+    state: directory
 
 - name: Template the registry config
   template:
