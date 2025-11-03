@@ -39,7 +39,7 @@ macvlan_gateway: "10.0.2.1"
 macvlan_host_ip: "10.0.2.173/24"
 macvlan_mode: "bridge"
 
-cloudflare_domain: "{{ lookup('env'), "CLOUDFLARE_DOMAIN" }}"
+cloudflare_domain: "{{ lookup('env', 'CLOUDFLARE_DOMAIN') }}"
 cloudflare_api_key: "{{ lookup('env', 'CLOUDFLARE_API_KEY') }}"
 cloudflare_email: "{{ lookup('env', 'CLOUDFLARE_EMAIL') }}"
 zerossl_email: "{{ lookup('env', 'ZEROSSL_EMAIL') }}"
