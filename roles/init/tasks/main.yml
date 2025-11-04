@@ -124,29 +124,22 @@
         path: "{{ mounted_data_path }}/nginx/files"
         state: directory
 
-- name: Setup acme.sh mounts
-  block:
-    - name: Create the acme.sh directory
-      ansible.builtin.file:
-        path: "{{ host_roles_path }}/files/acme/acme.sh"
-        state: directory
-
 - name: Setup vault mounts
   block:
     - name: Create the internal directory
       ansible.builtin.file:
-        path: "{{ host_roles_path }}/files/vault/internal"
+        path: "{{ mounted_data_path }}/vault/internal"
         state: directory
 
 - name: Download iPXE efi binary
   ansible.builtin.get_url:
     url: https://boot.ipxe.org/ipxe.efi
-    dest: "{{ host_roles_path }}/files/nginx/files/ipxe.efi"
+    dest: "{{ mounted_data_path }}/nginx/files/ipxe.efi"
 
 - name: Download iPXE iso
   ansible.builtin.get_url:
     url: https://boot.ipxe.org/ipxe.iso
-    dest: "{{ host_roles_path }}/files/nginx/files/ipxe.iso"
+    dest: "{{ mounted_data_path }}/nginx/files/ipxe.iso"
 
 - name: Delete the ipvlan network
   community.docker.docker_network:
@@ -156,7 +149,7 @@
 
 - name: Build the docker-compose
   community.docker.docker_compose_v2:
-    project_src: "{{ host_roles_path }}/files"
+    project_src: "{{ mounted_data_path }}"
     project_name: infra
     state: present
     build: always
@@ -170,6 +163,11 @@
   debug:
     msg: "{{ docker_compose_result.stderr | default('No error message available') }}"
   when: docker_compose_result.failed
+
+- name: Fail if Docker Compose failed after retries
+  fail:
+    msg: "Docker Compose failed to start the services after multiple attempts."
+  when: docker_compose_result is failed
 
 - name: Wait for the acme.sh container to become healthy
   shell: "{% raw %}docker inspect --format='{{.State.Health.Status}}' acme{% endraw %}"
@@ -196,13 +194,13 @@
 
 - name: Wait for the vault root password file to generate
   ansible.builtin.wait_for:
-    path: "{{ host_roles_path }}/files/vault/vault_stuff/stuff/root_token"
+    path: "{{ host_data_path }}/vault/vault_stuff/stuff/root_token"
     state: present
     timeout: 120
 
 - name: Set the vault root password
   ansible.builtin.set_fact:
-    vault_root_password: "{{ lookup('file', host_roles_path + '/files/vault/vault_stuff/stuff/root_token') | trim }}"
+    vault_root_password: "{{ lookup('file', host_data_path + '/vault/vault_stuff/stuff/root_token') | trim }}"
 
 - name: Print the vault root password
   debug:
@@ -318,7 +316,7 @@
 - name: Build ISOs in parallel
   ansible.builtin.shell:
     cmd: |
-      VAULT_TOKEN="{{ vault_root_password }}" ./scripts/os/build.sh -o {{ host_roles_path }}/files/nginx/files/{{ item[0] }}_{{ item[1] }} -p "{{ provisioning_ssh_key_path }}" {{ item[0] }} -t {{ item[1] }}
+      VAULT_TOKEN="{{ vault_root_password }}" ./scripts/os/build.sh -o {{ host_data_path }}/nginx/files/{{ item[0] }}_{{ item[1] }} -p "{{ provisioning_ssh_key_path }}" {{ item[0] }} -t {{ item[1] }}
     chdir: "../../"
   loop: "{{ what_to_build }}"
   async: 600
