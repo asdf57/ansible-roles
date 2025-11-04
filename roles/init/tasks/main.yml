@@ -204,13 +204,13 @@
 
 - name: Wait for the vault root password file to generate
   ansible.builtin.wait_for:
-    path: "{{ host_data_path }}/vault/vault_stuff/stuff/root_token"
+    path: "{{ mounted_data_path }}/vault/vault_stuff/stuff/root_token"
     state: present
     timeout: 120
 
 - name: Set the vault root password
   ansible.builtin.set_fact:
-    vault_root_password: "{{ lookup('file', host_data_path + '/vault/vault_stuff/stuff/root_token') | trim }}"
+    vault_root_password: "{{ lookup('file', mounted_data_path + '/vault/vault_stuff/stuff/root_token') | trim }}"
 
 - name: Print the vault root password
   debug:
