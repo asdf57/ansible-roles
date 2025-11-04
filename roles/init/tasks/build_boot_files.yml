@@ -1,6 +1,6 @@
 - name: Check if directory exists
   ansible.builtin.stat:
-    path: "{{ role_path }}/files/nginx/files/{{ item.0 }}_{{ item.1 }}"
+    path: "{{ mounted_data_path }}/nginx/files/{{ item.0 }}_{{ item.1 }}"
   register: check_dir
 
 - name: Add to what to build list
