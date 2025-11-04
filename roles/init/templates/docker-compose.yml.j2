@@ -6,8 +6,7 @@ volumes:
 
 services:
   registry:
-    build:
-      context: ./registry
+    image: registry
     container_name: registry
     restart: always
     ports:
