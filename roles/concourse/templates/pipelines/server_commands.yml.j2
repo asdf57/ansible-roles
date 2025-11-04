@@ -33,5 +33,5 @@ jobs:
               - |
                   shopt -s nullglob
                   commands_file=(/tmp/build/*/commands/commands)
-                  chmod +x "${commands_file[0]}"
+                  sudo chmod +x "${commands_file[0]}"
                   bash "${commands_file[0]}"
