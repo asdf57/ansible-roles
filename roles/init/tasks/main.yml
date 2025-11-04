@@ -107,6 +107,11 @@
     path: "{{ mounted_data_path }}/registry"
     state: directory
 
+- name: Create registry config directory
+  file:
+    path: "{{ mounted_data_path }}/registry/config"
+    state: directory
+
 - name: Template the registry config
   template:
     src: config.yml.j2
