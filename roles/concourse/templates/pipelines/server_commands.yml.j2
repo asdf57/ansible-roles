@@ -13,4 +13,25 @@ jobs:
       - task: run-commands
         privileged: true
         config:
-          platform: linux-[]
+          platform: linux
+          image_resource:
+            type: registry-image
+            source:
+              repository: registry.ryuugu.dev/prov
+              tag: latest
+          inputs:
+            - name: commands
+          params:
+            VAULT_TOKEN: ((root_token.key))
+            VAULT_ADDR: "{{ vault_url }}"
+          run:
+            path: /bin/bash
+            user: keiichi
+            dir: /homelab
+            args:
+              - -lc
+              - |
+                  shopt -s nullglob
+                  commands_file=/tmp/build/*/commands/commands
+                  chmod +x "$commands_file"
+                  bash "$commands_file"
