@@ -32,7 +32,6 @@ jobs:
               - -lc
               - |
                   shopt -s nullglob
-                  ls -al /tmp/**
-                  commands_file=/tmp/*/commands/commands
-                  chmod +x "$commands_file"
-                  bash "$commands_file"
+                  commands_file=(/tmp/build/*/commands/commands)
+                  chmod +x "${commands_file[0]}"
+                  bash "${commands_file[0]}"
