@@ -86,6 +86,16 @@
     path: "{{ mounted_data_path }}/vault"
     state: directory
 
+- name: Create vault policies directory
+  file:
+    path: "{{ mounted_data_path }}/vault/policies"
+    state: directory
+
+- name: Copy vault policies
+  copy:
+    src: vault/policies/
+    dest: "{{ mounted_data_path }}/vault/policies/"
+
 - name: Copy vault Dockerfile
   copy:
     src: vault/Dockerfile
