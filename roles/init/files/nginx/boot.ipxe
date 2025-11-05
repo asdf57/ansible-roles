@@ -1,0 +1,10 @@
+#!ipxe
+
+dhcp
+
+echo Booting system with MAC: ${net0/mac}
+echo Determining OS from API...
+
+# Query the API to determine which OS to boot
+# iPXE has built-in variables like ${net0/mac} for the MAC address
+chain http://nginx.ryuugu.dev/ipxe/${net0/mac}
