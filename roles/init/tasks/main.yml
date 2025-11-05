@@ -76,10 +76,15 @@
     dest: "{{ mounted_data_path }}/nginx/entrypoint.sh"
     mode: '0755'
 
+- name: Create the files directory
+  ansible.builtin.file:
+    path: "{{ mounted_data_path }}/nginx/files"
+    state: directory
+
 - name: Copy nginx boot.ipxe
   copy:
     src: nginx/boot.ipxe
-    dest: "{{ mounted_data_path }}/nginx/boot.ipxe"
+    dest: "{{ mounted_data_path }}/nginx/files/boot.ipxe"
 
 - name: Template nginx.conf
   template:
@@ -131,13 +136,6 @@
   template:
     src: config.yml.j2
     dest: "{{ mounted_data_path }}/registry/config/config.yml"
-
-- name: Setup nginx mounts
-  block:
-    - name: Create the files directory
-      ansible.builtin.file:
-        path: "{{ mounted_data_path }}/nginx/files"
-        state: directory
 
 - name: Setup vault mounts
   block:
