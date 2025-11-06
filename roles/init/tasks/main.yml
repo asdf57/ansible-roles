@@ -86,6 +86,16 @@
     src: nginx/boot.ipxe
     dest: "{{ mounted_data_path }}/nginx/files/boot.ipxe"
 
+- name: Copy nginx arch boot iPXE script
+  copy:
+    src: nginx/arch_boot.ipxe
+    dest: "{{ mounted_data_path }}/nginx/files/arch_boot.ipxe"
+
+- name: Copy nginx debian boot iPXE script
+  copy:
+    src: nginx/debian_boot.ipxe
+    dest: "{{ mounted_data_path }}/nginx/files/debian_boot.ipxe"
+
 - name: Template nginx.conf
   template:
     src: default.conf.j2

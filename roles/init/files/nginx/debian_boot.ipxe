@@ -1,0 +1,11 @@
+#!ipxe
+
+echo Debian iPXE bootloader
+
+set server_url http://nginx.ryuugu.dev/debian_netboot
+
+kernel ${server_url}/vmlinuz boot=live fetch=${server_url}/filesystem.squashfs initrd=initrd.img ip=dhcp
+
+initrd ${server_url}/initrd.img
+
+boot
