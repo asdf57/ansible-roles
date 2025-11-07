@@ -339,7 +339,7 @@
 - name: Build ISOs in parallel
   ansible.builtin.shell:
     cmd: |
-      VAULT_TOKEN="{{ vault_root_password }}" ./scripts/os/build.sh -o {{ mounted_data_path }}/nginx/files/{{ item[0] }}_{{ item[1] }} -p "{{ provisioning_ssh_key_path }}" {{ item[0] }} -t {{ item[1] }}
+      VAULT_TOKEN="{{ vault_root_password }}" ./scripts/os/build.sh -o "{{ host_data_path }}/nginx/files/{{ item[0] }}_{{ item[1] }}" -p "{{ provisioning_ssh_key_path }}" {{ item[0] }} -t {{ item[1] }}
     chdir: "../../"
   loop: "{{ what_to_build }}"
   async: 600
