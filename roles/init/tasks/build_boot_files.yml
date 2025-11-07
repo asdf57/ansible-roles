@@ -3,7 +3,19 @@
     path: "{{ mounted_data_path }}/nginx/files/{{ item.0 }}_{{ item.1 }}"
   register: check_dir
 
+- name: Check if directory is non-empty
+  ansible.builtin.command:
+    cmd: "ls -A {{ mounted_data_path }}/nginx/files/{{ item.0 }}_{{ item.1 }}"
+  register: check_non_empty
+  failed_when: false
+  changed_when: false
+  when: check_dir.stat.exists
+
+- name: Set fact if we need to build
+  set_fact:
+    need_to_build: "{{ not check_dir.stat.exists or (check_dir.stat.exists and check_non_empty.stdout == '') }}"
+
 - name: Add to what to build list
   set_fact:
     what_to_build: "{{ what_to_build + [item] }}"
-  when: not check_dir.stat.exists
+  when: need_to_build
