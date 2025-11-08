@@ -1,0 +1,39 @@
+FROM debian:latest
+
+RUN apt-get update && \
+    apt-get upgrade -y && \
+    apt-get install -y gnupg wget sudo
+
+WORKDIR /build
+
+RUN mkdir -p /root/.ssh
+
+COPY provisioning_key.pub /root/.ssh/authorized_keys
+
+RUN chmod 600 /root/.ssh/authorized_keys && chmod 700 /root/.ssh
+
+RUN apt-get install -y \
+    live-build \
+    debootstrap \
+    syslinux \
+    isolinux \
+    squashfs-tools \
+    xorriso \
+    grub-pc-bin \
+    mtools \
+    curl \
+    openssh-server \
+    dosfstools \
+    python3 jq
+
+# Copy the build script
+COPY debian/build.sh /build/build.sh
+
+# Make the build script executable
+RUN chmod +x /build/build.sh
+
+# Define an environment variable for parameters
+ENV PARAMS=""
+
+# Use the shell form to allow environment variable evaluation
+ENTRYPOINT ["/bin/sh", "-c", "/build/build.sh"]

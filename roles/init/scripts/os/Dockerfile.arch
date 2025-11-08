@@ -1,0 +1,21 @@
+FROM archlinux:latest
+
+RUN pacman -Sy --noconfirm archlinux-keyring
+RUN pacman-key --init && pacman-key --populate archlinux
+RUN pacman -Syu --noconfirm
+
+WORKDIR /build
+
+COPY provisioning_key.pub /root/.ssh/authorized_keys
+
+RUN chmod 600 /root/.ssh/authorized_keys && \
+    chmod 700 /root/.ssh
+
+COPY arch/build.sh /build/build.sh
+
+RUN chmod +x /build/build.sh
+
+ENV PARAMS=""
+
+# Use the shell form to allow environment variable evaluation
+ENTRYPOINT ["/bin/sh", "-c", "/build/build.sh"]
