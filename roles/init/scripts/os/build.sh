@@ -14,7 +14,7 @@ help_message="Usage: $0 [-h] [-o <output_dir>] [-v] <distro> [options]
     <distro>  The distribution to build an ISO for
 
   Flags:
-    -o  The output directory to write the ISO into  (relative to this script's location
+    -o  The host node's output directory to write the ISO into
     -v  Enable verbose mode
     -h  Display this help message"
 
@@ -98,12 +98,6 @@ function build() {
   else
     echo "=> SSH key already exists in build context!"
   fi
-  
-  # echo "=> Set output directory to $output_dir"
-  # if [[ ! -d "$output_dir" ]]; then
-  #   echo "=> Output directory $output_dir does not exist, creating it!"
-  #   mkdir -p "$output_dir"
-  # fi
 
   # Set inheritable environment variables
   export OUTPUT_DIR="$output_dir"
@@ -112,12 +106,12 @@ function build() {
     arch )
       echo "$distro_flags"
       docker build --no-cache --platform linux/amd64 -t arch-builder -f Dockerfile.arch .
-      docker run --rm --platform linux/amd64 --privileged -e PARAMS="$distro_flags" -v $(realpath $OUTPUT_DIR):/output arch-builder
+      docker run --rm --platform linux/amd64 --privileged -e PARAMS="$distro_flags" -v ${OUTPUT_DIR}:/output arch-builder
       ;;
 
     debian )
       docker build --no-cache --platform linux/amd64 -t debian-builder -f Dockerfile.debian .
-      docker run --rm --platform linux/amd64 --privileged -e PARAMS="$distro_flags" -v $(realpath $OUTPUT_DIR):/output debian-builder
+      docker run --rm --platform linux/amd64 --privileged -e PARAMS="$distro_flags" -v ${OUTPUT_DIR}:/output debian-builder
       ;;
   esac
 
