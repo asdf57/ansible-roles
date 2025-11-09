@@ -18,8 +18,7 @@
 - name: Refresh the environment
   ansible.builtin.shell:
     cmd: |
-      cd inventory; git pull; cd -
-      ./scripts/setup_hostvars.sh {{ inventory_hostname }}
+      /etc/profile.d/runtime_setup.sh
     chdir: "../../"
   tags:
     - setup
