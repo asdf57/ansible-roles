@@ -3,7 +3,6 @@
   community.hashi_vault.vault_kv2_get:
     url: "https://vault.ryuugu.dev"
     path: "kv2/servers/{{ inventory_hostname }}/ssh/public"
-    token: "{{ vault_root_password }}"
     validate_certs: true
   register: ssh_key
   delegate_to: localhost
@@ -26,7 +25,6 @@
         path: "servers/{{ inventory_hostname }}/ssh/public"
         data:
           key: "{{ lookup('file', playbook_dir + '/' + inventory_hostname + '_ssh_key.pub') }}"
-        token: "{{ vault_root_password }}"
         validate_certs: true
       retries: 50
       delay: 5
@@ -38,7 +36,6 @@
         path: "servers/{{ inventory_hostname }}/ssh/private"
         data:
           key: "{{ lookup('file', playbook_dir + '/' + inventory_hostname + '_ssh_key') }}"
-        token: "{{ vault_root_password }}"
         validate_certs: true
       retries: 50
       delay: 5
