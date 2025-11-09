@@ -1,6 +1,6 @@
 ---
 - name: Check if SSH key already exists in Vault
-  community.hashi_vault.vault_read:
+  community.hashi_vault.vault_kv2_get:
     url: "https://vault.ryuugu.dev"
     path: "kv2/servers/{{ inventory_hostname }}/ssh/public"
     token: "{{ vault_root_password }}"
@@ -20,9 +20,10 @@
         type: "ed25519"
 
     - name: Upload the public SSH key to vault
-      community.hashi_vault.vault_write:
+      community.hashi_vault.vault_kv2_write:
         url: "https://vault.ryuugu.dev"
-        path: "kv2/servers/{{ inventory_hostname }}/ssh/public"
+        engine_mount_point: "kv2"
+        path: "servers/{{ inventory_hostname }}/ssh/public"
         data:
           key: "{{ lookup('file', playbook_dir + '/' + inventory_hostname + '_ssh_key.pub') }}"
         token: "{{ vault_root_password }}"
@@ -31,9 +32,10 @@
       delay: 5
 
     - name: Upload the private SSH key to vault
-      community.hashi_vault.vault_write:
+      community.hashi_vault.vault_kv2_write:
         url: "https://vault.ryuugu.dev"
-        path: "kv2/servers/{{ inventory_hostname }}/ssh/private"
+        engine_mount_point: "kv2"
+        path: "servers/{{ inventory_hostname }}/ssh/private"
         data:
           key: "{{ lookup('file', playbook_dir + '/' + inventory_hostname + '_ssh_key') }}"
         token: "{{ vault_root_password }}"
