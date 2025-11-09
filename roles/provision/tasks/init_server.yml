@@ -2,7 +2,8 @@
 - name: Check if SSH key already exists in Vault
   community.hashi_vault.vault_kv2_get:
     url: "https://vault.ryuugu.dev"
-    path: "kv2/servers/{{ inventory_hostname }}/ssh/public"
+    engine_mount_point: "kv2"
+    path: "servers/{{ inventory_hostname }}/ssh/public"
     validate_certs: true
   register: ssh_key
   delegate_to: localhost
@@ -19,38 +20,29 @@
         type: "ed25519"
 
     - name: Upload the public SSH key to vault
-      community.hashi_vault.vault_kv2_write:
+      community.hashi_vault.vault_write:
         url: "https://vault.ryuugu.dev"
-        engine_mount_point: "kv2"
-        path: "servers/{{ inventory_hostname }}/ssh/public"
+        path: "kv2/data/servers/{{ inventory_hostname }}/ssh/public"
         data:
-          key: "{{ lookup('file', playbook_dir + '/' + inventory_hostname + '_ssh_key.pub') }}"
+          data:
+            key: "{{ lookup('file', playbook_dir + '/' + inventory_hostname + '_ssh_key.pub') }}"
         validate_certs: true
-      retries: 50
+      retries: 5
       delay: 5
 
     - name: Upload the private SSH key to vault
-      community.hashi_vault.vault_kv2_write:
+      community.hashi_vault.vault_write:
         url: "https://vault.ryuugu.dev"
-        engine_mount_point: "kv2"
-        path: "servers/{{ inventory_hostname }}/ssh/private"
+        path: "kv2/data/servers/{{ inventory_hostname }}/ssh/private"
         data:
-          key: "{{ lookup('file', playbook_dir + '/' + inventory_hostname + '_ssh_key') }}"
+          data:
+            key: "{{ lookup('file', playbook_dir + '/' + inventory_hostname + '_ssh_key') }}"
         validate_certs: true
-      retries: 50
+      retries: 5
       delay: 5
   when: ssh_key is failed
   tags:
   - setup
-
-
-# - name: Partition the storage device
-#   include_tasks: partition
-
-# - name: Start the provisioning process
-#   include_role:
-#     name: provision
-#     tasks_from: provision
 
 - name: Remove the temporary SSH key files
   file:
