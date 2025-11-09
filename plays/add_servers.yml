@@ -1,0 +1,21 @@
+- name: API provision setup
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Set up servers in API
+      include_role:
+        name: provision
+        tasks_from: create_server
+      tags:
+        - setup
+
+- name: Infrastructure setup
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: General
+      include_role:
+        name: provision
+        tasks_from: init_server
+      tags:
+        - setup
