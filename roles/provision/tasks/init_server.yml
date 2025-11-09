@@ -7,7 +7,7 @@
     validate_certs: true
   register: ssh_key
   delegate_to: localhost
-  ignore_errors: true
+  failed_when: false
   tags:
     - setup
 
@@ -40,7 +40,7 @@
         validate_certs: true
       retries: 5
       delay: 5
-  when: ssh_key is failed
+  when: ssh_key.secret is not defined
   tags:
   - setup
 
