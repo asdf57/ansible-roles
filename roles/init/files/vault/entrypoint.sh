@@ -33,7 +33,7 @@ vault login "$(cat /stuff/root_token)"
 
 if ! vault secrets list | grep -q "^kv2/"; then
   echo "Enabling KV version 2 secrets engine..."
-  vault secrets enable -path=kv2 kv || true
+  vault secrets enable -version=2 -path=kv2 kv
 else
   echo "KV secrets engine is already enabled."
 fi
