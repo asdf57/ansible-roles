@@ -172,7 +172,7 @@
 
 - name: Build the docker-compose
   community.docker.docker_compose_v2:
-    project_src: "{{ mounted_data_path }}"
+    project_src: "{{ host_data_path }}"
     project_name: infra
     state: present
     build: always
