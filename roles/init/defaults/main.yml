@@ -21,12 +21,16 @@ interface: "enp7s0"
 
 # Concourse
 concourse_version: 7.12.1
-concourse_team: "test"
+concourse_team: "{{ lookup('env', 'CONCOURSE_TEAM') }}"
 concourse_ipv4: "10.0.2.126"
 concourse_db_ipv4: "10.0.2.127"
 concourse_user: "{{ lookup('env', 'CONCOURSE_USER') }}"
 concourse_password: "{{ lookup('env', 'CONCOURSE_PASSWORD') }}"
 concourse_url: "http://{{ concourse_ipv4 }}:8080"
+concourse_commands_pipeline: "{{ lookup('env', 'CONCOURSE_COMMANDS_PIPELINE') }}"
+concourse_commands_file: "{{ lookup('env', 'CONCOURSE_COMMANDS_FILE') }}"
+concourse_oauth_client_id: "{{ lookup('env', 'CONCOURSE_OAUTH_CLIENT_ID') }}"
+concourse_oauth_client_secret: "{{ lookup('env', 'CONCOURSE_OAUTH_CLIENT_SECRET') }}"
 
 # IPVLAN driver settings
 ipvlan_subnet: "10.0.2.0/24"
