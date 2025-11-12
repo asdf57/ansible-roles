@@ -86,7 +86,7 @@ services:
       clusternet:
         ipv4_address: "{{ server_api_ipv4 }}"
     environment:
-      CONCOURSE_URL: "{{ concourse_url }}"
+      CONCOURSE_URL: "https://ci.ryuugu.dev"
       CONCOURSE_USERNAME: "{{ concourse_user }}"
       CONCOURSE_PASSWORD: "{{ concourse_password }}"
       CONCOURSE_TEAM: "{{ concourse_team }}"
@@ -94,6 +94,7 @@ services:
       CONCOURSE_COMMANDS_FILE: "{{ concourse_commands_file }}"
       CONCOURSE_OAUTH_CLIENT_ID: "{{ concourse_oauth_client_id }}"
       CONCOURSE_OAUTH_CLIENT_SECRET: "{{ concourse_oauth_client_secret }}"
+
   vault:
     build: ./vault
     container_name: vault
