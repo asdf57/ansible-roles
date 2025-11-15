@@ -1,4 +1,10 @@
 ---
+- name: Gather facts from localhost
+  ansible.builtin.setup:
+  delegate_to: localhost
+  delegate_facts: true
+  run_once: true
+
 - name: Check if SSH key already exists in Vault
   community.hashi_vault.vault_kv2_get:
     url: "https://vault.ryuugu.dev"
