@@ -9,7 +9,7 @@
 
 - name: Set pipeline
   ansible.builtin.shell: |
-    fly -t {{ concourse_team }} set-pipeline \
+    fly -t {{ concourse_target }} set-pipeline \
     -p "commands" \
     --non-interactive \
     -c "/tmp/commands_pipeline.yml"
@@ -17,5 +17,5 @@
 
 - name: Unpause the pipeline
   ansible.builtin.shell: |
-    fly -t {{ concourse_team }} unpause-pipeline -p "commands"
+    fly -t {{ concourse_target }} unpause-pipeline -p "commands"
   delegate_to: localhost

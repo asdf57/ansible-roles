@@ -22,6 +22,7 @@ interface: "enp7s0"
 # Concourse
 concourse_version: 7.12.1
 concourse_team: "{{ lookup('env', 'CONCOURSE_TEAM') }}"
+concourse_target: "{{ lookup('env', 'CONCOURSE_TARGET') }}"
 concourse_ipv4: "10.0.2.126"
 concourse_db_ipv4: "10.0.2.127"
 concourse_user: "{{ lookup('env', 'CONCOURSE_USER') }}"

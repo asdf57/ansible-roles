@@ -1,6 +1,6 @@
 - name: Log in to Concourse
   ansible.builtin.shell: |
-    fly -t {{ concourse_team }} login \
+    fly -t {{ concourse_target }} login \
       -c {{ concourse_url }} \
       -u {{ concourse_user }} \
       -p {{ concourse_password }}
