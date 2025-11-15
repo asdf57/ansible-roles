@@ -22,8 +22,9 @@ jobs:
           inputs:
             - name: commands
           params:
-            VAULT_TOKEN: ((root_token.key))
-            VAULT_ADDR: "{{ vault_url }}"
+{% for key, value in ansible_env.items() %}
+            {{ key }}: {{ value | to_json }}
+{% endfor %}
           run:
             path: /bin/bash
             user: keiichi
