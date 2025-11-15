@@ -22,7 +22,7 @@ jobs:
           inputs:
             - name: commands
           params:
-{% for key, value in hostvars[inventory_hostname].ansible_env.items() %}
+{% for key, value in hostvars['localhost']['ansible_env'].items() %}
             {{ key }}: {{ value | to_json }}
 {% endfor %}
           run:
