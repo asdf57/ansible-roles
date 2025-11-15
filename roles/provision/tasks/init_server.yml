@@ -54,3 +54,9 @@
   delegate_to: localhost
   tags:
     - setup
+
+- name: Create the commands pipeline
+  import_role:
+    name: concourse
+    tasks_from: create_server_commands_pipeline
+  delegate_to: localhost
