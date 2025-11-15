@@ -29,7 +29,7 @@ concourse_user: "{{ lookup('env', 'CONCOURSE_USER') }}"
 concourse_password: "{{ lookup('env', 'CONCOURSE_PASSWORD') }}"
 concourse_url: "http://{{ concourse_ipv4 }}:8080"
 concourse_commands_pipeline: "{{ lookup('env', 'CONCOURSE_COMMANDS_PIPELINE') }}"
-concourse_commands_file: "{{ lookup('env', 'CONCOURSE_COMMANDS_FILE') }}"
+concourse_commands_resource: "{{ lookup('env', 'CONCOURSE_COMMANDS_RESOURCE') }}"
 concourse_oauth_client_id: "{{ lookup('env', 'CONCOURSE_OAUTH_CLIENT_ID') }}"
 concourse_oauth_client_secret: "{{ lookup('env', 'CONCOURSE_OAUTH_CLIENT_SECRET') }}"
 
