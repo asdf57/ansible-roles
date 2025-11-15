@@ -5,7 +5,7 @@
 mounted_data_path: "{{ lookup('env', 'MOUNTED_DATA_PATH') }}"
 host_data_path: "{{ lookup('env', 'HOST_DATA_PATH') }}"
 
-host_git_ssh_key_path: "{{ lookup('env', 'HOST_GIT_PROVISIONING_KEY_PATH') }}"
+host_git_ssh_key_path: "{{ lookup('env', 'HOST_GIT_PROVISIONING_KEY_FILE') }}"
 git_ssh_key_path: "/etc/ssh/git_provisioning_key"
 provisioning_ssh_key_path: "/etc/ssh/provisioning_key"
 provisioning_api_repo: "{{ lookup('env', 'GIT_PROVISIONING_API_REPO') }}"
