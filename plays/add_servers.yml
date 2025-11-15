@@ -11,7 +11,7 @@
 
 - name: Infrastructure setup
   hosts: all
-  gather_facts: true
+  gather_facts: false
   tasks:
     - name: General
       include_role:
