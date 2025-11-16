@@ -70,6 +70,7 @@ services:
       CONCOURSE_CLUSTER_NAME: homelab
       CONCOURSE_WORKER_CONTAINERD_DNS_SERVER: "192.168.1.1"
       CONCOURSE_WORKER_RUNTIME: "containerd"
+      CONCOURSE_CONTAINERD_ALLOW_HOST_ACCESS: "true"
     restart: always
     networks:
       clusternet:
