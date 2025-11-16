@@ -14,4 +14,6 @@ export CONCOURSE_VAULT_AUTH_PARAM="role_id:$role_id,secret_id:$secret_id"
 
 echo "$CONCOURSE_VAULT_AUTH_PARAM"
 
+iptables -D INPUT -i concourse0 -j REJECT --reject-with icmp-host-prohibited
+
 exec dumb-init /usr/local/bin/entrypoint.sh "$@"
