@@ -46,7 +46,7 @@
         creates: /mnt/bin
       when: ansible_distribution == 'Debian'
 
-- name: Setup chroot mounts for Debian
+- name: Setup chroot mounts for both distros
   block:
     - name: Mount /dev
       ansible.posix.mount:
@@ -79,6 +79,7 @@
         state: mounted
         opts: bind
         fstype: none
+  when: ansible_distribution == 'Debian'
 
 - name: Generate fstab entries
   ansible.builtin.shell: |
@@ -92,8 +93,11 @@
     mode: '0644'
 
 - name: Create symlink for timezone
-  ansible.builtin.shell:
-    cmd: "{{ chroot_name }} /mnt ln -sf /usr/share/zoneinfo/America/New_York /etc/localtime"
+  ansible.builtin.file:
+    src: /usr/share/zoneinfo/America/New_York
+    dest: /mnt/etc/localtime
+    state: link
+    force: yes
 
 - name: Set the hardware clock
   ansible.builtin.shell:
@@ -164,12 +168,12 @@
     msg: "Root password: {{ root_password }}"
 
 - name: Upload the root password to vault
-  community.hashi_vault.vault_write:
+  community.hashi_vault.vault_kv2_write:
     url: "https://vault.ryuugu.dev"
-    path: "kv2/servers/{{ inventory_hostname }}/users/root"
+    engine_mount_point: "kv2"
+    path: "servers/{{ inventory_hostname }}/users/root"
     data:
       password: "{{ root_password }}"
-    token: "{{ vault_root_password }}"
     validate_certs: true
   retries: 50
   delay: 5
@@ -239,12 +243,14 @@
       register: user_exists
       failed_when: user_exists.rc not in [0, 1]
 
-    - name: Create a password for the user
-      ansible.builtin.set_fact:
-        password: "{{ lookup('password', '/dev/null', chars=['ascii_letters', 'digits'], length=15) }}"
-      register: password_result
+    - name: Generate unique passwords for each new user
+      set_fact:
+        user_passwords_map: "{{ user_passwords_map | default({}) | combine({item.item.username: lookup('password', '/dev/null length=15 chars=ascii_letters,digits')}) }}"
+      loop: "{{ user_exists.results }}"
+      when: item.rc == 1
+      no_log: true
 
-    - name: Create users with unique passwords
+    - name: Create users that do not exist
       ansible.builtin.shell: |
         {{ chroot_name }} /mnt useradd -m -s "{{ item.item.shell }}" -G "{{ item.item.groups | join(',') }}" "{{ item.item.username }}"
       when: item.rc == 1
@@ -255,21 +261,21 @@
       ansible.builtin.shell:
         cmd: |
           {{ chroot_name }} /mnt chpasswd
-        stdin: "{{ item.item.username }}:{{ lookup('password', '/dev/null length=15') }}"
-      when: item.rc == 1
-      loop: "{{ user_exists.results }}"
+        stdin: "{{ item.key }}:{{ item.value }}"
+      loop: "{{ user_passwords_map | default({}) | dict2items }}"
       no_log: true
-      register: user_passwords
+      when: user_passwords_map is defined
 
     - name: Upload user passwords to Vault
-      community.hashi_vault.vault_write:
+      community.hashi_vault.vault_kv2_write:
         url: "https://vault.ryuugu.dev"
-        path: "kv2/servers/{{ inventory_hostname }}/users/{{ item.item.item.username }}"
+        engine_mount_point: "kv2"
+        path: "servers/{{ inventory_hostname }}/users/{{ item.key }}"
         data:
-          password: "{{ item.stdin.split(':')[1] }}"
-        token: "{{ vault_root_password }}"
-      loop: "{{ user_passwords.results }}"
-      when: not item.skipped | default(false)
+          password: "{{ item.value }}"
+        validate_certs: true
+      loop: "{{ user_passwords_map | default({}) | dict2items }}"
+      when: user_passwords_map is defined
       delegate_to: localhost
 
 - name: Install and configure sudo
@@ -306,9 +312,27 @@
         cmd: "chroot /mnt apt-get install -y openssh-server"
       when: ansible_distribution == 'Debian'
 
-    - name: Enable sshd
+    - name: Enable sshd (Arch)
+      ansible.builtin.shell:
+        cmd: "{{ chroot_name }} /mnt systemctl enable sshd"
+      when: ansible_distribution == 'Archlinux'
+
+    - name: Enable sshd (Debian)
       ansible.builtin.shell:
         cmd: "{{ chroot_name }} /mnt systemctl enable ssh"
+      when: ansible_distribution == 'Debian'
+
+    - name: Harden SSH configuration
+      ansible.builtin.lineinfile:
+        path: /mnt/etc/ssh/sshd_config
+        regexp: "{{ item.regexp }}"
+        line: "{{ item.line }}"
+        state: present
+      loop:
+        - { regexp: '^#?PermitRootLogin', line: 'PermitRootLogin prohibit-password' }
+        - { regexp: '^#?PasswordAuthentication', line: 'PasswordAuthentication no' }
+        - { regexp: '^#?PubkeyAuthentication', line: 'PubkeyAuthentication yes' }
+        - { regexp: '^#?X11Forwarding', line: 'X11Forwarding no' }
 
 - name: Configure the bootloader
   block:
@@ -397,11 +421,6 @@
         cmd: "{{ chroot_name }} /mnt systemctl enable NetworkManager"
       become: true
 
-    - name: Start NetworkManager
-      ansible.builtin.shell:
-        cmd: "{{ chroot_name }} /mnt systemctl start NetworkManager"
-      become: true
-
 - name: Add public SSH key to root's authorized_keys
   ansible.builtin.lineinfile:
     path: /mnt/root/.ssh/authorized_keys
@@ -424,10 +443,43 @@
     state: present
     insertafter: EOF
 
+- name: Cleanup chroot mounts before reboot
+  block:
+    - name: Unmount chroot filesystems (Debian)
+      ansible.posix.mount:
+        path: "{{ item }}"
+        state: unmounted
+      loop:
+        - /mnt/run
+        - /mnt/sys
+        - /mnt/proc
+        - /mnt/dev
+      failed_when: false
+      when: ansible_distribution == 'Debian'
+  rescue:
+    - name: Force unmount if needed
+      ansible.builtin.command:
+        cmd: "umount -l {{ item }}"
+      loop:
+        - /mnt/run
+        - /mnt/sys
+        - /mnt/proc
+        - /mnt/dev
+      failed_when: false
+      when: ansible_distribution == 'Debian'
+
 - name: Reboot the system
   ansible.builtin.reboot:
     reboot_timeout: 600
   become: yes
+
+- name: Wait for system to come back online
+  ansible.builtin.wait_for_connection:
+    timeout: 300
+    delay: 10
+
+- name: Verify network connectivity
+  ansible.builtin.ping:
 
 - name: Install python
   include_role:
