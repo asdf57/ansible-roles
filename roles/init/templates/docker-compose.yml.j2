@@ -3,6 +3,8 @@ volumes:
     driver: local
   vault_shared:
     driver: local
+  concourse_keys:
+    driver: local
 
 services:
   registry:
@@ -16,6 +18,23 @@ services:
     networks:
       clusternet:
         ipv4_address: "{{ registry_ipv4 }}"
+
+  concourse-keys:
+    image: alpine
+    container_name: concourse-keys
+    command: |
+      sh -c "
+        apk add --no-cache openssh-client
+        if [ ! -f /concourse-keys/session_signing_key ]; then
+          ssh-keygen -t rsa -m PEM -f /concourse-keys/session_signing_key -N ''
+          ssh-keygen -t rsa -m PEM -f /concourse-keys/tsa_host_key -N ''
+          cp /concourse-keys/session_signing_key.pub /concourse-keys/authorized_worker_keys
+        fi
+        exit 0
+      "
+    volumes:
+      - concourse_keys:/concourse-keys
+    restart: on-failure
 
   concourse-db:
     container_name: concourse-db
@@ -35,26 +54,27 @@ services:
       clusternet:
         ipv4_address: "{{ concourse_db_ipv4 }}"
 
-  concourse:
-    container_name: concourse
-    build:
-      context: ./concourse
-      args:
-        CONCOURSE_VERSION: "{{ concourse_version }}"
-    command: quickstart
+  concourse-web:
+    container_name: concourse-web
+    image: concourse/concourse:{{ concourse_version }}
+    command: web
     privileged: true
-    cgroup: host
     depends_on:
       concourse-db:
         condition: service_healthy
+      concourse-keys:
+        condition: service_completed_successfully
       vault:
         condition: service_healthy
-    ports: ["8080:8080"]
+    ports:
+      - "8080:8080"
+      - "2222:2222"
     volumes:
-      - "{{ host_data_path }}/vault/vault_stuff/stuff:/stuff"
-      - vault_shared:/shared
+      - concourse_keys:/concourse-keys
     environment:
-      CONCOURSE_VAULT_URL: "{{ vault_url }}"
+      CONCOURSE_SESSION_SIGNING_KEY: /concourse-keys/session_signing_key
+      CONCOURSE_TSA_HOST_KEY: /concourse-keys/tsa_host_key
+      CONCOURSE_TSA_AUTHORIZED_KEYS: /concourse-keys/authorized_worker_keys
       CONCOURSE_POSTGRES_HOST: "{{ concourse_db_ipv4 }}"
       CONCOURSE_POSTGRES_USER: concourse_user
       CONCOURSE_POSTGRES_PASSWORD: concourse_pass
@@ -62,19 +82,38 @@ services:
       CONCOURSE_EXTERNAL_URL: "{{ concourse_url }}"
       CONCOURSE_ADD_LOCAL_USER: test:test
       CONCOURSE_MAIN_TEAM_LOCAL_USER: "{{ concourse_user }}"
-      CONCOURSE_WORKER_BAGGAGECLAIM_DRIVER: overlay
-      CONCOURSE_CLIENT_SECRET: Y29uY291cnNlLXdlYgo=
-      CONCOURSE_TSA_CLIENT_SECRET: Y29uY291cnNlLXdvcmtlcgo=
-      CONCOURSE_X_FRAME_OPTIONS: allow
-      CONCOURSE_CONTENT_SECURITY_POLICY: "frame-ancestors *;"
       CONCOURSE_CLUSTER_NAME: homelab
-      CONCOURSE_WORKER_CONTAINERD_DNS_SERVER: "192.168.1.1"
-      CONCOURSE_WORKER_RUNTIME: "containerd"
-      CONCOURSE_CONTAINERD_ALLOW_HOST_ACCESS: "true"
     restart: always
     networks:
       clusternet:
         ipv4_address: "{{ concourse_ipv4 }}"
+
+  concourse-worker:
+    container_name: concourse-worker
+    build:
+      context: ./concourse
+      args:
+        CONCOURSE_VERSION: "{{ concourse_version }}"
+    command: worker
+    privileged: true
+    cgroup: host
+    depends_on:
+      - concourse-web
+    volumes:
+      - concourse_keys:/concourse-keys
+      - "{{ host_data_path }}/vault/vault_stuff/stuff:/stuff"
+      - vault_shared:/shared
+    environment:
+      CONCOURSE_TSA_HOST: concourse-web:2222
+      CONCOURSE_TSA_PUBLIC_KEY: /concourse-keys/tsa_host_key.pub
+      CONCOURSE_TSA_WORKER_PRIVATE_KEY: /concourse-keys/session_signing_key
+      CONCOURSE_RUNTIME: containerd
+      CONCOURSE_CONTAINERD_ALLOW_HOST_ACCESS: "true"
+      CONCOURSE_VAULT_URL: "{{ vault_url }}"
+      CONCOURSE_CONTAINERD_DNS_PROXY_ENABLE: "true"
+    restart: always
+    networks:
+      - clusternet
 
   http:
     build: ./provisioning-api
