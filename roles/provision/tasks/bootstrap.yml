@@ -42,6 +42,8 @@
     - name: Install the base system (Debian)
       ansible.builtin.shell:
         cmd: "debootstrap --verbose {{ ansible_distribution_release }} /mnt https://deb.debian.org/debian/"
+      args:
+        creates: /mnt/bin
       when: ansible_distribution == 'Debian'
 
 - name: Setup chroot mounts for Debian
@@ -80,7 +82,14 @@
 
 - name: Generate fstab entries
   ansible.builtin.shell: |
-    genfstab -U /mnt >> /mnt/etc/fstab
+    genfstab -U /mnt > /tmp/fstab.new
+
+- name: Install fstab
+  ansible.builtin.copy:
+    src: /tmp/fstab.new
+    dest: /mnt/etc/fstab
+    remote_src: yes
+    mode: '0644'
 
 - name: Create symlink for timezone
   ansible.builtin.shell:
@@ -169,7 +178,9 @@
 - name: Set the root password
   ansible.builtin.shell:
     cmd: |
-      {{ chroot_name }} /mnt bash -c "echo 'root:{{ root_password }}' | chpasswd"
+      {{ chroot_name }} /mnt chpasswd
+    stdin: "root:{{ root_password }}"
+  no_log: true
 
 # - name: Add files and dirs to be copied to all created users
 #   block:
@@ -233,20 +244,33 @@
         password: "{{ lookup('password', '/dev/null', chars=['ascii_letters', 'digits'], length=15) }}"
       register: password_result
 
-    - name: Extract the password
-      ansible.builtin.set_fact:
-        password: "{{ root_password_result.ansible_facts.root_password }}"
-
-    - name: Print the password
-      debug:
-        msg: "password: {{ root_password }}"
-
-
-    - name: Create users that do not exist
+    - name: Create users with unique passwords
       ansible.builtin.shell: |
-        echo "{{ item.item.password }}" | {{ chroot_name }} /mnt useradd -m -p "$(openssl passwd -6 -stdin)" -s "{{ item.item.shell }}" -G "{{ item.item.groups | join(',') }}" "{{ item.item.username }}"
+        {{ chroot_name }} /mnt useradd -m -s "{{ item.item.shell }}" -G "{{ item.item.groups | join(',') }}" "{{ item.item.username }}"
       when: item.rc == 1
       loop: "{{ user_exists.results }}"
+      no_log: true
+
+    - name: Set user passwords
+      ansible.builtin.shell:
+        cmd: |
+          {{ chroot_name }} /mnt chpasswd
+        stdin: "{{ item.item.username }}:{{ lookup('password', '/dev/null length=15') }}"
+      when: item.rc == 1
+      loop: "{{ user_exists.results }}"
+      no_log: true
+      register: user_passwords
+
+    - name: Upload user passwords to Vault
+      community.hashi_vault.vault_write:
+        url: "https://vault.ryuugu.dev"
+        path: "kv2/servers/{{ inventory_hostname }}/users/{{ item.item.item.username }}"
+        data:
+          password: "{{ item.stdin.split(':')[1] }}"
+        token: "{{ vault_root_password }}"
+      loop: "{{ user_passwords.results }}"
+      when: not item.skipped | default(false)
+      delegate_to: localhost
 
 - name: Install and configure sudo
   block:
