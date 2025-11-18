@@ -252,7 +252,7 @@
 
     - name: Create users that do not exist
       ansible.builtin.shell: |
-        {{ chroot_name }} /mnt useradd -m -s "{{ item.item.shell }}" -G "{{ item.item.groups | join(',') }}" "{{ item.item.username }}"
+        {{ chroot_name }} /mnt useradd -m -s "{{ item.item.shell | default('/bin/bash') }}" -G "{{ item.item.groups | default(['users']) | join(',') }}" "{{ item.item.username }}"
       when: item.rc == 1
       loop: "{{ user_exists.results }}"
       no_log: true
