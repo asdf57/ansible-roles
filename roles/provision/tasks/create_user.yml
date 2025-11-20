@@ -30,6 +30,7 @@
           {{ chroot_name }} /mnt chpasswd
         stdin: "{{ username }}:{{ user_password }}"
       no_log: true
+      register: set_password_result
       failed_when: set_password_result.rc != 0
 
     - name: Upload user passwords to Vault
