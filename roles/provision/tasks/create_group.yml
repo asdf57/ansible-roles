@@ -1,0 +1,10 @@
+- name: Check if the group exists
+  ansible.builtin.shell: |
+    {{ chroot_name }} /mnt getent group "{{ group_name }}"
+  register: group_check
+  failed_when: false
+
+- name: Create the group
+  ansible.builtin.shell: |
+    {{ chroot_name }} /mnt groupadd "{{ group_name }}"
+  when: group_check.rc != 0

@@ -12,6 +12,12 @@
       set_fact:
         user_password: "{{ lookup('password', '/dev/null length=20 chars=ascii_letters,digits') }}"
 
+    - name: Create groups if they do not exist
+      include_tasks: create_group.yml
+      loop: "{{ user_groups | default([]) }}"
+      loop_control:
+        loop_var: group_name
+
     - name: Create user
       ansible.builtin.shell: |
         {{ chroot_name }} /mnt useradd -m -s /bin/bash "{{ username }}" -G "{{ user_groups | default('') | join(',') }}"
