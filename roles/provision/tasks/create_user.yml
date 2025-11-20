@@ -1,0 +1,39 @@
+- name: Check if user exists
+  ansible.builtin.shell: |
+    {{ chroot_name }} /mnt id -u "{{ username }}"
+  changed_when: false
+  register: user_exists
+  failed_when: false
+
+- name: Create the user
+  when: user_exists.rc != 0
+  block:
+    - name: Generate unique password
+      set_fact:
+        user_password: "{{ lookup('password', '/dev/null length=20 chars=ascii_letters,digits') }}"
+
+    - name: Create user
+      ansible.builtin.shell: |
+        {{ chroot_name }} /mnt useradd -m -s /bin/bash "{{ username }}" -G "{{ groups | default('') | join(',') }}"
+      register: create_user_result
+      failed_when: create_user_result.rc != 0
+
+    - name: Set user password
+      ansible.builtin.shell:
+        cmd: |
+          {{ chroot_name }} /mnt chpasswd
+        stdin: "{{ username }}:{{ user_password }}"
+      no_log: true
+      failed_when: set_password_result.rc != 0
+
+    - name: Upload user passwords to Vault
+      community.hashi_vault.vault_kv2_write:
+        url: "https://vault.ryuugu.dev"
+        engine_mount_point: "kv2"
+        path: "servers/{{ inventory_hostname }}/users/{{ item.key }}"
+        data:
+          password: "{{ item.value }}"
+        validate_certs: true
+      loop: "{{ user_passwords_map | default({}) | dict2items }}"
+      when: user_passwords_map is defined
+      delegate_to: localhost

@@ -163,10 +163,6 @@
   ansible.builtin.set_fact:
     root_password: "{{ root_password_result.ansible_facts.root_password }}"
 
-- name: Print the root password
-  debug:
-    msg: "Root password: {{ root_password }}"
-
 - name: Upload the root password to vault
   community.hashi_vault.vault_kv2_write:
     url: "https://vault.ryuugu.dev"
@@ -186,97 +182,14 @@
     stdin: "root:{{ root_password }}"
   no_log: true
 
-# - name: Add files and dirs to be copied to all created users
-#   block:
-#     - name: Clone the dotfiles repo
-#       ansible.builtin.git:
-#         repo: "{{ templates_repo }}"
-#         dest: "{{ role_path }}/files/{{ inventory_hostname }}/dotfiles"
-#         version: main
-#         force: yes
-#       delegate_to: localhost
-
-    # - name: Select all template dotfiles
-    #   ansible.builtin.find:
-    #     paths: "{{ role_path }}/files/{{ inventory_hostname }}/dotfiles/"
-    #     recurse: yes
-    #     patterns: "*.j2"
-    #     file_type: file
-    #   register: templated_dotfiles
-    #   delegate_to: localhost
-
-    # - name: Template dotfiles
-    #   ansible.builtin.template:
-    #     src: "{{ item.path }}"
-    #     dest: "{{ item.path | regex_replace('\\.j2$', '') }}"
-    #     mode: '0755'
-    #     force: yes
-    #     backup: yes
-    #   loop: "{{ templated_dotfiles.files }}"
-    #   delegate_to: localhost
-
-    # - name: Find and copy non-empty dotfiles
-    #   ansible.builtin.shell: |
-    #     find "{{ role_path }}/files/{{ inventory_hostname }}/dotfiles/" -type f -not -name "*.j2" | while read file; do
-    #       if grep -q '[^[:space:]]' "$file"; then
-    #         rel_path=$(realpath --relative-to="{{ role_path }}/files/{{ inventory_hostname }}/dotfiles/" "$file")
-    #         mkdir -p "/mnt/etc/skel/.config/$(dirname "$rel_path")"
-    #         cp -f "$file" "/mnt/etc/skel/.config/$rel_path"
-    #         chmod 0755 "/mnt/etc/skel/.config/$rel_path"
-    #       fi
-    #     done
-    #   delegate_to: localhost
-    #   changed_when: true
-
-    # - name: Remove the local dotfiles
-    #   ansible.builtin.file:
-    #     path: "{{ role_path }}/files/{{ inventory_hostname }}/dotfiles"
-    #     state: absent
-
-- name: Setup users in chroot
-  block:
-    - name: Check if users exist
-      ansible.builtin.shell: |
-        {{ chroot_name }} /mnt id -u "{{ item.username }}"
-      changed_when: false
-      loop: "{{ users }}"
-      register: user_exists
-      failed_when: user_exists.rc not in [0, 1]
-
-    - name: Generate unique passwords for each new user
-      set_fact:
-        user_passwords_map: "{{ user_passwords_map | default({}) | combine({item.item.username: lookup('password', '/dev/null length=15 chars=ascii_letters,digits')}) }}"
-      loop: "{{ user_exists.results }}"
-      when: item.rc == 1
-      no_log: true
-
-    - name: Create users that do not exist
-      ansible.builtin.shell: |
-        {{ chroot_name }} /mnt useradd -m -s "{{ item.item.shell | default('/bin/bash') }}" -G "{{ item.item.groups | default(['users']) | join(',') }}" "{{ item.item.username }}"
-      when: item.rc == 1
-      loop: "{{ user_exists.results }}"
-      no_log: true
-
-    - name: Set user passwords
-      ansible.builtin.shell:
-        cmd: |
-          {{ chroot_name }} /mnt chpasswd
-        stdin: "{{ item.key }}:{{ item.value }}"
-      loop: "{{ user_passwords_map | default({}) | dict2items }}"
-      no_log: true
-      when: user_passwords_map is defined
-
-    - name: Upload user passwords to Vault
-      community.hashi_vault.vault_kv2_write:
-        url: "https://vault.ryuugu.dev"
-        engine_mount_point: "kv2"
-        path: "servers/{{ inventory_hostname }}/users/{{ item.key }}"
-        data:
-          password: "{{ item.value }}"
-        validate_certs: true
-      loop: "{{ user_passwords_map | default({}) | dict2items }}"
-      when: user_passwords_map is defined
-      delegate_to: localhost
+- name: Setup users
+  include_tasks: create_user.yml
+  loop: "{{ users }}"
+  loop_control:
+    loop_var: item
+  vars:
+    username: "{{ item.username }}"
+    groups: "{{ item.groups | default([]) }}"
 
 - name: Install and configure sudo
   block:
