@@ -189,7 +189,7 @@
     loop_var: item
   vars:
     username: "{{ item.username }}"
-    groups: "{{ item.groups | default([]) }}"
+    user_groups: "{{ item.groups | default([]) }}"
 
 - name: Install and configure sudo
   block:

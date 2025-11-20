@@ -14,7 +14,7 @@
 
     - name: Create user
       ansible.builtin.shell: |
-        {{ chroot_name }} /mnt useradd -m -s /bin/bash "{{ username }}" -G "{{ groups | default('') | join(',') }}"
+        {{ chroot_name }} /mnt useradd -m -s /bin/bash "{{ username }}" -G "{{ user_groups | default('') | join(',') }}"
       register: create_user_result
       failed_when: create_user_result.rc != 0
 
