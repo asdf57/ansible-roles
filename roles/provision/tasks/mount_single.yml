@@ -15,15 +15,10 @@
       path: /mnt/boot
       state: directory
 
-  - name: Create mount point for EFI partition
-    ansible.builtin.file:
-      path: /mnt/boot/efi
-      state: directory
-
-  - name: Mount the EFI partition to /boot/efi
+  - name: Mount the EFI partition to /boot
     ansible.posix.mount:
       src: "{{ disk_name }}{{ idx + 1 }}"
-      path: /mnt/boot/efi
+      path: /mnt/boot
       state: mounted
       fstype: "{{ fstype }}"
   when: item.fs_type == "efi"
