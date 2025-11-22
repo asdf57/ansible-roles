@@ -67,3 +67,16 @@
   loop_control:
     loop_var: item
     index_var: idx
+
+- name: Generate fstab
+  ansible.builtin.command:
+    cmd: "genfstab -U /mnt >> /mnt/etc/fstab"
+
+- name: Get fstab
+  ansible.builtin.slurp:
+    src: /mnt/etc/fstab
+  register: fstab_contents
+
+- name: Display fstab contents
+  debug:
+    msg: "{{ fstab_contents.content | b64decode }}"
