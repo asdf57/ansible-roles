@@ -15,6 +15,11 @@
       path: /mnt/boot
       state: directory
 
+  - name: Create the /mnt/boot/efi directory
+    ansible.builtin.file:
+      path: /mnt/boot/efi
+      state: directory
+
   - name: Mount the EFI partition and add to fstab
     ansible.posix.mount:
       src: "{{ disk_name }}{{ idx + 1 }}"
