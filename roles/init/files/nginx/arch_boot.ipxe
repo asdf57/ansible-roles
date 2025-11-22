@@ -2,11 +2,13 @@
 
 echo Arch iPXE bootloader
 
-# Load kernel with proper parameters
-kernel http://nginx.ryuugu.dev/arch_netboot/vmlinuz archisobasedir=arch archiso_http_srv=http://nginx.ryuugu.dev/arch_netboot/ ip=dhcp cow_spacesize=512M initrd=initrd
+kernel http://nginx.ryuugu.dev/arch_netboot/vmlinuz \
+    ip=dhcp \
+    cow_spacesize=512M \
+    archisobasedir=arch \
+    archiso_http_srv=http://nginx.ryuugu.dev/arch_netboot/ \
+    initrd=initrd
 
-# Load initial ramdisk
 initrd http://nginx.ryuugu.dev/arch_netboot/initrd.img
 
-# Boot the system
 boot
