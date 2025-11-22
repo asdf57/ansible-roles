@@ -10,22 +10,16 @@
 
 - name: EFI partition setup
   block:
-  - name: Create /mnt/boot directory first
-    ansible.builtin.file:
-      path: /mnt/boot
-      state: directory
-
   - name: Create mount point for EFI partition
     ansible.builtin.file:
       path: /mnt/boot/efi
       state: directory
 
   - name: Mount the EFI partition to /boot/efi
-    ansible.posix.mount:
-      src: "{{ disk_name }}{{ idx + 1 }}"
-      path: /mnt/boot/efi
-      state: mounted
-      fstype: "{{ fstype }}"
+    ansible.builtin.command:
+      cmd: mount -t {{ fstype }} {{ disk_name }}{{ idx + 1 }} /mnt/boot/efi
+    args:
+      creates: /mnt/boot/efi/EFI
   when: item.fs_type == "efi"
 
 - name: Enable swap partition
@@ -43,12 +37,14 @@
       set_fact:
         gen_mnt_point: "/mnt{{ general_mount_idx if general_mount_idx | int > 0 else '' }}"
 
-    - name: Mount general partitions to /mnt, /mnt1, etc.
-      ansible.posix.mount:
-        src: "{{ disk_name }}{{ idx + 1 }}"
+    - name: Create mount point directory
+      ansible.builtin.file:
         path: "{{ gen_mnt_point }}"
-        state: mounted
-        fstype: "{{ fstype }}"
+        state: directory
+
+    - name: Mount general partitions to /mnt, /mnt1, etc.
+      ansible.builtin.command:
+        cmd: mount -t {{ fstype }} {{ disk_name }}{{ idx + 1 }} {{ gen_mnt_point }}
 
     - name: Print general partition mount
       debug:
