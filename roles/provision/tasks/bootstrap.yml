@@ -81,6 +81,14 @@
         fstype: none
   when: ansible_distribution == 'Debian'
 
+# Mount partitions AFTER base system installation to ensure /mnt/etc/fstab exists
+- name: Mount the filesystems
+  include_tasks: mount_single.yml
+  loop: "{{ storage.partitions }}"
+  loop_control:
+    loop_var: item
+    index_var: idx
+
 # - name: Generate fstab entries
 #   ansible.builtin.shell: |
 #     genfstab -U /mnt > /tmp/fstab.new
