@@ -325,27 +325,35 @@
         cmd: "{{ chroot_name }} /mnt systemctl enable NetworkManager"
       become: true
 
-- name: Add public SSH key to root's authorized_keys
-  ansible.builtin.lineinfile:
-    path: /mnt/root/.ssh/authorized_keys
-    line: "{{ lookup('file', '/home/condor/.ssh/{{ inventory_hostname }}_public_key.pub') }}"
-    create: yes
-    mode: '0600'
-    owner: root
-    group: root
-    state: present
-    insertafter: EOF
+- name: Get the SSH key from Vault
+  community.hashi_vault.vault_kv2_get:
+    url: "https://vault.ryuugu.dev"
+    engine_mount_point: "kv2"
+    path: "servers/{{ inventory_hostname }}/ssh/public"
+    validate_certs: true
+  register: ssh_key
+  delegate_to: localhost
+  failed_when: false
 
-- name: Add provisioning key to root's authorized_keys
-  ansible.builtin.lineinfile:
-    path: /mnt/root/.ssh/authorized_keys
-    line: "{{ lookup('file', '/home/condor/.ssh/provisioning_key.pub') }}"
-    create: yes
-    mode: '0600'
-    owner: root
-    group: root
-    state: present
-    insertafter: EOF
+- name: Setup SSH key for root
+  block:
+    - name: Create /mnt/root/.ssh directory
+      ansible.builtin.file:
+        path: /mnt/root/.ssh
+        state: directory
+        mode: '0700'
+        owner: root
+        group: root
+
+    - name: Add provisioning key to root's authorized_keys
+      ansible.builtin.lineinfile:
+        path: /mnt/root/.ssh/authorized_keys
+        line: "{{ ssh_key.data.data.key }}"
+        create: yes
+        mode: '0600'
+        owner: root
+        group: root
+  when: ssh_key.data is defined and ssh_key.data.data is defined and ssh_key.data.data.key is defined
 
 - name: Cleanup chroot mounts before reboot
   block:
