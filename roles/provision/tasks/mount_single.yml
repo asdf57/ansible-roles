@@ -15,17 +15,32 @@
       path: /mnt/boot
       state: directory
 
-  - name: Mount the EFI partition to /boot
+  - name: Mount the EFI partition and add to fstab
     ansible.posix.mount:
       src: "{{ disk_name }}{{ idx + 1 }}"
       path: /mnt/boot
-      state: mounted
       fstype: "{{ fstype }}"
+      opts: defaults
+      state: mounted
+      fstab: /mnt/etc/fstab
+      passno: "2"
   when: item.fs_type == "efi"
 
-- name: Enable swap partition
-  ansible.builtin.command:
-    cmd: swapon {{ disk_name }}{{ idx + 1 }}
+- name: Swap partition setup
+  block:
+    - name: Enable swap partition
+      ansible.builtin.command:
+        cmd: swapon {{ disk_name }}{{ idx + 1 }}
+
+    - name: Add swap to fstab
+      ansible.posix.mount:
+        src: "{{ disk_name }}{{ idx + 1 }}"
+        path: none
+        fstype: swap
+        opts: sw
+        state: present
+        fstab: /mnt/etc/fstab
+        passno: "0"
   when: item.fs_type == "swap"
 
 - name: Block mount general partitions
@@ -34,18 +49,30 @@
       set_fact:
         general_mount_idx: "{{ 0 if general_partitions is undefined else general_mount_idx + 1 }}"
 
-    - name: Set mount point
+    - name: Set mount point (for mounting during provisioning)
       set_fact:
         gen_mnt_point: "/mnt{{ general_mount_idx if general_mount_idx | int > 0 else '' }}"
 
-    - name: Mount general partitions to /mnt, /mnt1, etc.
+    - name: Set final mount point (for fstab)
+      set_fact:
+        final_mnt_point: "{{ '/' if general_mount_idx | int == 0 else '/mnt' + (general_mount_idx | string) }}"
+
+    - name: Create mount point directory
+      ansible.builtin.file:
+        path: "{{ gen_mnt_point }}"
+        state: directory
+
+    - name: Mount general partitions and add to fstab
       ansible.posix.mount:
         src: "{{ disk_name }}{{ idx + 1 }}"
         path: "{{ gen_mnt_point }}"
-        state: mounted
         fstype: "{{ fstype }}"
+        opts: defaults
+        state: mounted
+        fstab: /mnt/etc/fstab
+        passno: "{{ '1' if general_mount_idx | int == 0 else '2' }}"
 
     - name: Print general partition mount
       debug:
-        msg: "Mounted {{ disk_name }}{{ idx + 1 }} to {{ gen_mnt_point }}"
+        msg: "Mounted {{ disk_name }}{{ idx + 1 }} to {{ gen_mnt_point }} (will be {{ final_mnt_point }} on boot)"
   when: item.fs_type not in ['efi', 'swap']

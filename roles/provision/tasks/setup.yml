@@ -78,9 +78,9 @@
         opts: bind
         fstype: none
 
-- name: Generate fstab entries
-  ansible.builtin.shell: |
-    genfstab -U /mnt >> /mnt/etc/fstab
+# - name: Generate fstab entries
+#   ansible.builtin.shell: |
+#     genfstab -U /mnt >> /mnt/etc/fstab
 
 - name: Create symlink for timezone
   ansible.builtin.shell:

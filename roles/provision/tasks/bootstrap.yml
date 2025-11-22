@@ -81,9 +81,9 @@
         fstype: none
   when: ansible_distribution == 'Debian'
 
-- name: Generate fstab entries
-  ansible.builtin.shell: |
-    genfstab -U /mnt > /tmp/fstab.new
+# - name: Generate fstab entries
+#   ansible.builtin.shell: |
+#     genfstab -U /mnt > /tmp/fstab.new
 
 - name: Install fstab
   ansible.builtin.copy:
