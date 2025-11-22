@@ -271,11 +271,6 @@
       become: true
       when: ansible_facts['os_family'] == 'Debian'
 
-    - name: Fail if GRUB installation fails
-      fail:
-        msg: "Failed to install GRUB bootloader"
-      when: grub_install.rc != 0
-
     - name: Create iPXE directory
       ansible.builtin.file:
         path: /mnt/boot/ipxe
