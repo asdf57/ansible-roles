@@ -347,7 +347,7 @@
 
     - name: Add provisioning key to root's authorized_keys
       ansible.builtin.lineinfile:
-        path: /mnt/root/.ssh/authorized_keys
+        path: /mnt/home/{{ inventory_hostname }}/.ssh/authorized_keys
         line: "{{ ssh_key.data.data.key }}"
         create: yes
         mode: '0600'

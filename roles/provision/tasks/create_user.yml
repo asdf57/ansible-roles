@@ -33,14 +33,14 @@
       register: set_password_result
       failed_when: set_password_result.rc != 0
 
-    - name: Upload user passwords to Vault
+    - name: Upload user password to Vault
       community.hashi_vault.vault_kv2_write:
         url: "https://vault.ryuugu.dev"
         engine_mount_point: "kv2"
-        path: "servers/{{ inventory_hostname }}/users/{{ item.key }}"
+        path: "servers/{{ inventory_hostname }}/users/{{ username }}"
         data:
-          password: "{{ item.value }}"
+          password: "{{ user_password }}"
         validate_certs: true
-      loop: "{{ user_passwords_map | default({}) | dict2items }}"
-      when: user_passwords_map is defined
+      retries: 50
+      delay: 5
       delegate_to: localhost
