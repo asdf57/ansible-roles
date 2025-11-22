@@ -30,6 +30,9 @@
       ansible.builtin.shell: reflector --verbose --latest 10 --sort rate | awk -e '! /rsync/ {print}' > /etc/pacman.d/mirrorlist
   when: ansible_distribution == 'Archlinux'
 
+- name: Mount the general partitions
+  include_tasks: mount_general_partitions.yml
+
 - name: Install the base system
   block:
     - name: Install the base system (Arch Linux)
@@ -82,16 +85,8 @@
   when: ansible_distribution == 'Debian'
 
 # Mount partitions AFTER base system installation to ensure /mnt/etc/fstab exists
-- name: Mount the filesystems
-  include_tasks: mount_single.yml
-  loop: "{{ storage.partitions }}"
-  loop_control:
-    loop_var: item
-    index_var: idx
-
-# - name: Generate fstab entries
-#   ansible.builtin.shell: |
-#     genfstab -U /mnt > /tmp/fstab.new
+- name: Mount the non-general partitions
+  include_tasks: mount_non_general_partitions.yml
 
 - name: Install fstab
   ansible.builtin.copy:

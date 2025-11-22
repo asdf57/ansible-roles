@@ -1,0 +1,8 @@
+---
+- name: Mount the non-general partitions
+  include_tasks: mount_single.yml
+  loop: "{{ storage.partitions }}"
+  loop_control:
+    loop_var: item
+    index_var: idx
+  when: item.fs_type in ["efi", "swap"]

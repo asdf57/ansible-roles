@@ -60,10 +60,3 @@
   loop_control:
     loop_var: item
     index_var: idx
-
-- name: Mount the filesystems
-  include_tasks: mount_single.yml
-  loop: "{{ storage.partitions }}"
-  loop_control:
-    loop_var: item
-    index_var: idx
