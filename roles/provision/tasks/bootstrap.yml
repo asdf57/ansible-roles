@@ -88,13 +88,6 @@
 - name: Mount the non-general partitions
   include_tasks: mount_non_general_partitions.yml
 
-- name: Install fstab
-  ansible.builtin.copy:
-    src: /tmp/fstab.new
-    dest: /mnt/etc/fstab
-    remote_src: yes
-    mode: '0644'
-
 - name: Create symlink for timezone
   ansible.builtin.file:
     src: /usr/share/zoneinfo/America/New_York
