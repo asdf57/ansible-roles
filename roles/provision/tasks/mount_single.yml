@@ -10,6 +10,11 @@
 
 - name: EFI partition setup
   block:
+  - name: Create /mnt/boot directory first
+    ansible.builtin.file:
+      path: /mnt/boot
+      state: directory
+
   - name: Create mount point for EFI partition
     ansible.builtin.file:
       path: /mnt/boot/efi
