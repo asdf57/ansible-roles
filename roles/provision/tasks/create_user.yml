@@ -44,3 +44,44 @@
       retries: 50
       delay: 5
       delegate_to: localhost
+
+- name: Check if user SSH key already exists in Vault
+  community.hashi_vault.vault_kv2_get:
+    url: "https://vault.ryuugu.dev"
+    engine_mount_point: "kv2"
+    path: "servers/{{ inventory_hostname }}/ssh/{{ username }}/public"
+    validate_certs: true
+  register: ssh_key
+  delegate_to: localhost
+  failed_when: false
+
+- name: Create SSH keypair for the user
+  delegate_to: localhost
+  block:
+    - name: Create id25519 SSH key
+      community.crypto.openssh_keypair:
+        path: "{{ playbook_dir }}/{{ inventory_hostname }}_{{ username }}_ssh_key"
+        type: "ed25519"
+
+    - name: Upload the public SSH key to vault
+      community.hashi_vault.vault_write:
+        url: "https://vault.ryuugu.dev"
+        path: "kv2/data/servers/{{ inventory_hostname }}/ssh/{{ username }}/public"
+        data:
+          data:
+            key: "{{ lookup('file', playbook_dir + '/' + inventory_hostname + '_' + username + '_ssh_key.pub') }}"
+        validate_certs: true
+      retries: 5
+      delay: 5
+
+    - name: Upload the private SSH key to vault
+      community.hashi_vault.vault_write:
+        url: "https://vault.ryuugu.dev"
+        path: "kv2/data/servers/{{ inventory_hostname }}/ssh/{{ username }}/private"
+        data:
+          data:
+            key: "{{ lookup('file', playbook_dir + '/' + inventory_hostname + '_' + username + '_ssh_key') }}"
+        validate_certs: true
+      retries: 5
+      delay: 5
+  when: ssh_key.secret is not defined

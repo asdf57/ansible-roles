@@ -5,11 +5,11 @@
   delegate_facts: true
   run_once: true
 
-- name: Check if SSH key already exists in Vault
+- name: Check if root SSH key already exists in Vault
   community.hashi_vault.vault_kv2_get:
     url: "https://vault.ryuugu.dev"
     engine_mount_point: "kv2"
-    path: "servers/{{ inventory_hostname }}/ssh/public"
+    path: "servers/{{ inventory_hostname }}/ssh/root/public"
     validate_certs: true
   register: ssh_key
   delegate_to: localhost
@@ -17,7 +17,7 @@
   tags:
     - setup
 
-- name: Create the SSH keypair for the server
+- name: Create the root SSH keypair for the server
   delegate_to: localhost
   block:
     - name: Create id25519 SSH key for server
@@ -28,7 +28,7 @@
     - name: Upload the public SSH key to vault
       community.hashi_vault.vault_write:
         url: "https://vault.ryuugu.dev"
-        path: "kv2/data/servers/{{ inventory_hostname }}/ssh/public"
+        path: "kv2/data/servers/{{ inventory_hostname }}/ssh/root/public"
         data:
           data:
             key: "{{ lookup('file', playbook_dir + '/' + inventory_hostname + '_ssh_key.pub') }}"
@@ -39,7 +39,7 @@
     - name: Upload the private SSH key to vault
       community.hashi_vault.vault_write:
         url: "https://vault.ryuugu.dev"
-        path: "kv2/data/servers/{{ inventory_hostname }}/ssh/private"
+        path: "kv2/data/servers/{{ inventory_hostname }}/ssh/root/private"
         data:
           data:
             key: "{{ lookup('file', playbook_dir + '/' + inventory_hostname + '_ssh_key') }}"
