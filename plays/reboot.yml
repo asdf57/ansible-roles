@@ -1,0 +1,7 @@
+- name: Reboot
+  hosts: all
+  tasks:
+    - name: Perform the reboot
+      include_role:
+        name: provision
+        tasks_from: reboot

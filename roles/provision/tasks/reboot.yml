@@ -1,6 +1,7 @@
 ---
 - name: Prime the NIC
   include_tasks: prime_nic.yml
+  when: reboot_to_ipxe | default(false) | bool
 
 - name: Reboot to iPXE
   ansible.builtin.shell:
@@ -11,9 +12,6 @@
 
 - name: Reboot
   ansible.builtin.reboot:
-    reboot_timeout: 600
-    test_command: whoami
-  when: not reboot_to_ipxe | default(false) | bool
 
 - name: Wait for the server to come back after reboot
   ansible.builtin.wait_for_connection:
