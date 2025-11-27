@@ -84,4 +84,19 @@
         validate_certs: true
       retries: 5
       delay: 5
+
+    - name: Ensure user .ssh directory exists
+      ansible.builtin.file:
+        path: "/mnt/home/{{ username }}/.ssh"
+        state: directory
+        owner: "{{ username }}"
+        group: "{{ username }}"
+        mode: '0700'
+
+    - name: Install user public key
+      ansible.builtin.authorized_key:
+        user: "{{ username }}"
+        key: "{{ lookup('file', playbook_dir + '/' + inventory_hostname + '_' + username + '_ssh_key.pub') }}"
+        path: "/mnt/home/{{ username }}/.ssh/authorized_keys"
+        manage_dir: false
   when: ssh_key.secret is not defined
