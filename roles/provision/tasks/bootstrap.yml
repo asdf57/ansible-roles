@@ -150,26 +150,53 @@
     backup: yes
     create: true
 
-- name: Generate a root password
-  ansible.builtin.set_fact:
-    root_password: "{{ lookup('password', '/dev/null', chars=['ascii_letters', 'digits'], length=15) }}"
-  register: root_password_result
-
-- name: Extract the root password
-  ansible.builtin.set_fact:
-    root_password: "{{ root_password_result.ansible_facts.root_password }}"
-
-- name: Upload the root password to vault
-  community.hashi_vault.vault_kv2_write:
+- name: Get the root password from Vault
+  community.hashi_vault.vault_kv2_get:
     url: "https://vault.ryuugu.dev"
     engine_mount_point: "kv2"
     path: "servers/{{ inventory_hostname }}/users/root"
-    data:
-      password: "{{ root_password }}"
     validate_certs: true
-  retries: 50
-  delay: 5
+  register: root_password_vault
   delegate_to: localhost
+  failed_when: false
+
+- name: Create root password
+  when: root_password_vault.data is not defined or root_password_vault.data.password is not defined
+  block:
+    - name: Generate a root password
+      ansible.builtin.set_fact:
+        root_password: "{{ lookup('password', '/dev/null', chars=['ascii_letters', 'digits'], length=15) }}"
+      register: root_password_result
+
+    - name: Extract the root password
+      ansible.builtin.set_fact:
+        root_password: "{{ root_password_result.ansible_facts.root_password }}"
+
+    - name: Upload the root password to vault
+      community.hashi_vault.vault_kv2_write:
+        url: "https://vault.ryuugu.dev"
+        engine_mount_point: "kv2"
+        path: "servers/{{ inventory_hostname }}/users/root"
+        data:
+          password: "{{ root_password }}"
+        validate_certs: true
+      retries: 50
+      delay: 5
+      delegate_to: localhost
+
+- name: Get the root password from Vault
+  community.hashi_vault.vault_kv2_get:
+    url: "https://vault.ryuugu.dev"
+    engine_mount_point: "kv2"
+    path: "servers/{{ inventory_hostname }}/users/root"
+    validate_certs: true
+  register: root_password_vault
+  delegate_to: localhost
+  failed_when: false
+
+- name: Set the root password fact
+  ansible.builtin.set_fact:
+    root_password: "{{ root_password_vault.data.password }}"
 
 - name: Set the root password
   ansible.builtin.shell:

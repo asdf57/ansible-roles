@@ -57,6 +57,7 @@
 
 - name: Create SSH keypair for the user
   delegate_to: localhost
+  when: ssh_key.data is not defined or ssh_key.data.key is not defined
   block:
     - name: Create id25519 SSH key
       community.crypto.openssh_keypair:
@@ -99,4 +100,3 @@
         key: "{{ lookup('file', playbook_dir + '/' + inventory_hostname + '_' + username + '_ssh_key.pub') }}"
         path: "/mnt/home/{{ username }}/.ssh/authorized_keys"
         manage_dir: false
-  when: ssh_key.secret is not defined
