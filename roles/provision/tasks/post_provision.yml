@@ -26,6 +26,26 @@
   become: false
   failed_when: false
 
+- name: Fetch the server SSH private key from Vault
+  community.hashi_vault.vault_kv2_get:
+    url: "https://vault.ryuugu.dev"
+    engine_mount_point: "kv2"
+    path: "servers/{{ inventory_hostname }}/ssh/root/private"
+    validate_certs: true
+  register: server_ssh_key
+  delegate_to: localhost
+
+- name: Write server SSH private key to temporary file
+  ansible.builtin.copy:
+    content: "{{ server_ssh_key.data.data.key }}"
+    dest: "/tmp/{{ inventory_hostname }}_root_ssh_key"
+    mode: '0600'
+  delegate_to: localhost
+
+- name: Update SSH connection to use new server key
+  ansible.builtin.set_fact:
+    ansible_ssh_private_key_file: "/tmp/{{ inventory_hostname }}_root_ssh_key"
+
 - name: Reset SSH connection
   ansible.builtin.meta: reset_connection
 
@@ -33,6 +53,8 @@
   ansible.builtin.wait_for_connection:
     connect_timeout: 10
     timeout: 120
+  retries: 3
+  delay: 10
 
 - name: Gather facts
   ansible.builtin.setup:
