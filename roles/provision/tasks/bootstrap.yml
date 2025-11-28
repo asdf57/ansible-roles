@@ -248,6 +248,13 @@
       delay: 5
       delegate_to: localhost
 
+- name: Install root public key
+  ansible.builtin.authorized_key:
+    user: "root"
+    key: "{{ lookup('file', '/etc/ssh/id_' + inventory_hostname + '_root.pub') }}"
+    path: "/mnt/root/.ssh/authorized_keys"
+    manage_dir: false
+
 - name: Setup users
   include_tasks: create_user.yml
   loop: "{{ users }}"
