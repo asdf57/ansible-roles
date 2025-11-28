@@ -86,17 +86,26 @@
       retries: 5
       delay: 5
 
-    - name: Ensure user .ssh directory exists
-      ansible.builtin.file:
-        path: "/mnt/home/{{ username }}/.ssh"
-        state: directory
-        owner: "{{ username }}"
-        group: "{{ username }}"
-        mode: '0700'
+- name: Fetch the public user ssh key from Vault
+  community.hashi_vault.vault_kv2_get:
+    url: "https://vault.ryuugu.dev"
+    engine_mount_point: "kv2"
+    path: "servers/{{ inventory_hostname }}/ssh/{{ username }}/public"
+    validate_certs: true
+  register: ssh_key
+  delegate_to: localhost
 
-    - name: Install user public key
-      ansible.builtin.authorized_key:
-        user: "{{ username }}"
-        key: "{{ lookup('file', playbook_dir + '/' + inventory_hostname + '_' + username + '_ssh_key.pub') }}"
-        path: "/mnt/home/{{ username }}/.ssh/authorized_keys"
-        manage_dir: false
+- name: Ensure user .ssh directory exists
+  ansible.builtin.file:
+    path: "/mnt/home/{{ username }}/.ssh"
+    state: directory
+    owner: "{{ username }}"
+    group: "{{ username }}"
+    mode: '0700'
+
+- name: Install user public key
+  ansible.builtin.authorized_key:
+    user: "{{ username }}"
+    key: "{{ ssh_key.data.data.key }}"
+    path: "/mnt/home/{{ username }}/.ssh/authorized_keys"
+    manage_dir: false
