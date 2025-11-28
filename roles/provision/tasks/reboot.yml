@@ -13,3 +13,4 @@
 - name: Reboot
   ansible.builtin.reboot:
     reboot_timeout: 0
+  failed_when: false
