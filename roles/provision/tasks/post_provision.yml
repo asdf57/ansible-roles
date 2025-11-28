@@ -8,6 +8,9 @@
   delegate_to: localhost
   become: false
 
+- name: Reset SSH connection
+  ansible.builtin.meta: reset_connection
+
 - name: Wait for system to be fully ready
   ansible.builtin.wait_for_connection:
     connect_timeout: 10
