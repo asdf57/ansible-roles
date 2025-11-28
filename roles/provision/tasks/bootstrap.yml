@@ -470,6 +470,7 @@
   ansible.builtin.reboot:
     reboot_timeout: 0
   become: yes
+  failed_when: false
 
 - name: Reset SSH connection to use new credentials
   meta: reset_connection
