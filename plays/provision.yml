@@ -76,6 +76,13 @@
       become: false
       failed_when: false
 
+    - name: Reset ssh connection
+      ansible.builtin.meta: reset_connection
+
+    - name: Wait a moment for SSH to fully stabilize
+      ansible.builtin.pause:
+        seconds: 5
+
 
 - name: Post-provision setup
   hosts: all
