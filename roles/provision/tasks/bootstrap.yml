@@ -194,6 +194,10 @@
   delegate_to: localhost
   failed_when: false
 
+- name: Debug print
+  debug:
+    var: root_password_vault
+
 - name: Set the root password fact
   ansible.builtin.set_fact:
     root_password: "{{ root_password_vault.data.password }}"
