@@ -96,16 +96,21 @@
   delegate_to: localhost
 
 - name: Ensure user .ssh directory exists
-  ansible.builtin.file:
-    path: "/mnt/home/{{ username }}/.ssh"
-    state: directory
-    owner: "{{ username }}"
-    group: "{{ username }}"
-    mode: '0700'
+  ansible.builtin.shell:
+    cmd: |
+      {{ chroot_name }} /mnt mkdir -p /home/{{ username }}/.ssh
+      {{ chroot_name }} /mnt chown {{ username }}:{{ username }} /home/{{ username }}/.ssh
+      {{ chroot_name }} /mnt chmod 0700 /home/{{ username }}/.ssh
 
-- name: Install user public key
-  ansible.builtin.authorized_key:
-    user: "{{ username }}"
-    key: "{{ ssh_key.data.data.key }}"
-    path: "/mnt/home/{{ username }}/.ssh/authorized_keys"
-    manage_dir: false
+- name: Create authorized_keys file
+  ansible.builtin.copy:
+    content: "{{ ssh_key.data.data.key }}"
+    dest: "/mnt/home/{{ username }}/.ssh/authorized_keys"
+    mode: '0600'
+    owner: root
+    group: root
+
+- name: Set correct ownership on authorized_keys
+  ansible.builtin.shell:
+    cmd: |
+      {{ chroot_name }} /mnt chown {{ username }}:{{ username }} /home/{{ username }}/.ssh/authorized_keys
