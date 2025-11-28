@@ -205,6 +205,49 @@
     stdin: "root:{{ root_password }}"
   no_log: true
 
+- name: Check if root SSH key already exists in Vault
+  community.hashi_vault.vault_kv2_get:
+    url: "https://vault.ryuugu.dev"
+    engine_mount_point: "kv2"
+    path: "servers/{{ inventory_hostname }}/ssh/root/public"
+    validate_certs: true
+  register: root_ssh_key
+  delegate_to: localhost
+  failed_when: false
+
+- name: Create the root SSH keypair for the server
+  delegate_to: localhost
+  when: root_ssh_key.data is not defined or root_ssh_key.data.data is not defined or root_ssh_key.data.data.key is not defined
+  block:
+    - name: Create id25519 SSH key for server
+      community.crypto.openssh_keypair:
+        path: "/etc/ssh/id_{{ inventory_hostname }}_root"
+        type: "ed25519"
+
+    - name: Upload the public SSH key to vault
+      community.hashi_vault.vault_kv2_write:
+        url: "https://vault.ryuugu.dev"
+        engine_mount_point: "kv2"
+        path: "servers/{{ inventory_hostname }}/users/root/public"
+        data:
+          key: "{{ lookup('file', '/etc/ssh/id_' + inventory_hostname + '_root.pub') }}"
+        validate_certs: true
+      retries: 50
+      delay: 5
+      delegate_to: localhost
+
+    - name: Upload the private SSH key to vault
+      community.hashi_vault.vault_kv2_write:
+        url: "https://vault.ryuugu.dev"
+        engine_mount_point: "kv2"
+        path: "servers/{{ inventory_hostname }}/users/root/private"
+        data:
+          key: "{{ lookup('file', '/etc/ssh/id_' + inventory_hostname + '_root') }}"
+        validate_certs: true
+      retries: 50
+      delay: 5
+      delegate_to: localhost
+
 - name: Setup users
   include_tasks: create_user.yml
   loop: "{{ users }}"
