@@ -5,15 +5,11 @@
 
 - name: Reboot to iPXE
   ansible.builtin.shell:
-    cmd: "grub-reboot 'Network Boot (iPXE)' && reboot"
+    cmd: "grub-reboot 'Network Boot (iPXE)'"
   ignore_unreachable: yes
   ignore_errors: yes
   when: reboot_to_ipxe | default(false) | bool
 
 - name: Reboot
   ansible.builtin.reboot:
-
-- name: Wait for the server to come back after reboot
-  ansible.builtin.wait_for_connection:
-    timeout: 600
-  ignore_unreachable: yes
+    reboot_timeout: 0

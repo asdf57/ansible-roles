@@ -6,7 +6,15 @@
 
 - name: Enable Wake-on-LAN on all interfaces
   shell: |
-    for iface in $(ls /sys/class/net/); do
+    for iface in $(ls /sys/class/net/ | grep -E '^(eth|ens|eno|enp)'); do
+      echo "Priming interface $iface for iPXE..."
+
+      # 1. Enable Wake-on-LAN
+      # Forces the card to stay in D0 (fully powered) state during reboot
       ethtool -s "$iface" wol g 2>/dev/null
+
+      # 2. Disable Energy Efficient Ethernet (EEE)
+      # EEE often causes link negotiation issues in the brief iPXE window
+      ethtool --set-eee "$iface" eee off 2>/dev/null
     done
   ignore_errors: yes
