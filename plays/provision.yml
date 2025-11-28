@@ -44,9 +44,23 @@
         name: provision
         tasks_from: bootstrap
 
-- name: Post-provision setup
+- name: Await server
   hosts: all
   gather_facts: false
+  tasks:
+    - name: Wait for SSH port to be available
+      ansible.builtin.wait_for:
+        host: "{{ ansible_host | default(inventory_hostname) }}"
+        port: 22
+        delay: 30
+        timeout: 600
+        state: started
+      delegate_to: localhost
+      become: false
+
+- name: Post-provision setup
+  hosts: all
+  gather_facts: true
   tasks:
     - name: Post-provision setup
       include_role:

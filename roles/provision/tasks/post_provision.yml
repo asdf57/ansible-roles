@@ -1,17 +1,3 @@
-- name: Wait for SSH port to be available
-  ansible.builtin.wait_for:
-    host: "{{ ansible_host | default(inventory_hostname) }}"
-    port: 22
-    delay: 30
-    timeout: 600
-    state: started
-  delegate_to: localhost
-  become: false
-
-- name: Wait for SSH to stabilize
-  ansible.builtin.pause:
-    seconds: 15
-
 - name: Remove the stale local ssh known_hosts entry
   ansible.builtin.shell: ssh-keygen -R "{{ ansible_host | default(inventory_hostname) }}" && ssh-keygen -R "{{ inventory_hostname }}"
   delegate_to: localhost
@@ -19,58 +5,24 @@
   failed_when: false
 
 - name: Clear SSH control sockets
-  ansible.builtin.shell: rm -f ~/.ansible/cp/*{{ inventory_hostname }}* ~/.ssh/controlmasters/*{{ inventory_hostname }}*
+  ansible.builtin.shell: rm -f ~/.ansible/cp/*{{ inventory_hostname }}*
   delegate_to: localhost
   become: false
   failed_when: false
-
-- name: Fetch the server SSH private key from Vault
-  community.hashi_vault.vault_kv2_get:
-    url: "https://vault.ryuugu.dev"
-    engine_mount_point: "kv2"
-    path: "servers/{{ inventory_hostname }}/ssh/root/private"
-    validate_certs: true
-  register: server_ssh_key
-  delegate_to: localhost
-
-- name: Write server SSH private key to temporary file
-  ansible.builtin.copy:
-    content: "{{ server_ssh_key.data.data.key }}"
-    dest: "/tmp/{{ inventory_hostname }}_root_ssh_key"
-    mode: '0600'
-  delegate_to: localhost
 
 - name: Add new host key to known_hosts
   ansible.builtin.shell: ssh-keyscan -H "{{ ansible_host | default(inventory_hostname) }}" >> ~/.ssh/known_hosts
   delegate_to: localhost
   become: false
   failed_when: false
-  retries: 5
-  delay: 5
-  until: result.rc == 0
-  register: result
-
-- name: Update SSH connection parameters
-  ansible.builtin.set_fact:
-    ansible_ssh_private_key_file: "/tmp/{{ inventory_hostname }}_root_ssh_key"
-    ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o IdentitiesOnly=yes"
 
 - name: Reset SSH connection
   ansible.builtin.meta: reset_connection
 
-- name: Test SSH connectivity manually
-  ansible.builtin.shell: ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i /tmp/{{ inventory_hostname }}_root_ssh_key root@{{ ansible_host | default(inventory_hostname) }} "echo Connected"
-  delegate_to: localhost
-  become: false
-  register: manual_ssh_test
-  retries: 10
-  delay: 10
-  until: manual_ssh_test.rc == 0
-
 - name: Wait for system to be fully ready
   ansible.builtin.wait_for_connection:
     connect_timeout: 10
-    timeout: 60
+    timeout: 120
 
 - name: Gather facts
   ansible.builtin.setup:
