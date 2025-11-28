@@ -248,10 +248,19 @@
       delay: 5
       delegate_to: localhost
 
+- name: Fetch the public root ssh key from Vault
+  community.hashi_vault.vault_kv2_get:
+    url: "https://vault.ryuugu.dev"
+    engine_mount_point: "kv2"
+    path: "servers/{{ inventory_hostname }}/ssh/root/public"
+    validate_certs: true
+  register: root_ssh_key
+  delegate_to: localhost
+
 - name: Install root public key
   ansible.builtin.authorized_key:
     user: "root"
-    key: "{{ lookup('file', '/etc/ssh/id_' + inventory_hostname + '_root.pub') }}"
+    key: "{{ root_ssh_key.data.data.key }}"
     path: "/mnt/root/.ssh/authorized_keys"
     manage_dir: false
 
