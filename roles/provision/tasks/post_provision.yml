@@ -8,6 +8,11 @@
   delegate_to: localhost
   become: false
 
+- name: Remove the stale local ssh known_hosts entry
+  ansible.builtin.shell: ssh-keygen -R "{{ ansible_host | default(inventory_hostname) }}"
+  delegate_to: localhost
+  become: false
+
 - name: Reset SSH connection
   ansible.builtin.meta: reset_connection
 
