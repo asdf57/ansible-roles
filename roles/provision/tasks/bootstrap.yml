@@ -471,11 +471,3 @@
     reboot_timeout: 0
   become: yes
   failed_when: false
-
-- name: Reset SSH connection to use new credentials
-  meta: reset_connection
-
-- name: Wait for system to come back online
-  ansible.builtin.wait_for_connection:
-    timeout: 300
-    delay: 10

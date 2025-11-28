@@ -43,3 +43,12 @@
       include_role:
         name: provision
         tasks_from: bootstrap
+
+- name: Post-provision setup
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Post-provision setup
+      include_role:
+        name: provision
+        tasks_from: post_provision

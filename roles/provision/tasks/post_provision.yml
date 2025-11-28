@@ -1,0 +1,39 @@
+- name: Wait for SSH port to be available
+  ansible.builtin.wait_for:
+    host: "{{ ansible_host | default(inventory_hostname) }}"
+    port: 22
+    delay: 30
+    timeout: 600
+    state: started
+  delegate_to: localhost
+  become: false
+
+- name: Wait for system to be fully ready
+  ansible.builtin.wait_for_connection:
+    connect_timeout: 10
+    timeout: 120
+
+- name: Gather facts
+  ansible.builtin.setup:
+
+- name: Verify network connectivity
+  ansible.builtin.ping:
+
+- name: Install python
+  include_role:
+    name: python
+    tasks_from: install
+
+- name: Install specified packages (Arch)
+  community.general.pacman:
+    name: "{{ item }}"
+    state: present
+  loop: "{{ packages }}"
+  when: ansible_distribution == 'Archlinux'
+
+- name: Install specified packages (Debian)
+  ansible.builtin.apt:
+    name: "{{ item }}"
+    state: present
+  loop: "{{ packages }}"
+  when: ansible_distribution == 'Debian'
