@@ -161,7 +161,7 @@
   failed_when: false
 
 - name: Create root password
-  when: root_password_vault.data is not defined or root_password_vault.data.password is not defined
+  when: root_password_vault.data is not defined or root_password_vault.data.data is not defined or root_password_vault.data.data.password is not defined
   block:
     - name: Generate a root password
       ansible.builtin.set_fact:
@@ -200,7 +200,7 @@
 
 - name: Set the root password fact
   ansible.builtin.set_fact:
-    root_password: "{{ root_password_vault.data.password }}"
+    root_password: "{{ root_password_vault.data.data.password }}"
 
 - name: Set the root password
   ansible.builtin.shell:

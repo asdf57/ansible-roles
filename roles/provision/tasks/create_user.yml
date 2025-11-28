@@ -57,7 +57,7 @@
 
 - name: Create SSH keypair for the user
   delegate_to: localhost
-  when: ssh_key.data is not defined or ssh_key.data.key is not defined
+  when: ssh_key.data is not defined or ssh_key.data.data is not defined or ssh_key.data.data.key is not defined
   block:
     - name: Create id25519 SSH key
       community.crypto.openssh_keypair:
