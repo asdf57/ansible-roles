@@ -177,6 +177,7 @@
     state: present
     build: always
     check_files_existing: false
+    remove_orphans: yes
   register: docker_compose_result
   failed_when: docker_compose_result.failed
   ignore_errors: true
