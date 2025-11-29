@@ -24,7 +24,12 @@
   hosts: all
   gather_facts: true
   tasks:
+    - name: Set live environment fact
+      ansible.builtin.set_fact:
+        is_live_env: "{{ lookup('env', 'IS_LIVE_ENV') | default('1') == '0' }}"
+
     - name: Enter live environment
+      when: not is_live_env | bool
       include_role:
         name: provision
         tasks_from: reboot
