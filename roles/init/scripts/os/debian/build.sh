@@ -102,6 +102,12 @@ systemctl enable ssh
 EOF
 chmod +x config/hooks/normal/openssh-setup.hook.chroot
 
+echo ":: Setting system-wide environment variables"
+mkdir -p config/includes.chroot/etc
+cat << 'EOF' >> config/includes.chroot/etc/environment
+IS_LIVE_ENV=0
+EOF
+
 # Configure live-build and build the ISO
 echo ":: Configuring live-build and starting the build process"
 lb config -b "$type" --distribution "$distribution" --architecture "amd64"

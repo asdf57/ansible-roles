@@ -111,6 +111,11 @@ EOF
 echo "=> Making the start_sshd.sh login script executable"
 chmod +x configs/$profile/airootfs/etc/profile.d/start_sshd.sh
 
+echo ":: Setting system-wide environment variables"
+cat << 'EOF' >> configs/$profile/airootfs/etc/environment
+IS_LIVE_ENV=0
+EOF
+
 echo ":: Enabling the dhcpcd service in the live environment"
 ln -sf /usr/lib/systemd/system/dhcpcd.service \
     configs/$profile/airootfs/etc/systemd/system/multi-user.target.wants/dhcpcd.service

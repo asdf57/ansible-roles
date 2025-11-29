@@ -1,0 +1,8 @@
+- name: Build ISOs
+  hosts: localhost
+  tasks:
+    - name: Build boot files
+      import_role:
+        name: init
+        tasks_from: build_boot_files
+      become: true

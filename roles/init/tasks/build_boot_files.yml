@@ -13,7 +13,7 @@
 
 - name: Set fact if we need to build
   set_fact:
-    need_to_build: "{{ not check_dir.stat.exists or (check_dir.stat.exists and check_non_empty.stdout == '') }}"
+    need_to_build: "{{ not check_dir.stat.exists or (check_dir.stat.exists and check_non_empty.stdout == '') or (force_build is defined and force_build | bool) }}"
 
 - name: Add to what to build list
   set_fact:
