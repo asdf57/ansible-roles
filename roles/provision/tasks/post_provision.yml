@@ -1,16 +1,21 @@
 - name: Verify network connectivity
   ansible.builtin.ping:
 
-- name: Install specified packages (Arch)
-  community.general.pacman:
-    name: "{{ item }}"
-    state: present
-  loop: "{{ packages }}"
-  when: ansible_distribution == 'Archlinux'
+# - name: Install specified packages (Arch)
+#   community.general.pacman:
+#     name: "{{ item }}"
+#     state: present
+#   loop: "{{ packages }}"
+#   when: ansible_distribution == 'Archlinux'
 
-- name: Install specified packages (Debian)
-  ansible.builtin.apt:
-    name: "{{ item }}"
-    state: present
-  loop: "{{ packages }}"
-  when: ansible_distribution == 'Debian'
+# - name: Install specified packages (Debian)
+#   ansible.builtin.apt:
+#     name: "{{ item }}"
+#     state: present
+#   loop: "{{ packages }}"
+#   when: ansible_distribution == 'Debian'
+
+- name: Install KDE Plasma
+  include_role:
+    name: kde_plasma
+  when: install_kde_plasma | default(true) | bool
