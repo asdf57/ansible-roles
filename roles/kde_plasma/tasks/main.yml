@@ -24,3 +24,9 @@
     name: sddm
     enabled: yes
   when: install_sddm
+
+- name: Start SDDM service
+  ansible.builtin.systemd:
+    name: sddm
+    state: started
+  when: install_sddm
