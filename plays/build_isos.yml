@@ -2,7 +2,13 @@
   hosts: localhost
   tasks:
     - name: Build boot files
-      import_role:
+      include_role:
         name: init
         tasks_from: build_boot_files
       become: true
+      loop: "{{ ['arch', 'debian'] | product(['netboot', 'iso']) | list }}"
+      loop_control:
+        loop_var: build_item
+      vars:
+        os: "{{ build_item[0] }}"
+        type: "{{ build_item[1] }}"

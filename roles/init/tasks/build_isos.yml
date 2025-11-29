@@ -1,0 +1,32 @@
+- name: Initialize what to build tuple list
+  set_fact:
+    what_to_build: []
+
+- name: Get files in each build directory
+  include_tasks: build_boot_files.yml
+  with_nested:
+    - [arch, debian]
+    - [netboot, iso]
+
+- name: Here's what we need to build
+  debug:
+    var: what_to_build
+
+- name: Build ISOs in parallel
+  ansible.builtin.shell:
+    cmd: |
+      VAULT_TOKEN="{{ vault_root_password }}" ./os/build.sh -o "{{ host_data_path }}/nginx/files/{{ item[0] }}_{{ item[1] }}" -p "{{ provisioning_ssh_key_path }}" {{ item[0] }} -t {{ item[1] }}
+    chdir: "../../"
+  loop: "{{ what_to_build }}"
+  async: 600
+  poll: 0
+  register: iso_build_jobs
+
+- name: Wait for ISO builds to complete
+  ansible.builtin.async_status:
+    jid: "{{ item.ansible_job_id }}"
+  loop: "{{ iso_build_jobs.results }}"
+  register: job_result
+  until: job_result.finished 
+  retries: 500
+  delay: 10
