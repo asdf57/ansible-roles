@@ -1,24 +1,26 @@
 - name: Install Xorg packages
-  apt:
+  ansible.builtin.package:
     name: "{{ xorg_packages_by_distro[ansible_distribution] }}"
     state: present
     update_cache: yes
+  when: ansible_distribution in ['Archlinux', 'Debian']
 
 - name: Install KDE Plasma and applications
-  apt:
+  ansible.builtin.package:
     name: "{{ kde_packages_by_distro[ansible_distribution] }}"
     state: present
     update_cache: yes
+  when: ansible_distribution in ['Archlinux', 'Debian']
 
-- name: Install and enable SDDM
-  apt:
+- name: Install SDDM
+  ansible.builtin.package:
     name: sddm
     state: present
-  when: install_sddm
+    update_cache: yes
+  when: install_sddm and ansible_distribution in ['Archlinux', 'Debian']
 
 - name: Enable SDDM service
-  systemd:
+  ansible.builtin.systemd:
     name: sddm
     enabled: yes
-    state: started
   when: install_sddm
