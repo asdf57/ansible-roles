@@ -14,3 +14,5 @@
   ansible.builtin.reboot:
     reboot_timeout: 0
   failed_when: false
+  ignore_unreachable: yes
+  ignore_errors: yes
