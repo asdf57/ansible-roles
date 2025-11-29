@@ -5,3 +5,5 @@
       include_role:
         name: init
         tasks_from: build_isos
+      vars:
+        vault_root_password: "{{ lookup('env', 'VAULT_TOKEN') }}"
