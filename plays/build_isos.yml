@@ -4,11 +4,4 @@
     - name: Build boot files
       include_role:
         name: init
-        tasks_from: build_boot_files
-      become: true
-      loop: "{{ ['arch', 'debian'] | product(['netboot', 'iso']) | list }}"
-      loop_control:
-        loop_var: build_item
-      vars:
-        os: "{{ build_item[0] }}"
-        type: "{{ build_item[1] }}"
+        tasks_from: build_isos
