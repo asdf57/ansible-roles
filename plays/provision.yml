@@ -64,24 +64,24 @@
       become: false
       failed_when: false
 
-    - name: Clear SSH control sockets
-      ansible.builtin.shell: rm -f ~/.ansible/cp/*{{ inventory_hostname }}*
-      delegate_to: localhost
-      become: false
-      failed_when: false
+    # - name: Clear SSH control sockets
+    #   ansible.builtin.shell: rm -f ~/.ansible/cp/*{{ inventory_hostname }}*
+    #   delegate_to: localhost
+    #   become: false
+    #   failed_when: false
 
-    - name: Add new host key to known_hosts
-      ansible.builtin.shell: ssh-keyscan -H "{{ ansible_host | default(inventory_hostname) }}" >> ~/.ssh/known_hosts
-      delegate_to: localhost
-      become: false
-      failed_when: false
+    # - name: Add new host key to known_hosts
+    #   ansible.builtin.shell: ssh-keyscan -H "{{ ansible_host | default(inventory_hostname) }}" >> ~/.ssh/known_hosts
+    #   delegate_to: localhost
+    #   become: false
+    #   failed_when: false
 
     - name: Reset ssh connection
       ansible.builtin.meta: reset_connection
 
-    - name: Wait a moment for SSH to fully stabilize
-      ansible.builtin.pause:
-        seconds: 5
+    # - name: Wait a moment for SSH to fully stabilize
+    #   ansible.builtin.pause:
+    #     seconds: 5
 
 
 - name: Post-provision setup
