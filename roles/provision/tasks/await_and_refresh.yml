@@ -1,0 +1,18 @@
+- name: Wait for SSH port to be available
+  ansible.builtin.wait_for:
+    host: "{{ ansible_host | default(inventory_hostname) }}"
+    port: 22
+    delay: 30
+    timeout: 600
+    state: started
+  delegate_to: localhost
+  become: false
+
+- name: Remove the stale local ssh known_hosts entry
+  ansible.builtin.shell: ssh-keygen -R "{{ ansible_host | default(inventory_hostname) }}" && ssh-keygen -R "{{ inventory_hostname }}"
+  delegate_to: localhost
+  become: false
+  failed_when: false
+
+- name: Reset ssh connection
+  ansible.builtin.meta: reset_connection

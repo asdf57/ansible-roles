@@ -20,6 +20,22 @@
       tags:
         - setup
 
+- name: Pre-provision setup
+  hosts: all
+  gather_facts: true
+  tasks:
+    - name: Enter live environment
+      include_role:
+        name: provision
+        tasks_from: reboot
+      vars:
+        reboot_to_ipxe: true
+
+    - name: Await and refresh
+      include_role:
+        name: provision
+        tasks_from: await_and_refresh
+
 - name: Provision
   hosts: all
   tasks:
@@ -55,41 +71,10 @@
   hosts: all
   gather_facts: false
   tasks:
-    - name: Wait for SSH port to be available
-      ansible.builtin.wait_for:
-        host: "{{ ansible_host | default(inventory_hostname) }}"
-        port: 22
-        delay: 30
-        timeout: 600
-        state: started
-      delegate_to: localhost
-      become: false
-
-    - name: Remove the stale local ssh known_hosts entry
-      ansible.builtin.shell: ssh-keygen -R "{{ ansible_host | default(inventory_hostname) }}" && ssh-keygen -R "{{ inventory_hostname }}"
-      delegate_to: localhost
-      become: false
-      failed_when: false
-
-    # - name: Clear SSH control sockets
-    #   ansible.builtin.shell: rm -f ~/.ansible/cp/*{{ inventory_hostname }}*
-    #   delegate_to: localhost
-    #   become: false
-    #   failed_when: false
-
-    # - name: Add new host key to known_hosts
-    #   ansible.builtin.shell: ssh-keyscan -H "{{ ansible_host | default(inventory_hostname) }}" >> ~/.ssh/known_hosts
-    #   delegate_to: localhost
-    #   become: false
-    #   failed_when: false
-
-    - name: Reset ssh connection
-      ansible.builtin.meta: reset_connection
-
-    # - name: Wait a moment for SSH to fully stabilize
-    #   ansible.builtin.pause:
-    #     seconds: 5
-
+    - name: Await and refresh
+      include_role:
+        name: provision
+        tasks_from: await_and_refresh
 
 - name: Post-provision setup
   hosts: all
