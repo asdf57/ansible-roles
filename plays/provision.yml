@@ -39,13 +39,6 @@
 - name: Provision
   hosts: all
   tasks:
-    - name: Enter live environment
-      include_role:
-        name: provision
-        tasks_from: reboot
-      vars:
-        reboot_to_ipxe: true
-
     - name: Perform prereqs
       include_role:
         name: provision
