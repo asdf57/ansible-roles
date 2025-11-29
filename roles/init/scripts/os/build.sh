@@ -84,8 +84,8 @@ function build() {
 
   # Check if the public SSH key for Ansible is present
   if [[ ! -f "$prov_key.pub" ]]; then
-    echo "- Public SSH key for Ansible not found, will recreate!" >&2
-    ssh-keygen -t ed25519 -f "$prov_key" -N ""
+    echo "- Public SSH key for Ansible not found!!!" >&2
+    exit 1
   fi
 
   echo "=> SSH key at $prov_key found!"
