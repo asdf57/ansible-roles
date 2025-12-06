@@ -34,4 +34,5 @@ jobs:
               - |
                   shopt -s nullglob
                   commands_file=(/tmp/build/*/commands/commands)
-                  ssh {{ inventory_hostname }} 'bash -s' < "${commands_file[0]}"
+                  user=$(yq e '.user' "${commands_file[0]}")
+                  yq e '.commands' "${commands_file[0]}" | ssh "${user}@{{ inventory_hostname }}" 'bash -s'
