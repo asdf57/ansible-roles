@@ -14,13 +14,30 @@ jobs:
 {% for key, value in hostvars['localhost']['ansible_env'].items() %}
             {{ key }}: {{ value | to_json }}
 {% endfor %}
+          caches:
+            - path: /var/run/docker.sock
+          mounts:
+            - type: bind
+              source: /var/run/docker.sock
+              target: /var/run/docker.sock
           run:
             path: /bin/bash
-            user: keiichi
+            user: root
             dir: /homelab
             args:
               - -lc
               - |
                   shopt -s nullglob
-                  sudo mkdir -p /srv/homelab
-                  ansible-playbook -i inventory/inventory.yml ansible/plays/build_isos.yml
+                  
+                  # Ensure docker group exists and add user
+                  if ! getent group docker > /dev/null; then
+                    groupadd -g $(stat -c '%g' /var/run/docker.sock) docker
+                  fi
+                  usermod -aG docker keiichi || true
+                  
+                  # Run as keiichi with docker access
+                  sudo -u keiichi bash -lc "
+                    cd /homelab
+                    sudo mkdir -p /srv/homelab
+                    ansible-playbook -i inventory/inventory.yml ansible/plays/build_isos.yml
+                  "
