@@ -1,0 +1,26 @@
+jobs:
+  - name: build-isos
+    plan:
+      - task: build
+        privileged: true
+        config:
+          platform: linux
+          image_resource:
+            type: registry-image
+            source:
+              repository: registry.ryuugu.dev/prov
+              tag: latest
+          params:
+{% for key, value in hostvars['localhost']['ansible_env'].items() %}
+            {{ key }}: {{ value | to_json }}
+{% endfor %}
+          run:
+            path: /bin/bash
+            user: keiichi
+            dir: /homelab
+            args:
+              - -lc
+              - |
+                  shopt -s nullglob
+                  sudo mkdir -p /srv/homelab
+                  ansible-playbook -i inventory/inventory.yml ansible/plays/build_isos.yml

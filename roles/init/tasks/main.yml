@@ -354,6 +354,11 @@
     name: concourse
     tasks_from: create_commands_pipeline
 
+- name: Initialize ISO build pipeline
+  import_role:
+    name: concourse
+    tasks_from: create_iso_build_pipeline
+
 # - name: Check if nebula CA private key exists in Vault
 #   community.hashi_vault.vault_read:
 #     url: "https://vault.ryuugu.dev"

@@ -1,0 +1,21 @@
+- name: Log in to Concourse
+  import_tasks: fly_login.yml
+
+- name: Render the ISO build pipeline
+  template:
+    src: "{{ role_path }}/templates/pipelines/build_isos.yml.j2"
+    dest: "/tmp/build_isos_pipeline.yml"
+  delegate_to: localhost
+
+- name: Set pipeline
+  ansible.builtin.shell: |
+    fly -t {{ concourse_target }} set-pipeline \
+    -p "build-isos" \
+    --non-interactive \
+    -c "/tmp/build_isos_pipeline.yml"
+  delegate_to: localhost
+
+- name: Unpause the pipeline
+  ansible.builtin.shell: |
+    fly -t {{ concourse_target }} unpause-pipeline -p "build-isos"
+  delegate_to: localhost
