@@ -71,6 +71,7 @@ services:
       - "2222:2222"
     volumes:
       - concourse_keys:/concourse-keys
+      - /var/run/docker.sock:/var/run/docker.sock
     environment:
       CONCOURSE_SESSION_SIGNING_KEY: /concourse-keys/session_signing_key
       CONCOURSE_TSA_HOST_KEY: /concourse-keys/tsa_host_key
