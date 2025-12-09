@@ -16,3 +16,12 @@
   failed_when: false
   ignore_unreachable: yes
   ignore_errors: yes
+  when: not hard_reset | default(false) | bool
+
+- name: Hard reboot
+  raw: echo b > /proc/sysrq-trigger
+  failed_when: false
+  ignore_unreachable: yes
+  ignore_errors: yes
+  become: true
+  when: hard_reset | default(false) | bool
