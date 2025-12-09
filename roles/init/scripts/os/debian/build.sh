@@ -69,12 +69,24 @@ chmod 700 config/includes.chroot/root/.ssh
 # Add to the live environment packages
 echo "openssh-server" >> config/package-lists/ssh.list.chroot
 echo "python3" >> config/package-lists/python.list.chroot
+echo "python3-minimal" >> config/package-lists/python.list.chroot
 echo "systemd-timesyncd" >> config/package-lists/timesyncd.list.chroot
 echo "dosfstools" >> config/package-lists/dosfstools.list.chroot
 echo "parted" >> config/package-lists/parted.list.chroot
 echo "debootstrap" >> config/package-lists/debootstrap.list.chroot
 echo "arch-install-scripts" >> config/package-lists/arch-install-scripts.list.chroot
 echo "locales" >> config/package-lists/locales.list.chroot
+
+# Create a hook to ensure Python symlinks are correct
+echo ":: Creating hook to set up Python symlinks"
+cat << 'EOF' > config/hooks/normal/python-symlink.hook.chroot
+#!/usr/bin/env bash
+# Ensure /usr/bin/python3 points to the system Python
+update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.13 1
+update-alternatives --set python3 /usr/bin/python3.13
+ln -sf /usr/bin/python3 /usr/bin/python
+EOF
+chmod +x config/hooks/normal/python-symlink.hook.chroot
 
 # Configure SSH daemon settingshttps://news.ycombinator.com
 echo ":: Configuring SSH daemon in the live environment"
