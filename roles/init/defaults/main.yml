@@ -62,3 +62,9 @@ vault_url: "https://vault.ryuugu.dev"
 vault_acme_label: "vault.ryuugu.dev"
 
 registry_ipv4: "10.0.2.122"
+
+# Postgres settings
+postgres_user: "osadmin"
+postgres_password: "{{ lookup('env', 'POSTGRES_PASSWORD') }}"
+postgres_db: "osdb"
+postgres_ipv4: "10.0.2.121"

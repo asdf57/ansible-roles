@@ -214,6 +214,21 @@ services:
       retries: 5000
       start_period: 10s
 
+  postgres:
+    image: postgres:15
+    container_name: osdb
+    restart: always
+    environment:
+      POSTGRES_USER: "{{ postgres_user }}"
+      POSTGRES_PASSWORD: "{{ postgres_password }}"
+      POSTGRES_DB: "{{ postgres_db }}"
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - "{{ host_data_path }}/postgres/data:/var/lib/postgresql/data:rw"
+    networks:
+      clusternet:
+        ipv4_address: "{{ postgres_ipv4 }}"
+
 secrets:
   git_provisioning_key:
     file: "{{ host_git_ssh_key_path }}"
