@@ -117,14 +117,20 @@ chmod +x config/hooks/normal/openssh-setup.hook.chroot
 echo ":: Setting system-wide environment variables"
 
 # Set in PAM environment (most reliable for SSH sessions)
-mkdir -p config/includes.chroot/etc/security/pam_env.conf.d
-cat << 'EOF' > config/includes.chroot/etc/security/pam_env.conf.d/live-env.conf
-IS_LIVE_ENV DEFAULT=0
+mkdir -p config/includes.chroot/etc/environment.d
+cat << 'EOF' > config/includes.chroot/etc/environment.d/10-live-env.conf
+IS_LIVE_ENV=0
 EOF
 
 # Also add to /etc/environment as backup
 cat << 'EOF' >> config/includes.chroot/etc/environment
 IS_LIVE_ENV=0
+EOF
+
+# Configure PAM to read from /etc/environment
+mkdir -p config/includes.chroot/etc/pam.d
+cat << 'EOF' >> config/includes.chroot/etc/pam.d/sshd
+session required pam_env.so readenv=1 envfile=/etc/environment
 EOF
 
 # Add to /etc/profile.d for shell sessions
