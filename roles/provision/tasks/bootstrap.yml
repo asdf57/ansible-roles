@@ -107,9 +107,9 @@
     state: present
     create: true
 
-- name: Generate the locales
-  ansible.builtin.shell:
-    cmd: "{{ chroot_name }} /mnt locale-gen"
+# - name: Generate the locales
+#   ansible.builtin.shell:
+#     cmd: "{{ chroot_name }} /mnt locale-gen"
 
 - name: Create locale.conf
   ansible.builtin.lineinfile:
