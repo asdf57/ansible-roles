@@ -19,11 +19,12 @@
   when: not hard_reset | default(false) | bool
 
 - name: Hard reboot
-  ansible.builtin.shell: "echo 1 > /proc/sys/kernel/sysrq && nohup sh -c 'sleep 2 && echo b > /proc/sysrq-trigger' >/dev/null 2>&1 &"
-  async: 1
-  poll: 0
+  ansible.builtin.shell:
+    cmd: "echo 1 > /proc/sys/kernel/sysrq; echo b > /proc/sysrq-trigger"
   failed_when: false
   ignore_unreachable: yes
   ignore_errors: yes
   become: true
+  async: 1
+  poll: 0
   when: hard_reset | default(false) | bool
