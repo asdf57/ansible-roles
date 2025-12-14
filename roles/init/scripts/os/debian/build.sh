@@ -115,7 +115,14 @@ EOF
 chmod +x config/hooks/normal/openssh-setup.hook.chroot
 
 echo ":: Setting system-wide environment variables"
-mkdir -p config/includes.chroot/etc
+
+# Set in PAM environment (most reliable for SSH sessions)
+mkdir -p config/includes.chroot/etc/security/pam_env.conf.d
+cat << 'EOF' > config/includes.chroot/etc/security/pam_env.conf.d/live-env.conf
+IS_LIVE_ENV DEFAULT=0
+EOF
+
+# Also add to /etc/environment as backup
 cat << 'EOF' >> config/includes.chroot/etc/environment
 IS_LIVE_ENV=0
 EOF
