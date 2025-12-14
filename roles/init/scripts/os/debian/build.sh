@@ -114,39 +114,9 @@ systemctl enable ssh
 EOF
 chmod +x config/hooks/normal/openssh-setup.hook.chroot
 
-echo ":: Setting system-wide environment variables"
-
-# Set in PAM environment (most reliable for SSH sessions)
-mkdir -p config/includes.chroot/etc/environment.d
-cat << 'EOF' > config/includes.chroot/etc/environment.d/10-live-env.conf
-IS_LIVE_ENV=0
-EOF
-
-# Also add to /etc/environment as backup
-cat << 'EOF' >> config/includes.chroot/etc/environment
-IS_LIVE_ENV=0
-EOF
-
-# Configure PAM to read from /etc/environment
-mkdir -p config/includes.chroot/etc/pam.d
-cat << 'EOF' >> config/includes.chroot/etc/pam.d/sshd
-session required pam_env.so readenv=1 envfile=/etc/environment
-EOF
-
-# Add to /etc/profile.d for shell sessions
-mkdir -p config/includes.chroot/etc/profile.d
-cat << 'EOF' > config/includes.chroot/etc/profile.d/live-env.sh
-#!/bin/sh
-export IS_LIVE_ENV=0
-EOF
-chmod +x config/includes.chroot/etc/profile.d/live-env.sh
-
-# Also set it in systemd environment for services
-mkdir -p config/includes.chroot/etc/systemd/system.conf.d
-cat << 'EOF' > config/includes.chroot/etc/systemd/system.conf.d/live-env.conf
-[Manager]
-DefaultEnvironment="IS_LIVE_ENV=0"
-EOF
+echo ":: Setting the /var/lib/is_live_env file to indicate live environment"
+mkdir -p config/includes.chroot/var/lib
+touch config/includes.chroot/var/lib/is_live_env
 
 # Configure live-build and build the ISO
 echo ":: Configuring live-build and starting the build process"

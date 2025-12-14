@@ -24,13 +24,14 @@
   hosts: all
   gather_facts: true
   tasks:
-    - name: Print the IS_LIVE_ENV value
-      ansible.builtin.debug:
-        msg: "IS_LIVE_ENV={{ lookup('env', 'IS_LIVE_ENV') | default('N/A') }}"
+    - name: Check if /var/lib/is_live_env exists
+      ansible.builtin.stat:
+        path: /var/lib/is_live_env
+      register: is_live_env_file
 
     - name: Set live environment fact
       ansible.builtin.set_fact:
-        is_live_env: "{{ lookup('env', 'IS_LIVE_ENV') | default('1') == '0' }}"
+        is_live_env: "{{ is_live_env_file.stat.exists }}"
 
     - name: Enter live environment
       when: not is_live_env | bool
@@ -45,9 +46,14 @@
         name: provision
         tasks_from: await_and_refresh
 
+    - name: Check if /var/lib/is_live_env exists
+      ansible.builtin.stat:
+        path: /var/lib/is_live_env
+      register: is_live_env_file
+
     - name: Set live environment fact
       ansible.builtin.set_fact:
-        is_live_env: "{{ lookup('env', 'IS_LIVE_ENV') | default('1') == '0' }}"
+        is_live_env: "{{ is_live_env_file.stat.exists }}"
 
     - name: Fail if not in the live environment
       ansible.builtin.fail:
