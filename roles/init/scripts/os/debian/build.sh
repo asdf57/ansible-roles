@@ -120,6 +120,21 @@ cat << 'EOF' >> config/includes.chroot/etc/environment
 IS_LIVE_ENV=0
 EOF
 
+# Add to /etc/profile.d for shell sessions
+mkdir -p config/includes.chroot/etc/profile.d
+cat << 'EOF' > config/includes.chroot/etc/profile.d/live-env.sh
+#!/bin/sh
+export IS_LIVE_ENV=0
+EOF
+chmod +x config/includes.chroot/etc/profile.d/live-env.sh
+
+# Also set it in systemd environment for services
+mkdir -p config/includes.chroot/etc/systemd/system.conf.d
+cat << 'EOF' > config/includes.chroot/etc/systemd/system.conf.d/live-env.conf
+[Manager]
+DefaultEnvironment="IS_LIVE_ENV=0"
+EOF
+
 # Configure live-build and build the ISO
 echo ":: Configuring live-build and starting the build process"
 lb config -b "$type" --distribution "$distribution" --architecture "amd64"
