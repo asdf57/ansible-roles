@@ -88,6 +88,10 @@
 - name: Mount the non-general partitions
   include_tasks: mount_non_general_partitions.yml
 
+- name: Generate fstab entries
+  ansible.builtin.shell: |
+    genfstab -U /mnt >> /mnt/etc/fstab
+
 - name: Create symlink for timezone
   ansible.builtin.file:
     src: /usr/share/zoneinfo/America/New_York
