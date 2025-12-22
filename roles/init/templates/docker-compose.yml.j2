@@ -127,7 +127,7 @@ services:
         ipv4_address: "{{ server_api_ipv4 }}"
     environment:
       CONCOURSE_URL: "https://ci.ryuugu.dev"
-      CONCOURSE_USERNAME: "{{ concourse_user }}"
+      CONCOURSE_USER: "{{ concourse_user }}"
       CONCOURSE_PASSWORD: "{{ concourse_password }}"
       CONCOURSE_TEAM: "{{ concourse_team }}"
       CONCOURSE_COMMANDS_PIPELINE: "{{ concourse_commands_pipeline }}"
