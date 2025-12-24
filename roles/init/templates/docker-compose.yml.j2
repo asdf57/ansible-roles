@@ -119,6 +119,7 @@ services:
     build: ./provisioning-api
     ports:
       - "3000:3000"
+      - "8000:8000"
     secrets:
       - git_provisioning_key
     restart: always
