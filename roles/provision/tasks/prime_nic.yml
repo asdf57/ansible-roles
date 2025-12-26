@@ -3,6 +3,7 @@
   ansible.builtin.package:
     name: "ethtool"
     state: present
+    update_cache: true
 
 - name: Enable Wake-on-LAN on all interfaces
   shell: |
