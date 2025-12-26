@@ -3,6 +3,7 @@
   ansible.builtin.package:
     name: "{{ item }}"
     state: present
+    update_cache: yes
   loop: "{{ required_packages }}"
 
 - name: Enable Wake-on-LAN on all interfaces
