@@ -1,9 +1,13 @@
 ---
+- name: Update pacman database
+  community.general.pacman:
+    update_cache: yes
+  when: ansible_distribution == 'Archlinux'
+
 - name: Install required packages
   ansible.builtin.package:
     name: "{{ item }}"
     state: present
-    update_cache: yes
   loop: "{{ required_packages }}"
 
 - name: Enable Wake-on-LAN on all interfaces
