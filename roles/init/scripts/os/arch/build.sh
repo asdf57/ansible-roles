@@ -111,55 +111,17 @@ EOF
 echo "=> Making the start_sshd.sh login script executable"
 chmod +x configs/$profile/airootfs/etc/profile.d/start_sshd.sh
 
-echo ":: Setting system-wide environment variables"
-cat << 'EOF' >> configs/$profile/airootfs/etc/environment
-IS_LIVE_ENV=0
+echo ":: Set /var/lib/is_live_env file to indicate live environment"
+cat << 'EOF' > configs/$profile/airootfs/etc/profile.d/set_live_env.sh
+#!/bin/bash
+touch /var/lib/is_live_env
 EOF
+chmod +x configs/$profile/airootfs/etc/profile.d/set_live_env.sh
 
 echo ":: Enabling the dhcpcd service in the live environment"
 ln -sf /usr/lib/systemd/system/dhcpcd.service \
     configs/$profile/airootfs/etc/systemd/system/multi-user.target.wants/dhcpcd.service
 
-echo ":: Creating custom retry_ipconfig hook"
-mkdir -p configs/$profile/airootfs/usr/lib/initcpio/{hooks,install}
-
-cat << 'EOF' > configs/$profile/airootfs/usr/lib/initcpio/hooks/retry_ipconfig
-#!/bin/bash
-
-build() {
-  add_runscript
-}
-
-help() {
-    cat <<HELPEOF
-Retries ipconfig if DHCP failed
-HELPEOF
-}
-EOF
-
-cat << 'EOF' > configs/$profile/airootfs/usr/lib/initcpio/hooks/retry_ipconfig
-#!/usr/bin/ash
-
-run_hook() {
-    if [ -n "${ip}" ] && [ -n "${archiso_http_srv}" ]; then
-        # Check if we have an IP address
-        if ! ip addr show | grep -q "inet "; then
-            msg ":: No IP detected, retrying ipconfig..."
-
-            for i in 1 2 3; do
-                sleep 2
-                ipconfig -t 30 ${ip}
-
-                if ip addr show | grep -q "inet "; then
-                    msg ":: Got IP on retry attempt $i"
-                    [ -e /tmp/net-*.conf ] && . /tmp/net-*.conf
-                    break
-                fi
-            done
-        fi
-    fi
-}
-EOF
 
 # Build the Arch ISO
 echo ":: Building the Arch Linux ISO"
