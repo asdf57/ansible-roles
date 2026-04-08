@@ -1,11 +1,13 @@
 #!/bin/sh
 
+set -eu
+
 if [ ! -f /acme.sh/account.conf ]; then
   echo "Initializing acme.sh"
 
   acme.sh --upgrade
 
-  if [[ "${ACME_SERVER}" == "zerossl" ]]; then
+  if [ "${ACME_SERVER}" = "zerossl" ]; then
     echo "Registering account with zerossl"
       acme.sh --register-account --server zerossl \
         --eab-kid  "${ZEROSSL_EAB_KID}" \
@@ -20,12 +22,12 @@ if [ ! -f /acme.sh/account.conf ]; then
   acme.sh --issue --dns "${DNS_API}" -d "${ACME_DOMAIN}" -d "*.${ACME_DOMAIN}" --server "${ACME_SERVER}"
 fi
 
-mkdir -p /certs/ryuugu.dev
+mkdir -p "/certs/${ACME_DOMAIN}"
 acme.sh --install-cert -d "${ACME_DOMAIN}" \
-  --key-file       /certs/ryuugu.dev/key.pem \
-  --fullchain-file /certs/ryuugu.dev/full.pem \
-  --cert-file      /certs/ryuugu.dev/cert.pem \
-  --ca-file        /certs/ryuugu.dev/ca.pem
+  --key-file       "/certs/${ACME_DOMAIN}/key.pem" \
+  --fullchain-file "/certs/${ACME_DOMAIN}/full.pem" \
+  --cert-file      "/certs/${ACME_DOMAIN}/cert.pem" \
+  --ca-file        "/certs/${ACME_DOMAIN}/ca.pem"
 
 # Deploy to nginx
 echo "Deploying cert to nginx"
@@ -45,4 +47,4 @@ acme.sh --list
 
 touch /done
 
-crond -n -s -m off
+exec crond -f -d 8
