@@ -1,6 +1,25 @@
 ---
 # provisioning API, nginx reverse proxy, create cert, ipxe
 
+- name: Ensure the groupvars template exists
+  ansible.builtin.stat:
+    path: "/homelab/templates/groupvars.yml"
+  register: groupvars_template
+
+- name: Fail when the groupvars template is missing
+  ansible.builtin.fail:
+    msg: "Expected groupvars template at /homelab/templates/groupvars.yml."
+  when: not groupvars_template.stat.exists
+
+- name: Render the groupvars template
+  ansible.builtin.set_fact:
+    rendered_groupvars: "{{ lookup('template', '/homelab/templates/groupvars.yml') }}"
+
+- name: Load rendered groupvars into init variables
+  ansible.builtin.set_fact:
+    "{{ item.key }}": "{{ item.value }}"
+  loop: "{{ (rendered_groupvars | from_yaml) | dict2items }}"
+
 - name: Template the docker-compose file
   template:
     src: docker-compose.yml.j2
@@ -12,6 +31,80 @@
     dest: "{{ mounted_data_path }}/provisioning-api"
     version: "{{ provisioning_api_version }}"
     force: yes
+
+- name: Clone the webhook repo
+  git:
+    repo: "{{ webhook_repo }}"
+    dest: "{{ mounted_data_path }}/webhook"
+    version: "{{ webhook_version }}"
+    force: yes
+
+- name: Publish rendered group vars
+  block:
+    - name: Ensure the groupvars repo is configured
+      ansible.builtin.assert:
+        that:
+          - groupvars_repo | length > 0
+        fail_msg: "GIT_GROUPVARS_REPO must be set so init can publish rendered group vars."
+
+    - name: Ensure the local inventory group_vars directory exists
+      ansible.builtin.file:
+        path: "/homelab/inventory/group_vars"
+        state: directory
+
+    - name: Write rendered group vars into the local inventory
+      ansible.builtin.copy:
+        content: "{{ rendered_groupvars }}"
+        dest: "/homelab/inventory/group_vars/all.yml"
+        mode: "0644"
+
+    - name: Create a temporary checkout for the groupvars repo
+      ansible.builtin.tempfile:
+        state: directory
+        suffix: groupvars
+      register: groupvars_repo_checkout
+
+    - name: Clone the groupvars repo
+      ansible.builtin.git:
+        repo: "{{ groupvars_repo }}"
+        dest: "{{ groupvars_repo_checkout.path }}"
+        version: "{{ groupvars_version }}"
+        force: true
+        accept_hostkey: true
+
+    - name: Write rendered group vars into the repo checkout
+      ansible.builtin.copy:
+        content: "{{ rendered_groupvars }}"
+        dest: "{{ groupvars_repo_checkout.path }}/all.yml"
+        mode: "0644"
+
+    - name: Check whether the groupvars repo changed
+      ansible.builtin.command:
+        cmd: git status --porcelain
+      args:
+        chdir: "{{ groupvars_repo_checkout.path }}"
+      register: groupvars_repo_status
+      changed_when: false
+
+    - name: Commit and push rendered group vars
+      ansible.builtin.shell: |
+        git config user.name "{{ groupvars_git_user_name }}"
+        git config user.email "{{ groupvars_git_user_email }}"
+        git add all.yml
+        git commit -m "Update homelab group vars"
+        git push origin HEAD:{{ groupvars_version }}
+      args:
+        chdir: "{{ groupvars_repo_checkout.path }}"
+      when: groupvars_repo_status.stdout != ""
+
+  always:
+    - name: Remove the temporary groupvars checkout
+      ansible.builtin.file:
+        path: "{{ groupvars_repo_checkout.path }}"
+        state: absent
+      when:
+        - groupvars_repo_checkout is defined
+        - groupvars_repo_checkout.path is defined
 
 - name: Create acme directory
   file:
@@ -164,6 +257,13 @@
     url: https://boot.ipxe.org/ipxe.iso
     dest: "{{ mounted_data_path }}/nginx/files/ipxe.iso"
 
+- name: Load kernel modules required for Concourse worker networking
+  become: true
+  ansible.builtin.command:
+    cmd: "modprobe {{ item }}"
+  loop: "{{ concourse_worker_kernel_modules }}"
+  changed_when: false
+
 - name: Delete the ipvlan network
   community.docker.docker_network:
     name: ipvlan
@@ -233,13 +333,13 @@
 
 - name: Upload the vault root token to vault
   community.hashi_vault.vault_kv2_write:
-    url: "https://vault.ryuugu.dev"
+    url: "{{ vault_bootstrap_url }}"
     engine_mount_point: "kv2"
     path: "vault/root_token"
     data:
       key: "{{ vault_root_password }}"
     token: "{{ vault_root_password }}"
-    validate_certs: true
+    validate_certs: false
   retries: 50
   delay: 5
 
@@ -275,61 +375,61 @@
 
 - name: Upload the git public SSH key to vault
   community.hashi_vault.vault_kv2_write:
-    url: "https://vault.ryuugu.dev"
+    url: "{{ vault_bootstrap_url }}"
     engine_mount_point: "kv2"
     path: "github/ssh/public"
     data:
       key: "{{ git_ssh_public_key.stdout }}"
     token: "{{ vault_root_password }}"
-    validate_certs: true
+    validate_certs: false
   retries: 50
   delay: 5
 
 - name: Upload the git private SSH key to vault
   community.hashi_vault.vault_kv2_write:
-    url: "https://vault.ryuugu.dev"
+    url: "{{ vault_bootstrap_url }}"
     engine_mount_point: "kv2"
     path: "github/ssh/private"
     data:
       key: "{{ git_prov_key }}"
     token: "{{ vault_root_password }}"
-    validate_certs: true
+    validate_certs: false
   retries: 50
   delay: 5
 
 - name: Upload the git private SSH key to vault
   community.hashi_vault.vault_kv2_write:
-    url: "https://vault.ryuugu.dev"
+    url: "{{ vault_bootstrap_url }}"
     engine_mount_point: "kv2"
     path: "github/ssh/private"
     data:
       key: "{{ git_prov_key }}"
     token: "{{ vault_root_password }}"
-    validate_certs: true
+    validate_certs: false
   retries: 50
   delay: 5
 
 - name: Upload the provisioning private SSH key vault
   community.hashi_vault.vault_kv2_write:
-    url: "https://vault.ryuugu.dev"
+    url: "{{ vault_bootstrap_url }}"
     engine_mount_point: "kv2"
     path: "provisioning/ssh/private"
     data:
       key: "{{ prov_key }}"
     token: "{{ vault_root_password }}"
-    validate_certs: true
+    validate_certs: false
   retries: 50
   delay: 5
 
 - name: Upload the root vault token to vault
   community.hashi_vault.vault_kv2_write:
-    url: "https://vault.ryuugu.dev"
+    url: "{{ vault_bootstrap_url }}"
     engine_mount_point: "concourse"
     path: "main/root_token"
     data:
       key: "{{ vault_root_password }}"
     token: "{{ vault_root_password }}"
-    validate_certs: true
+    validate_certs: false
   retries: 50
   delay: 5
 

@@ -7,6 +7,17 @@ volumes:
     driver: local
 
 services:
+  webhook:
+    build: ./webhook
+    ports:
+      - "3001:3001"
+    secrets:
+      - droplet_ssh_key
+    restart: always
+    networks:
+      clusternet:
+        ipv4_address: "{{ webhook_ipv4 }}"
+
   registry:
     image: registry
     container_name: registry
@@ -80,7 +91,7 @@ services:
       CONCOURSE_POSTGRES_PASSWORD: concourse_pass
       CONCOURSE_POSTGRES_DATABASE: concourse
       CONCOURSE_EXTERNAL_URL: "{{ concourse_url }}"
-      CONCOURSE_ADD_LOCAL_USER: test:test
+      CONCOURSE_ADD_LOCAL_USER: "{{ concourse_user }}:{{ concourse_password }}"
       CONCOURSE_MAIN_TEAM_LOCAL_USER: "{{ concourse_user }}"
       CONCOURSE_CLUSTER_NAME: homelab
     restart: always
@@ -127,7 +138,7 @@ services:
       clusternet:
         ipv4_address: "{{ server_api_ipv4 }}"
     environment:
-      CONCOURSE_URL: "https://ci.ryuugu.dev"
+      CONCOURSE_URL: "{{ concourse_url }}"
       CONCOURSE_USER: "{{ concourse_user }}"
       CONCOURSE_PASSWORD: "{{ concourse_password }}"
       CONCOURSE_TEAM: "{{ concourse_team }}"
@@ -233,6 +244,8 @@ services:
 secrets:
   git_provisioning_key:
     file: "{{ host_git_ssh_key_path }}"
+  droplet_ssh_key:
+    file: "{{ droplet_ssh_key_path }}"
 
 networks:
   clusternet:
