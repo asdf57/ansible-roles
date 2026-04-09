@@ -433,15 +433,11 @@
         name: "{{ primary_router_name }}"
       spec:
         name: "{{ primary_router_name }}"
-        model: bootstrap-router
-        serialNumber: "bootstrap-{{ primary_router_name }}"
-        softwareId: bootstrap
-        routerOsVersion: bootstrap
-        role: primary
-        managementIP: dry-run
-        apiPort: 8729
-        apiUsername: bootstrap
-        apiPassword: bootstrap
+        role: "{{ primary_router_role }}"
+        managementIP: "{{ primary_router_management_ip }}"
+        apiPort: "{{ primary_router_api_port }}"
+        apiUsername: "{{ primary_router_api_username }}"
+        apiPassword: "{{ primary_router_api_password }}"
 
 - name: Check whether the bootstrap router already exists
   ansible.builtin.uri:
@@ -460,6 +456,16 @@
     status_code: 200
     body: "{{ bootstrap_router }}"
   when: bootstrap_router_check.status == 404
+
+- name: Update the bootstrap router when it already exists
+  ansible.builtin.uri:
+    url: "{{ prov_controller_api_url }}/routers/{{ primary_router_name }}"
+    method: PATCH
+    body_format: json
+    status_code: 200
+    body:
+      spec: "{{ bootstrap_router.spec }}"
+  when: bootstrap_router_check.status == 200
 
 - name: Define desired DNS records for bootstrap services
   ansible.builtin.set_fact:
