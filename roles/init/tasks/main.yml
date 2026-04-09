@@ -32,6 +32,13 @@
     version: "{{ provisioning_api_version }}"
     force: yes
 
+- name: Clone the provisioning controller repo
+  git:
+    repo: "{{ prov_controller_repo }}"
+    dest: "{{ mounted_data_path }}/prov-controller"
+    version: "{{ prov_controller_version }}"
+    force: yes
+
 - name: Clone the webhook repo
   git:
     repo: "{{ webhook_repo }}"
@@ -406,6 +413,145 @@
   no_log: true
   retries: 50
   delay: 5
+
+- name: Wait for the provisioning controller API to become reachable
+  ansible.builtin.uri:
+    url: "{{ prov_controller_api_url }}/routers/"
+    method: GET
+    status_code: 200
+  register: prov_controller_api
+  retries: 30
+  delay: 3
+  until: prov_controller_api is succeeded
+
+- name: Define the bootstrap router resource
+  ansible.builtin.set_fact:
+    bootstrap_router:
+      apiVersion: homelab.io/v1
+      kind: Router
+      metadata:
+        name: "{{ primary_router_name }}"
+      spec:
+        name: "{{ primary_router_name }}"
+        model: bootstrap-router
+        serialNumber: "bootstrap-{{ primary_router_name }}"
+        softwareId: bootstrap
+        routerOsVersion: bootstrap
+        role: primary
+        managementIP: dry-run
+        apiPort: 8729
+        apiUsername: bootstrap
+        apiPassword: bootstrap
+
+- name: Check whether the bootstrap router already exists
+  ansible.builtin.uri:
+    url: "{{ prov_controller_api_url }}/routers/{{ primary_router_name }}"
+    method: GET
+    status_code:
+      - 200
+      - 404
+  register: bootstrap_router_check
+
+- name: Create the bootstrap router when it is missing
+  ansible.builtin.uri:
+    url: "{{ prov_controller_api_url }}/routers/"
+    method: POST
+    body_format: json
+    status_code: 200
+    body: "{{ bootstrap_router }}"
+  when: bootstrap_router_check.status == 404
+
+- name: Define desired DNS records for bootstrap services
+  ansible.builtin.set_fact:
+    bootstrap_dns_records:
+      - name: nginx-public
+        fqdn: "{{ nginx_acme_label }}"
+        address: "{{ nginx_ipv4 }}"
+        comment: "homelab nginx"
+      - name: server-api-public
+        fqdn: "{{ server_api_fqdn }}"
+        address: "{{ nginx_ipv4 }}"
+        comment: "homelab server api via nginx"
+      - name: mgmt-public
+        fqdn: "{{ mgmt_fqdn }}"
+        address: "{{ nginx_ipv4 }}"
+        comment: "homelab mgmt via nginx"
+      - name: vault-public
+        fqdn: "{{ vault_acme_label }}"
+        address: "{{ nginx_ipv4 }}"
+        comment: "homelab vault via nginx"
+      - name: vault-api-public
+        fqdn: "{{ vault_api_fqdn }}"
+        address: "{{ nginx_ipv4 }}"
+        comment: "homelab vault api via nginx"
+      - name: ci-public
+        fqdn: "{{ concourse_fqdn }}"
+        address: "{{ nginx_ipv4 }}"
+        comment: "homelab concourse via nginx"
+      - name: registry-public
+        fqdn: "{{ registry_fqdn }}"
+        address: "{{ nginx_ipv4 }}"
+        comment: "homelab registry via nginx"
+      - name: provisioning-controller-public
+        fqdn: "{{ prov_controller_fqdn }}"
+        address: "{{ nginx_ipv4 }}"
+        comment: "homelab provisioning controller via nginx"
+
+- name: Check existing DNS records in the provisioning controller
+  ansible.builtin.uri:
+    url: "{{ prov_controller_api_url }}/dnsrecords/{{ item.name }}"
+    method: GET
+    status_code:
+      - 200
+      - 404
+  loop: "{{ bootstrap_dns_records }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: bootstrap_dns_record_checks
+
+- name: Create missing DNS records in the provisioning controller
+  ansible.builtin.uri:
+    url: "{{ prov_controller_api_url }}/dnsrecords/"
+    method: POST
+    body_format: json
+    status_code: 200
+    body:
+      apiVersion: homelab.io/v1
+      kind: DNSRecord
+      metadata:
+        name: "{{ item.item.name }}"
+      spec:
+        providerRef:
+          kind: Router
+          name: "{{ primary_router_name }}"
+        fqdn: "{{ item.item.fqdn }}"
+        address: "{{ item.item.address }}"
+        ttl: 300
+        comment: "{{ item.item.comment }}"
+  loop: "{{ bootstrap_dns_record_checks.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  when: item.status == 404
+
+- name: Update existing DNS records in the provisioning controller
+  ansible.builtin.uri:
+    url: "{{ prov_controller_api_url }}/dnsrecords/{{ item.item.name }}"
+    method: PATCH
+    body_format: json
+    status_code: 200
+    body:
+      spec:
+        providerRef:
+          kind: Router
+          name: "{{ primary_router_name }}"
+        fqdn: "{{ item.item.fqdn }}"
+        address: "{{ item.item.address }}"
+        ttl: 300
+        comment: "{{ item.item.comment }}"
+  loop: "{{ bootstrap_dns_record_checks.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  when: item.status == 200
 
 - name: Build ISOs
   include_tasks: build_isos.yml
