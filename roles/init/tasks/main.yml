@@ -120,7 +120,7 @@
   copy:
     src: acme/entrypoint.sh
     dest: "{{ mounted_data_path }}/acme/entrypoint.sh"
-    mode: '0755'
+    mode: "0755"
 
 - name: Create concourse directory
   file:
@@ -136,7 +136,7 @@
   copy:
     src: concourse/entrypoint.sh
     dest: "{{ mounted_data_path }}/concourse/entrypoint.sh"
-    mode: '0755'
+    mode: "0755"
 
 - name: Create dnsmasq directory
   file:
@@ -167,7 +167,7 @@
   copy:
     src: nginx/entrypoint.sh
     dest: "{{ mounted_data_path }}/nginx/entrypoint.sh"
-    mode: '0755'
+    mode: "0755"
 
 - name: Create the files directory
   ansible.builtin.file:
@@ -218,7 +218,7 @@
   copy:
     src: vault/entrypoint.sh
     dest: "{{ mounted_data_path }}/vault/entrypoint.sh"
-    mode: '0755'
+    mode: "0755"
 
 - name: Copy vault.hcl config
   copy:
@@ -340,7 +340,7 @@
       key: "{{ vault_root_password }}"
     token: "{{ vault_root_password }}"
     validate_certs: false
-  retries: 50
+  retries: 1
   delay: 5
 
 # - name: Create git id25519 SSH key
@@ -458,7 +458,6 @@
   import_role:
     name: concourse
     tasks_from: create_iso_build_pipeline
-
 # - name: Check if nebula CA private key exists in Vault
 #   community.hashi_vault.vault_read:
 #     url: "https://vault.ryuugu.dev"
@@ -506,9 +505,7 @@
 #         - ca.crt
 #   when: nebula_ca_check is failed or nebula_ca_check.data is not defined
 
-
 # - name: Build Droplet lighthouse cert
-  
 
 # - name: Build the hss image
 #   ansible.builtin.shell:
