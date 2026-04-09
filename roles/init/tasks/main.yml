@@ -323,6 +323,23 @@
     state: present
     timeout: 120
 
+- name: Wait for the Vault API to become reachable
+  ansible.builtin.uri:
+    url: "{{ vault_bootstrap_url }}/v1/sys/health"
+    method: GET
+    status_code:
+      - 200
+      - 429
+      - 472
+      - 473
+      - 501
+      - 503
+    validate_certs: false
+  register: vault_health
+  retries: 60
+  delay: 2
+  until: vault_health is succeeded
+
 - name: Set the vault root password
   ansible.builtin.set_fact:
     vault_root_password: "{{ lookup('file', mounted_data_path + '/vault/vault_stuff/stuff/root_token') | trim }}"
@@ -340,7 +357,7 @@
       key: "{{ vault_root_password }}"
     token: "{{ vault_root_password }}"
     validate_certs: false
-  retries: 1
+  retries: 10
   delay: 5
 
 # - name: Create git id25519 SSH key
