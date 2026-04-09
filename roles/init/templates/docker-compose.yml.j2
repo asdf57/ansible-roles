@@ -5,6 +5,10 @@ volumes:
     driver: local
   concourse_keys:
     driver: local
+  prov_controller_inventory_repo:
+    driver: local
+  prov_controller_hostvars_repo:
+    driver: local
 
 services:
   webhook:
@@ -146,6 +150,63 @@ services:
       CONCOURSE_COMMANDS_RESOURCE: "{{ concourse_commands_resource }}"
       CONCOURSE_OAUTH_CLIENT_ID: "{{ concourse_oauth_client_id }}"
       CONCOURSE_OAUTH_CLIENT_SECRET: "{{ concourse_oauth_client_secret }}"
+
+  prov-controller-redis:
+    image: redis:7-alpine
+    container_name: prov-controller-redis
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+      - --save
+      - "60 1000"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: always
+    networks:
+      - clusternet
+
+  prov-controller:
+    build: ./prov-controller
+    container_name: prov-controller
+    depends_on:
+      prov-controller-redis:
+        condition: service_healthy
+    secrets:
+      - git_provisioning_key
+    restart: always
+    environment:
+      REDIS_URL: redis://prov-controller-redis:6379
+      REDIS_ENFORCE_PERSISTENCE: "true"
+      INVENTORY_REPO_DIR: /repos/homelab-inventory
+      HOSTVARS_REPO_DIR: /repos/homelab-hostvars
+      INVENTORY_REPO_URL: "{{ inventory_repo }}"
+      HOSTVARS_REPO_URL: "{{ hostvars_repo }}"
+      INVENTORY_REPO_BRANCH: "{{ inventory_version }}"
+      HOSTVARS_REPO_BRANCH: "{{ hostvars_version }}"
+      GIT_AUTO_CLONE: "true"
+      GIT_PULL_ENABLED: "true"
+      GIT_PUSH_ENABLED: "true"
+      GIT_AUTHOR_NAME: "{{ groupvars_git_user_name }}"
+      GIT_AUTHOR_EMAIL: "{{ groupvars_git_user_email }}"
+      GIT_SSH_COMMAND: "ssh -i /run/secrets/git_provisioning_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+    volumes:
+      - prov_controller_inventory_repo:/repos/homelab-inventory
+      - prov_controller_hostvars_repo:/repos/homelab-hostvars
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8001/api/v1/routers/ >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      clusternet:
+        ipv4_address: "{{ prov_controller_ipv4 }}"
 
   vault:
     build: ./vault
