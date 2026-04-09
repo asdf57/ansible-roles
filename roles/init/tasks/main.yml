@@ -417,8 +417,7 @@
 - name: Push the prov image to the registry
   ansible.builtin.shell:
     cmd: |
-      docker tag prov:latest {{ registry_ipv4 }}:5000/prov:latest
-      docker push {{ registry_ipv4 }}:5000/prov:latest
+      skopeo copy --dest-tls-verify=false docker-daemon:prov:latest docker://{{ registry_ipv4 }}:5000/prov:latest
   register: prov_push
   retries: 5
   delay: 5
