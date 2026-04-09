@@ -1,8 +1,8 @@
-# server block for nginx.ryuugu.dev
+# server block for nginx
 server {
     listen 80;
     listen 443 ssl;
-    server_name nginx.ryuugu.dev;
+    server_name {{ nginx_acme_label }};
 
     ssl_certificate /etc/nginx/ssl/ryuugu.dev/full.pem;
     ssl_certificate_key /etc/nginx/ssl/ryuugu.dev/key.pem;
@@ -66,13 +66,13 @@ server {
 
 server {
     listen 80;
-    server_name server-api.ryuugu.dev;
+    server_name {{ server_api_fqdn }};
     return 301 https://$host$request_uri;
 }
 
 server {
     listen 443 ssl;
-    server_name server-api.ryuugu.dev;
+    server_name {{ server_api_fqdn }};
 
     ssl_certificate /etc/nginx/ssl/ryuugu.dev/full.pem;
     ssl_certificate_key /etc/nginx/ssl/ryuugu.dev/key.pem;
@@ -92,13 +92,13 @@ server {
 
 server {
     listen 80;
-    server_name mgmt.ryuugu.dev;
+    server_name {{ mgmt_fqdn }};
     return 301 https://$host$request_uri;
 }
 
 server {
     listen 443 ssl;
-    server_name mgmt.ryuugu.dev;
+    server_name {{ mgmt_fqdn }};
 
     ssl_certificate /etc/nginx/ssl/ryuugu.dev/full.pem;
     ssl_certificate_key /etc/nginx/ssl/ryuugu.dev/key.pem;
@@ -118,13 +118,13 @@ server {
 
 server {
     listen 80;
-    server_name vault.ryuugu.dev;
+    server_name {{ vault_acme_label }};
     return 301 https://$host$request_uri;
 }
 
 server {
     listen 443 ssl;
-    server_name vault.ryuugu.dev;
+    server_name {{ vault_acme_label }};
 
     ssl_certificate /etc/nginx/ssl/ryuugu.dev/full.pem;
     ssl_certificate_key /etc/nginx/ssl/ryuugu.dev/key.pem;
@@ -149,13 +149,13 @@ server {
 
 server {
     listen 80;
-    server_name vault-api.ryuugu.dev;
+    server_name {{ vault_api_fqdn }};
     return 301 https://$host$request_uri;
 }
 
 server {
     listen 443 ssl;
-    server_name vault-api.ryuugu.dev;
+    server_name {{ vault_api_fqdn }};
 
     ssl_certificate /etc/nginx/ssl/ryuugu.dev/full.pem;
     ssl_certificate_key /etc/nginx/ssl/ryuugu.dev/key.pem;
@@ -178,13 +178,13 @@ server {
 
 server {
     listen 80;
-    server_name ci.ryuugu.dev;
+    server_name {{ concourse_fqdn }};
     return 301 https://$host$request_uri;
 }
 
 server {
     listen 443 ssl;
-    server_name ci.ryuugu.dev;
+    server_name {{ concourse_fqdn }};
 
     ssl_certificate /etc/nginx/ssl/ryuugu.dev/full.pem;
     ssl_certificate_key /etc/nginx/ssl/ryuugu.dev/key.pem;
@@ -209,13 +209,13 @@ server {
 
 server {
     listen 80;
-    server_name registry.ryuugu.dev;
+    server_name {{ registry_fqdn }};
     return 301 https://$host$request_uri;
 }
 
 server {
     listen 443 ssl;
-    server_name registry.ryuugu.dev;
+    server_name {{ registry_fqdn }};
 
     ssl_certificate /etc/nginx/ssl/ryuugu.dev/full.pem;
     ssl_certificate_key /etc/nginx/ssl/ryuugu.dev/key.pem;
@@ -240,3 +240,28 @@ server {
 
 }
 
+server {
+    listen 80;
+    server_name {{ prov_controller_fqdn }};
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    server_name {{ prov_controller_fqdn }};
+
+    ssl_certificate /etc/nginx/ssl/ryuugu.dev/full.pem;
+    ssl_certificate_key /etc/nginx/ssl/ryuugu.dev/key.pem;
+    ssl_trusted_certificate /etc/nginx/ssl/ryuugu.dev/ca.pem;
+
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+
+    location / {
+        proxy_pass http://{{ prov_controller_ipv4 }}:8001;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
