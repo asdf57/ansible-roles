@@ -348,18 +348,6 @@
   debug:
     msg: "{{ vault_root_password }}"
 
-- name: Upload the vault root token to vault
-  community.hashi_vault.vault_kv2_write:
-    url: "{{ vault_bootstrap_url }}"
-    engine_mount_point: "kv2"
-    path: "vault/root_token"
-    data:
-      key: "{{ vault_root_password }}"
-    token: "{{ vault_root_password }}"
-    validate_certs: false
-  retries: 10
-  delay: 5
-
 # - name: Create git id25519 SSH key
 #   community.crypto.openssh_keypair:
 #     path: "{{ git_ssh_key_path }}"
@@ -390,63 +378,32 @@
       echo "{{ prov_key }}" > /tmp/temp_key && chmod 600 /tmp/temp_key && ssh-keygen -y -f /tmp/temp_key
   register: prov_ssh_public_key
 
-- name: Upload the git public SSH key to vault
+- name: Upload bootstrap secrets to Vault
   community.hashi_vault.vault_kv2_write:
     url: "{{ vault_bootstrap_url }}"
-    engine_mount_point: "kv2"
-    path: "github/ssh/public"
+    engine_mount_point: "{{ item.mount }}"
+    path: "{{ item.path }}"
     data:
-      key: "{{ git_ssh_public_key.stdout }}"
+      key: "{{ item.value }}"
     token: "{{ vault_root_password }}"
     validate_certs: false
-  retries: 50
-  delay: 5
-
-- name: Upload the git private SSH key to vault
-  community.hashi_vault.vault_kv2_write:
-    url: "{{ vault_bootstrap_url }}"
-    engine_mount_point: "kv2"
-    path: "github/ssh/private"
-    data:
-      key: "{{ git_prov_key }}"
-    token: "{{ vault_root_password }}"
-    validate_certs: false
-  retries: 50
-  delay: 5
-
-- name: Upload the git private SSH key to vault
-  community.hashi_vault.vault_kv2_write:
-    url: "{{ vault_bootstrap_url }}"
-    engine_mount_point: "kv2"
-    path: "github/ssh/private"
-    data:
-      key: "{{ git_prov_key }}"
-    token: "{{ vault_root_password }}"
-    validate_certs: false
-  retries: 50
-  delay: 5
-
-- name: Upload the provisioning private SSH key vault
-  community.hashi_vault.vault_kv2_write:
-    url: "{{ vault_bootstrap_url }}"
-    engine_mount_point: "kv2"
-    path: "provisioning/ssh/private"
-    data:
-      key: "{{ prov_key }}"
-    token: "{{ vault_root_password }}"
-    validate_certs: false
-  retries: 50
-  delay: 5
-
-- name: Upload the root vault token to vault
-  community.hashi_vault.vault_kv2_write:
-    url: "{{ vault_bootstrap_url }}"
-    engine_mount_point: "concourse"
-    path: "main/root_token"
-    data:
-      key: "{{ vault_root_password }}"
-    token: "{{ vault_root_password }}"
-    validate_certs: false
+  loop:
+    - mount: kv2
+      path: vault/root_token
+      value: "{{ vault_root_password }}"
+    - mount: kv2
+      path: github/ssh/public
+      value: "{{ git_ssh_public_key.stdout }}"
+    - mount: kv2
+      path: github/ssh/private
+      value: "{{ git_prov_key }}"
+    - mount: kv2
+      path: provisioning/ssh/private
+      value: "{{ prov_key }}"
+    - mount: concourse
+      path: main/root_token
+      value: "{{ vault_root_password }}"
+  no_log: true
   retries: 50
   delay: 5
 
