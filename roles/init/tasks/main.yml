@@ -417,8 +417,8 @@
 - name: Push the prov image to the registry
   ansible.builtin.shell:
     cmd: |
-      docker tag prov:latest registry.ryuugu.dev/prov:latest
-      docker push registry.ryuugu.dev/prov:latest
+      docker tag prov:latest {{ registry_ipv4 }}:5000/prov:latest
+      docker push {{ registry_ipv4 }}:5000/prov:latest
   register: prov_push
   retries: 5
   delay: 5
