@@ -27,7 +27,7 @@
         path: "{{ role_path }}/files/nginx/files/{{ item.0 }}_{{ item.1 }}"
         state: absent
       with_nested:
-        - [arch, debian]
+        - [arch, debian_trixie]
         - [netboot, iso]
 
     - name: Remove the templated default.conf

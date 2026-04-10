@@ -95,7 +95,7 @@ services:
       CONCOURSE_POSTGRES_PASSWORD: concourse_pass
       CONCOURSE_POSTGRES_DATABASE: concourse
       CONCOURSE_EXTERNAL_URL: "{{ concourse_url }}"
-      CONCOURSE_ADD_LOCAL_USER: "{{ concourse_user }}:{{ concourse_password }}"
+      CONCOURSE_ADD_LOCAL_USER: "{{ concourse_user }}:{{ lookup('env', 'CONCOURSE_PASSWORD') }}"
       CONCOURSE_MAIN_TEAM_LOCAL_USER: "{{ concourse_user }}"
       CONCOURSE_CLUSTER_NAME: homelab
     restart: always
@@ -144,12 +144,12 @@ services:
     environment:
       CONCOURSE_URL: "{{ concourse_url }}"
       CONCOURSE_USER: "{{ concourse_user }}"
-      CONCOURSE_PASSWORD: "{{ concourse_password }}"
+      CONCOURSE_PASSWORD: "{{ lookup('env', 'CONCOURSE_PASSWORD') }}"
       CONCOURSE_TEAM: "{{ concourse_team }}"
       CONCOURSE_COMMANDS_PIPELINE: "{{ concourse_commands_pipeline }}"
       CONCOURSE_COMMANDS_RESOURCE: "{{ concourse_commands_resource }}"
       CONCOURSE_OAUTH_CLIENT_ID: "{{ concourse_oauth_client_id }}"
-      CONCOURSE_OAUTH_CLIENT_SECRET: "{{ concourse_oauth_client_secret }}"
+      CONCOURSE_OAUTH_CLIENT_SECRET: "{{ lookup('env', 'CONCOURSE_OAUTH_CLIENT_SECRET') }}"
 
   prov-controller-redis:
     image: redis:7-alpine
@@ -266,12 +266,12 @@ services:
     container_name: acme
     network_mode: host
     environment:
-      - CF_Token="{{ cloudflare_api_key }}"
+      - CF_Token="{{ lookup('env', 'CLOUDFLARE_API_KEY') }}"
       - CF_Email="{{ cloudflare_email }}"
       - ACME_DOMAIN={{ cloudflare_domain }}
       - ACME_SERVER={{ cert_authority }}
-      - ZEROSSL_EAB_KID={{ zerossl_eab_kid }}
-      - ZEROSSL_EAB_HMAC_KEY={{ zerossl_eab_hmac_key }}
+      - ZEROSSL_EAB_KID={{ lookup('env', 'ZEROSSL_EAB_KID') }}
+      - ZEROSSL_EAB_HMAC_KEY={{ lookup('env', 'ZEROSSL_EAB_HMAC_KEY') }}
       - ZEROSSL_EMAIL={{ zerossl_email }}
       - DNS_API=dns_cf
     volumes:
@@ -293,7 +293,7 @@ services:
     restart: always
     environment:
       POSTGRES_USER: "{{ postgres_user }}"
-      POSTGRES_PASSWORD: "{{ postgres_password }}"
+      POSTGRES_PASSWORD: "{{ lookup('env', 'POSTGRES_PASSWORD') }}"
       POSTGRES_DB: "{{ postgres_db }}"
       PGDATA: /var/lib/postgresql/data/pgdata
     volumes:

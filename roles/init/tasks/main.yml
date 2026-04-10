@@ -410,9 +410,31 @@
     - mount: concourse
       path: main/root_token
       value: "{{ vault_root_password }}"
+    - mount: kv2
+      path: router/primary/api_password
+      value: "{{ lookup('env', 'PRIMARY_ROUTER_API_PASSWORD') }}"
+    - mount: kv2
+      path: concourse/local_user/password
+      value: "{{ lookup('env', 'CONCOURSE_PASSWORD') }}"
+    - mount: kv2
+      path: concourse/oauth/client_secret
+      value: "{{ lookup('env', 'CONCOURSE_OAUTH_CLIENT_SECRET') }}"
+    - mount: kv2
+      path: cloudflare/api_key
+      value: "{{ lookup('env', 'CLOUDFLARE_API_KEY') }}"
+    - mount: kv2
+      path: zerossl/eab/kid
+      value: "{{ lookup('env', 'ZEROSSL_EAB_KID') }}"
+    - mount: kv2
+      path: zerossl/eab/hmac_key
+      value: "{{ lookup('env', 'ZEROSSL_EAB_HMAC_KEY') }}"
+    - mount: kv2
+      path: postgres/osdb/password
+      value: "{{ lookup('env', 'POSTGRES_PASSWORD') }}"
   no_log: true
   retries: 50
   delay: 5
+  when: item.value | length > 0
 
 - name: Wait for the provisioning controller API to become reachable
   ansible.builtin.uri:
@@ -437,7 +459,7 @@
         managementIP: "{{ primary_router_management_ip }}"
         apiPort: "{{ primary_router_api_port }}"
         apiUsername: "{{ primary_router_api_username }}"
-        apiPassword: "{{ primary_router_api_password }}"
+        apiPassword: "{{ lookup('env', 'PRIMARY_ROUTER_API_PASSWORD') }}"
 
 - name: Check whether the bootstrap router already exists
   ansible.builtin.uri:
@@ -466,6 +488,46 @@
     body:
       spec: "{{ bootstrap_router.spec }}"
   when: bootstrap_router_check.status == 200
+
+- name: Define the bootstrap inventory capture group
+  ansible.builtin.set_fact:
+    bootstrap_inventory_capture_group:
+      apiVersion: homelab.io/v1
+      kind: InventoryCaptureGroup
+      metadata:
+        name: servers
+      spec:
+        selector:
+          matchLabels:
+            homelab.io/type: server
+
+- name: Check whether the bootstrap inventory capture group already exists
+  ansible.builtin.uri:
+    url: "{{ prov_controller_api_url }}/inventorycapturegroups/servers"
+    method: GET
+    status_code:
+      - 200
+      - 404
+  register: bootstrap_inventory_capture_group_check
+
+- name: Create the bootstrap inventory capture group when it is missing
+  ansible.builtin.uri:
+    url: "{{ prov_controller_api_url }}/inventorycapturegroups/"
+    method: POST
+    body_format: json
+    status_code: 200
+    body: "{{ bootstrap_inventory_capture_group }}"
+  when: bootstrap_inventory_capture_group_check.status == 404
+
+- name: Update the bootstrap inventory capture group when it already exists
+  ansible.builtin.uri:
+    url: "{{ prov_controller_api_url }}/inventorycapturegroups/servers"
+    method: PATCH
+    body_format: json
+    status_code: 200
+    body:
+      spec: "{{ bootstrap_inventory_capture_group.spec }}"
+  when: bootstrap_inventory_capture_group_check.status == 200
 
 - name: Define desired DNS records for bootstrap services
   ansible.builtin.set_fact:
@@ -498,7 +560,7 @@
         fqdn: "{{ registry_fqdn }}"
         address: "{{ nginx_ipv4 }}"
         comment: "homelab registry via nginx"
-      - name: provisioning-controller-public
+      - name: controller-public
         fqdn: "{{ prov_controller_fqdn }}"
         address: "{{ nginx_ipv4 }}"
         comment: "homelab provisioning controller via nginx"

@@ -5,7 +5,7 @@ metadata:
 spec:
   acme:
     externalAccountBinding:
-      keyID: "{{ zerossl_eab_kid }}"
+      keyID: "{{ lookup('env', 'ZEROSSL_EAB_KID') }}"
       keySecretRef:
         name: zero-ssl-eabsecret
         key: secret

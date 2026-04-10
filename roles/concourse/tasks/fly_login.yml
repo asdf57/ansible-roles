@@ -3,5 +3,5 @@
     fly -t {{ concourse_target }} login \
       -c {{ concourse_url }} \
       -u {{ concourse_user }} \
-      -p {{ concourse_password }}
+      -p {{ lookup('env', 'CONCOURSE_PASSWORD') }}
   delegate_to: localhost
