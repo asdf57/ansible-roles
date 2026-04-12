@@ -641,6 +641,26 @@
     name: concourse
     tasks_from: create_commands_pipeline
 
+- name: Fetch the inventory capture groups from API
+  ansible.builtin.uri:
+    url: "{{ prov_controller_api_url }}/inventorycapturegroups/"
+    method: GET
+    status_code: 200
+  register: inventory_capture_groups
+
+- name: Extract the inventory capture group names
+  ansible.builtin.set_fact:
+    inventory_capture_group_names: "{{ inventory_capture_groups.json.items | map(attribute='metadata.name') | list }}"
+
+- name: Show the inventory capture group names
+  debug:
+    var: inventory_capture_group_names
+
+# - name: Create the inventory capture group standup pipelines
+#   import_role:
+#     name: init
+#     tasks_from: create_inventory_capture_group_pipeline
+
 - name: Initialize ISO build pipeline
   import_role:
     name: concourse
