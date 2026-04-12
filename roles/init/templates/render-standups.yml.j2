@@ -31,8 +31,6 @@ jobs:
             CONCOURSE_TEAM: "{{ concourse_team }}"
             CONCOURSE_USER: "{{ concourse_user }}"
             CONCOURSE_PASSWORD: "{{ lookup('env', 'CONCOURSE_PASSWORD') }}"
-            SERVER_STANDUP_TEMPLATE: |
-{{ lookup('template', role_path + '/templates/server-standup.yml.j2') | indent(14, true) }}
           run:
             path: /bin/bash
             user: keiichi
@@ -47,7 +45,47 @@ jobs:
                     -p "${CONCOURSE_PASSWORD}" \
                     -n "${CONCOURSE_TEAM}"
 
-                  printf '%s\n' "${SERVER_STANDUP_TEMPLATE}" > /tmp/server-standup.yml
+                  cat > /tmp/server-standup.yml <<'EOF'
+                  resources:
+                    - name: inventory
+                      type: git
+                      check_every: 30s
+                      source:
+                        uri: "{{ inventory_repo }}"
+                        branch: "((inventory_capture_group_name))"
+                        private_key: ((github_ssh_private_key.key))
+
+                  jobs:
+                    - name: standup
+                      plan:
+                        - get: inventory
+                          trigger: true
+                        - task: show-inventory-capture-group
+                          privileged: true
+                          config:
+                            platform: linux
+                            image_resource:
+                              type: registry-image
+                              source:
+                                repository: "{{ registry_ipv4 }}:5000/prov"
+                                tag: latest
+                                insecure_registries:
+                                  - "{{ registry_ipv4 }}:5000"
+                            inputs:
+                              - name: inventory
+                            params:
+                              PROV_CONTROLLER_API_URL: "{{ prov_controller_api_url }}"
+                              INVENTORY_CAPTURE_GROUP_NAME: "((inventory_capture_group_name))"
+                            run:
+                              path: /bin/bash
+                              user: keiichi
+                              args:
+                                - -lc
+                                - |
+                                    set -euo pipefail
+                                    echo "Standup pipeline for ${INVENTORY_CAPTURE_GROUP_NAME}"
+                                    curl -fsS "${PROV_CONTROLLER_API_URL%/}/inventorycapturegroups/${INVENTORY_CAPTURE_GROUP_NAME}" | jq .
+                  EOF
 
                   mapfile -t inventory_capture_group_names < <(
                     curl -fsS "${PROV_CONTROLLER_API_URL%/}/inventorycapturegroups/" \
