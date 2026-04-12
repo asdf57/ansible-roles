@@ -29,7 +29,7 @@ jobs:
             CONCOURSE_URL: "{{ concourse_url }}"
             CONCOURSE_TEAM: "{{ concourse_team }}"
             CONCOURSE_USER: "{{ concourse_user }}"
-            CONCOURSE_PASSWORD: "{{ concourse_password }}"
+            CONCOURSE_PASSWORD: "{{ lookup('env', 'CONCOURSE_PASSWORD') }}"
             SERVER_STANDUP_TEMPLATE: |
 {{ lookup('template', role_path + '/templates/server-standup.yml.j2') | indent(14, true) }}
           run:
