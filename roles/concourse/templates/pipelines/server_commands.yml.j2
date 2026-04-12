@@ -26,6 +26,7 @@ jobs:
 {% for key, value in hostvars['localhost']['ansible_env'].items() %}
             {{ key }}: {{ value | to_json }}
 {% endfor %}
+            IS_BOOTSTRAP_ENV: "false"
           run:
             path: /bin/bash
             user: keiichi

@@ -26,6 +26,7 @@ jobs:
           params:
             PROV_CONTROLLER_API_URL: "{{ prov_controller_api_url }}"
             INVENTORY_CAPTURE_GROUP_NAME: "((inventory_capture_group_name))"
+            IS_BOOTSTRAP_ENV: "false"
           run:
             path: /bin/bash
             user: keiichi

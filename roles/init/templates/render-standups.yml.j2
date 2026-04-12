@@ -29,6 +29,7 @@ jobs:
             CONCOURSE_TEAM: "{{ concourse_team }}"
             CONCOURSE_USER: "{{ concourse_user }}"
             CONCOURSE_PASSWORD: "{{ lookup('env', 'CONCOURSE_PASSWORD') }}"
+            IS_BOOTSTRAP_ENV: "false"
           run:
             path: /bin/bash
             user: keiichi
@@ -77,6 +78,7 @@ jobs:
                             params:
                               PROV_CONTROLLER_API_URL: "{{ prov_controller_api_url }}"
                               INVENTORY_CAPTURE_GROUP_NAME: "${capture_group_var}"
+                              IS_BOOTSTRAP_ENV: "false"
                             run:
                               path: /bin/bash
                               user: keiichi
