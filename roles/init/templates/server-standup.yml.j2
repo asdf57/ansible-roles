@@ -1,7 +1,7 @@
 resources:
   - name: inventory-trigger
     type: git
-    check_every: 180d
+    check_every: 720h
     webhook_token: ((github/webhook.key))
     source:
       uri: "{{ inventory_repo }}"
