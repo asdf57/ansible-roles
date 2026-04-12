@@ -27,6 +27,8 @@ jobs:
             {{ key }}: {{ value | to_json }}
 {% endfor %}
             IS_BOOTSTRAP_ENV: "false"
+            VAULT_ADDR: "{{ vault_bootstrap_url }}"
+            VAULT_TOKEN: ((root_token.key))
           run:
             path: /bin/bash
             user: keiichi
