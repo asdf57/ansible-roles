@@ -1,5 +1,5 @@
 resources:
-  - name: inventory
+  - name: inventory-trigger
     type: git
     check_every: 30s
     source:
@@ -10,7 +10,7 @@ resources:
 jobs:
   - name: standup
     plan:
-      - get: inventory
+      - get: inventory-trigger
         trigger: true
       - task: show-inventory-capture-group
         privileged: true
@@ -22,7 +22,7 @@ jobs:
               repository: "{{ registry_fqdn }}/prov"
               tag: latest
           inputs:
-            - name: inventory
+            - name: inventory-trigger
           params:
             PROV_CONTROLLER_API_URL: "{{ prov_controller_api_url }}"
             INVENTORY_CAPTURE_GROUP_NAME: "((inventory_capture_group_name))"
