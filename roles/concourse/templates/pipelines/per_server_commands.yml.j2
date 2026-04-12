@@ -4,6 +4,7 @@ resources:
   source:
     uri: {{ commands_data_repo }}
     branch: {{ inventory_hostname }}
+    private_key: ((github_ssh_private_key.key))
 
 jobs:
   - name: commands

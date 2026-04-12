@@ -5,6 +5,7 @@ resources:
     source:
       uri: "{{ inventory_repo }}"
       branch: "((inventory_capture_group_name))"
+      private_key: ((github_ssh_private_key.key))
 
 jobs:
   - name: standup

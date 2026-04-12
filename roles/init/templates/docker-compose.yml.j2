@@ -71,7 +71,10 @@ services:
 
   concourse-web:
     container_name: concourse-web
-    image: concourse/concourse:{{ concourse_version }}
+    build:
+      context: ./concourse
+      args:
+        CONCOURSE_VERSION: "{{ concourse_version }}"
     command: web
     privileged: true
     depends_on:
@@ -86,6 +89,7 @@ services:
       - "2222:2222"
     volumes:
       - concourse_keys:/concourse-keys
+      - vault_shared:/shared
     environment:
       CONCOURSE_SESSION_SIGNING_KEY: /concourse-keys/session_signing_key
       CONCOURSE_TSA_HOST_KEY: /concourse-keys/tsa_host_key
@@ -98,6 +102,8 @@ services:
       CONCOURSE_ADD_LOCAL_USER: "{{ concourse_user }}:{{ lookup('env', 'CONCOURSE_PASSWORD') }}"
       CONCOURSE_MAIN_TEAM_LOCAL_USER: "{{ concourse_user }}"
       CONCOURSE_CLUSTER_NAME: homelab
+      CONCOURSE_VAULT_URL: "{{ vault_bootstrap_url }}"
+      CONCOURSE_VAULT_SHARED_PATH: shared
     restart: always
     networks:
       clusternet:
@@ -124,7 +130,8 @@ services:
       CONCOURSE_TSA_WORKER_PRIVATE_KEY: /concourse-keys/session_signing_key
       CONCOURSE_RUNTIME: containerd
       CONCOURSE_CONTAINERD_ALLOW_HOST_ACCESS: "true"
-      CONCOURSE_VAULT_URL: "{{ vault_url }}"
+      CONCOURSE_VAULT_URL: "{{ vault_bootstrap_url }}"
+      CONCOURSE_VAULT_SHARED_PATH: shared
       CONCOURSE_CONTAINERD_DNS_PROXY_ENABLE: "true"
     restart: always
     networks:

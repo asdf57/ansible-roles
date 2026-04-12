@@ -404,6 +404,9 @@
     - mount: kv2
       path: github/ssh/private
       value: "{{ git_prov_key }}"
+    - mount: concourse
+      path: shared/github_ssh_private_key
+      value: "{{ git_prov_key }}"
     - mount: kv2
       path: provisioning/ssh/private
       value: "{{ prov_key }}"
