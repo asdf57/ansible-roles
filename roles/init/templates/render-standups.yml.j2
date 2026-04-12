@@ -53,7 +53,7 @@ jobs:
                     | jq -r '.[].metadata.name'
                   )
 
-                  if [ "${#inventory_capture_group_names[@]}" -eq 0 ]; then
+                  if [ -z "${inventory_capture_group_names[*]:-}" ]; then
                     echo "No inventory capture groups found"
                     exit 0
                   fi
