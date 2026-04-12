@@ -621,8 +621,8 @@
     label: "{{ item.item.name }}"
   when: item.status == 200
 
-- name: Build ISOs
-  include_tasks: build_isos.yml
+# - name: Build ISOs
+#   include_tasks: build_isos.yml
 
 - name: Show vault URL
   debug:
