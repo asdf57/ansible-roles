@@ -45,15 +45,20 @@ jobs:
                     -p "${CONCOURSE_PASSWORD}" \
                     -n "${CONCOURSE_TEAM}"
 
-                  cat > /tmp/server-standup.yml <<'EOF'
+                  placeholder_open='(('
+                  placeholder_close='))'
+                  capture_group_var="${placeholder_open}inventory_capture_group_name${placeholder_close}"
+                  github_key_var="${placeholder_open}github_ssh_private_key.key${placeholder_close}"
+
+                  cat > /tmp/server-standup.yml <<EOF
                   resources:
                     - name: inventory
                       type: git
                       check_every: 30s
                       source:
                         uri: "{{ inventory_repo }}"
-                        branch: "((inventory_capture_group_name))"
-                        private_key: ((github_ssh_private_key.key))
+                        branch: "${capture_group_var}"
+                        private_key: ${github_key_var}
 
                   jobs:
                     - name: standup
@@ -75,7 +80,7 @@ jobs:
                               - name: inventory
                             params:
                               PROV_CONTROLLER_API_URL: "{{ prov_controller_api_url }}"
-                              INVENTORY_CAPTURE_GROUP_NAME: "((inventory_capture_group_name))"
+                              INVENTORY_CAPTURE_GROUP_NAME: "${capture_group_var}"
                             run:
                               path: /bin/bash
                               user: keiichi
@@ -83,8 +88,8 @@ jobs:
                                 - -lc
                                 - |
                                     set -euo pipefail
-                                    echo "Standup pipeline for ${INVENTORY_CAPTURE_GROUP_NAME}"
-                                    curl -fsS "${PROV_CONTROLLER_API_URL%/}/inventorycapturegroups/${INVENTORY_CAPTURE_GROUP_NAME}" | jq .
+                                    echo "Standup pipeline for \${INVENTORY_CAPTURE_GROUP_NAME}"
+                                    curl -fsS "\${PROV_CONTROLLER_API_URL%/}/inventorycapturegroups/\${INVENTORY_CAPTURE_GROUP_NAME}" | jq .
                   EOF
 
                   mapfile -t inventory_capture_group_names < <(
