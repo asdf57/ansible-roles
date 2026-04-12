@@ -18,7 +18,7 @@ jobs:
           image_resource:
             type: registry-image
             source:
-              repository: registry.ryuugu.dev/prov
+              repository: "{{ registry_fqdn }}/prov"
               tag: latest
           inputs:
             - name: commands

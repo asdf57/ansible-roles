@@ -19,10 +19,8 @@ jobs:
           image_resource:
             type: registry-image
             source:
-              repository: "{{ registry_ipv4 }}:5000/prov"
+              repository: "{{ registry_fqdn }}/prov"
               tag: latest
-              insecure_registries:
-                - "{{ registry_ipv4 }}:5000"
           inputs:
             - name: inventory
           params:
