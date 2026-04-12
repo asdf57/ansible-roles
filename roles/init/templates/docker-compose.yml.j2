@@ -21,7 +21,9 @@ services:
     networks:
       clusternet:
         ipv4_address: "{{ webhook_ipv4 }}"
-
+    environment:
+        WEBHOOK_TOKEN: "{{ lookup('env', 'GITHUB_WEBHOOK_SECRET') }}"
+        CI_URL: "{{ concourse_fqdn }}"
   registry:
     image: registry
     container_name: registry

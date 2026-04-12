@@ -1,6 +1,7 @@
 resources:
   - name: inventory-trigger
     type: git
+    webhook_token: ((github/webhook.key))
     check_every: 30s
     source:
       uri: "{{ inventory_repo }}"
@@ -51,12 +52,14 @@ jobs:
                   placeholder_close='))'
                   capture_group_var="${placeholder_open}inventory_capture_group_name${placeholder_close}"
                   github_key_var="${placeholder_open}github_ssh_private_key.key${placeholder_close}"
+                  github_webhook_key_var="${placeholder_open}github_webhook_token.key${placeholder_close}"
 
                   cat > /tmp/server-standup.yml <<EOF
                   resources:
                     - name: inventory-trigger
                       type: git
                       check_every: 30s
+                      webhook_token: ${github_webhook_key_var}
                       source:
                         uri: "{{ inventory_repo }}"
                         branch: "${capture_group_var}"

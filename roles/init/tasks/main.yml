@@ -407,6 +407,9 @@
     - mount: concourse
       path: shared/github_ssh_private_key
       value: "{{ git_prov_key }}"
+    - mount: concourse
+      path: shared/github/webhook
+      value: "{{ lookup('env', 'GITHUB_WEBHOOK_SECRET') }}"
     - mount: kv2
       path: provisioning/ssh/private
       value: "{{ prov_key }}"

@@ -2,6 +2,7 @@ resources:
   - name: inventory-trigger
     type: git
     check_every: 30s
+    webhook_token: ((github/webhook.key))
     source:
       uri: "{{ inventory_repo }}"
       branch: "((inventory_capture_group_name))"
