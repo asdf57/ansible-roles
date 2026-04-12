@@ -650,7 +650,7 @@
 
 - name: Extract the inventory capture group names
   ansible.builtin.set_fact:
-    inventory_capture_group_names: "{{ inventory_capture_groups.json.items | map(attribute='metadata.name') | list }}"
+    inventory_capture_group_names: "{{ inventory_capture_groups.json | map(attribute='metadata.name') | list }}"
 
 - name: Show the inventory capture group names
   debug:
