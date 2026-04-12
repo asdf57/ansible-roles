@@ -656,10 +656,8 @@
   debug:
     var: inventory_capture_group_names
 
-# - name: Create the inventory capture group standup pipelines
-#   import_role:
-#     name: init
-#     tasks_from: create_inventory_capture_group_pipeline
+- name: Create the inventory capture group standup pipelines
+  include_tasks: create_inventory_capture_group_pipeline.yml
 
 - name: Initialize ISO build pipeline
   import_role:

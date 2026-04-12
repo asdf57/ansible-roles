@@ -1,0 +1,23 @@
+- name: Log in to Concourse
+  import_role:
+    name: concourse
+    tasks_from: fly_login
+
+- name: Render the standup pipeline manager
+  ansible.builtin.template:
+    src: "{{ role_path }}/templates/render-standups.yml.j2"
+    dest: "/tmp/render_standups_pipeline.yml"
+  delegate_to: localhost
+
+- name: Set the standup pipeline manager
+  ansible.builtin.shell: |
+    fly -t {{ concourse_target }} set-pipeline \
+    -p "render-standups" \
+    --non-interactive \
+    -c "/tmp/render_standups_pipeline.yml"
+  delegate_to: localhost
+
+- name: Unpause the standup pipeline manager
+  ansible.builtin.shell: |
+    fly -t {{ concourse_target }} unpause-pipeline -p "render-standups"
+  delegate_to: localhost
