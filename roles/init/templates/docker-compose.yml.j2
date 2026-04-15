@@ -191,6 +191,13 @@ services:
     restart: always
     environment:
       REDIS_URL: redis://prov-controller-redis:6379
+      CONCOURSE_URL: "{{ concourse_url }}"
+      CONCOURSE_USER: "{{ concourse_user }}"
+      CONCOURSE_PASSWORD: "{{ lookup('env', 'CONCOURSE_PASSWORD') }}"
+      CONCOURSE_TEAM: "{{ concourse_team }}"
+      CONCOURSE_ISO_PIPELINE: build-isos
+      CONCOURSE_ISO_JOB: build-isos
+      NGINX_FILES_BASE_URL: "https://{{ nginx_acme_label }}"
       REDIS_ENFORCE_PERSISTENCE: "true"
       INVENTORY_REPO_DIR: /repos/homelab-inventory
       HOSTVARS_REPO_DIR: /repos/homelab-hostvars

@@ -15,6 +15,7 @@ jobs:
             {{ key }}: {{ value | to_json }}
 {% endfor %}
             IS_BOOTSTRAP_ENV: "false"
+            PROV_CONTROLLER_API_URL: "{{ prov_controller_api_url }}"
             VAULT_ADDR: "{{ vault_bootstrap_url }}"
             VAULT_TOKEN: ((root_token.key))
           run:
@@ -24,6 +25,40 @@ jobs:
             args:
               - -lc
               - |
+                  set -euo pipefail
                   shopt -s nullglob
+
+                  request_json="$(curl -fsS "${PROV_CONTROLLER_API_URL%/}/isobuilds/current")"
+                  request_id="$(printf '%s' "${request_json}" | jq -r '.id')"
+                  requested_distros_json="$(printf '%s' "${request_json}" | jq -c '.distros')"
+                  requested_distros_label="$(printf '%s' "${request_json}" | jq -r '.distros | join(", ")')"
+
+                  post_status() {
+                    local status="$1"
+                    local message="$2"
+                    curl -fsS \
+                      -X POST \
+                      -H 'Content-Type: application/json' \
+                      -d "$(jq -nc --arg status "${status}" --arg message "${message}" '{status: $status, message: $message}')" \
+                      "${PROV_CONTROLLER_API_URL%/}/isobuilds/${request_id}/status" >/dev/null
+                  }
+
+                  post_status "Running" "Building ISO artifacts for ${requested_distros_label}."
+
+                  finalize_build() {
+                    local exit_code="$1"
+                    if [[ "${exit_code}" -eq 0 ]]; then
+                      post_status "Succeeded" "Built ISO artifacts for ${requested_distros_label}."
+                    else
+                      post_status "Failed" "ISO build failed for ${requested_distros_label}."
+                    fi
+                  }
+
+                  trap 'finalize_build $?' EXIT
+
                   sudo mkdir -p /srv/homelab
-                  ansible-playbook -i inventory/inventory.yml ansible/plays/build_isos.yml
+                  ansible-playbook \
+                    -i inventory/inventory.yml \
+                    ansible/plays/build_isos.yml \
+                    -e "requested_build_distros_json=${requested_distros_json}" \
+                    -e '{"requested_build_types":["iso"],"force_build":true}'

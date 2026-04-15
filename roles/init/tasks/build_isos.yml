@@ -2,11 +2,16 @@
   set_fact:
     what_to_build: []
 
+- name: Resolve requested distro and artifact type filters
+  ansible.builtin.set_fact:
+    iso_build_distros: "{{ (requested_build_distros_json | default('[]', true) | from_json) if (requested_build_distros_json | default('', true) | length > 0) else ['arch', 'debian_trixie'] }}"
+    iso_build_types: "{{ requested_build_types | default(['netboot', 'iso']) }}"
+
 - name: Get files in each build directory
   include_tasks: build_boot_files.yml
   with_nested:
-    - [arch, debian_trixie]
-    - [netboot, iso]
+    - "{{ iso_build_distros }}"
+    - "{{ iso_build_types }}"
 
 - name: Here's what we need to build
   debug:
@@ -15,8 +20,7 @@
 - name: Build ISOs in parallel
   ansible.builtin.shell:
     cmd: |
-      VAULT_TOKEN="{{ vault_root_password }}" ./os/build.sh -d "{{ item[0] }}" -o "{{ host_data_path }}/nginx/files/{{ item[0] }}_{{ item[1] }}" -p "{{ provisioning_ssh_key_path }}" -t "{{ item[1] }}"
-    chdir: "../../"
+      VAULT_TOKEN="{{ vault_root_password }}" "{{ role_path }}/../os/files/build.sh" -d "{{ item[0] }}" -o "{{ host_data_path }}/nginx/files/{{ item[0] }}_{{ item[1] }}" -p "{{ provisioning_ssh_key_path }}" -- -t "{{ item[1] }}"
   loop: "{{ what_to_build }}"
   async: 600
   poll: 0
