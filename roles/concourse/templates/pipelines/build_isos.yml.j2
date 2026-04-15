@@ -31,7 +31,9 @@ jobs:
                   request_json="$(curl -fsS "${PROV_CONTROLLER_API_URL%/}/isobuilds/current")"
                   request_id="$(printf '%s' "${request_json}" | jq -r '.id')"
                   requested_distros_json="$(printf '%s' "${request_json}" | jq -c '.distros')"
+                  requested_build_types_json="$(printf '%s' "${request_json}" | jq -c '.artifactTypes')"
                   requested_distros_label="$(printf '%s' "${request_json}" | jq -r '.distros | join(", ")')"
+                  requested_build_types_label="$(printf '%s' "${request_json}" | jq -r '.artifactTypes | join(", ")')"
 
                   post_status() {
                     local status="$1"
@@ -43,14 +45,14 @@ jobs:
                       "${PROV_CONTROLLER_API_URL%/}/isobuilds/${request_id}/status" >/dev/null
                   }
 
-                  post_status "Running" "Building ISO artifacts for ${requested_distros_label}."
+                  post_status "Running" "Building ${requested_build_types_label} artifacts for ${requested_distros_label}."
 
                   finalize_build() {
                     local exit_code="$1"
                     if [[ "${exit_code}" -eq 0 ]]; then
-                      post_status "Succeeded" "Built ISO artifacts for ${requested_distros_label}."
+                      post_status "Succeeded" "Built ${requested_build_types_label} artifacts for ${requested_distros_label}."
                     else
-                      post_status "Failed" "ISO build failed for ${requested_distros_label}."
+                      post_status "Failed" "Build failed for ${requested_distros_label} (${requested_build_types_label})."
                     fi
                   }
 
@@ -61,4 +63,5 @@ jobs:
                     -i inventory/inventory.yml \
                     ansible/plays/build_isos.yml \
                     -e "requested_build_distros_json=${requested_distros_json}" \
-                    -e '{"requested_build_types":["iso"],"force_build":true}'
+                    -e "requested_build_types_json=${requested_build_types_json}" \
+                    -e '{"force_build":true}'

@@ -5,7 +5,7 @@
 - name: Resolve requested distro and artifact type filters
   ansible.builtin.set_fact:
     iso_build_distros: "{{ (requested_build_distros_json | default('[]', true) | from_json) if (requested_build_distros_json | default('', true) | length > 0) else ['arch', 'debian_trixie'] }}"
-    iso_build_types: "{{ requested_build_types | default(['netboot', 'iso']) }}"
+    iso_build_types: "{{ (requested_build_types_json | default('[]', true) | from_json) if (requested_build_types_json | default('', true) | length > 0) else (requested_build_types | default(['netboot', 'iso'])) }}"
 
 - name: Get files in each build directory
   include_tasks: build_boot_files.yml
