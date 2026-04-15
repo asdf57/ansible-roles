@@ -198,6 +198,7 @@ services:
       CONCOURSE_ISO_PIPELINE: build-isos
       CONCOURSE_ISO_JOB: build-isos
       NGINX_FILES_BASE_URL: "https://{{ nginx_acme_label }}"
+      NGINX_FILES_DIR: /srv/nginx-files
       REDIS_ENFORCE_PERSISTENCE: "true"
       INVENTORY_REPO_DIR: /repos/homelab-inventory
       HOSTVARS_REPO_DIR: /repos/homelab-hostvars
@@ -214,6 +215,7 @@ services:
     volumes:
       - prov_controller_inventory_repo:/repos/homelab-inventory
       - prov_controller_hostvars_repo:/repos/homelab-hostvars
+      - "{{ host_data_path }}/nginx/files:/srv/nginx-files"
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8001/api/v1/routers/ >/dev/null || exit 1"]
       interval: 10s

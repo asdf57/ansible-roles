@@ -6,6 +6,17 @@
   ansible.builtin.set_fact:
     iso_build_distros: "{{ (requested_build_distros_json | default('[]', true) | from_json) if (requested_build_distros_json | default('', true) | length > 0) else ['arch', 'debian_trixie'] }}"
     iso_build_types: "{{ (requested_build_types_json | default('[]', true) | from_json) if (requested_build_types_json | default('', true) | length > 0) else (requested_build_types | default(['netboot', 'iso'])) }}"
+    iso_builder_script_path: "{{ (lookup('env', 'ANSIBLE_ROLES_PATH') | default('/homelab/ansible/roles', true)) ~ '/os/files/build.sh' }}"
+
+- name: Check that the ISO builder script exists
+  ansible.builtin.stat:
+    path: "{{ iso_builder_script_path }}"
+  register: iso_builder_script
+
+- name: Fail when the ISO builder script is missing
+  ansible.builtin.fail:
+    msg: "ISO builder script not found at {{ iso_builder_script_path }}"
+  when: not iso_builder_script.stat.exists
 
 - name: Get files in each build directory
   include_tasks: build_boot_files.yml
@@ -20,7 +31,7 @@
 - name: Build ISOs in parallel
   ansible.builtin.shell:
     cmd: |
-      VAULT_TOKEN="{{ vault_root_password }}" "{{ role_path }}/../os/files/build.sh" -d "{{ item[0] }}" -o "{{ host_data_path }}/nginx/files/{{ item[0] }}_{{ item[1] }}" -p "{{ provisioning_ssh_key_path }}" -- -t "{{ item[1] }}"
+      VAULT_TOKEN="{{ vault_root_password }}" "{{ iso_builder_script_path }}" -d "{{ item[0] }}" -o "{{ host_data_path }}/nginx/files/{{ item[0] }}_{{ item[1] }}" -p "{{ provisioning_ssh_key_path }}" -- -t "{{ item[1] }}"
   loop: "{{ what_to_build }}"
   async: 600
   poll: 0
