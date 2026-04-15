@@ -34,6 +34,7 @@ jobs:
                   requested_build_types_json="$(printf '%s' "${request_json}" | jq -c '.artifactTypes')"
                   requested_distros_label="$(printf '%s' "${request_json}" | jq -r '.distros | join(", ")')"
                   requested_build_types_label="$(printf '%s' "${request_json}" | jq -r '.artifactTypes | join(", ")')"
+                  output_root="/tmp/iso-build-output"
 
                   post_status() {
                     local status="$1"
@@ -58,10 +59,31 @@ jobs:
 
                   trap 'finalize_build $?' EXIT
 
-                  sudo mkdir -p /srv/homelab
+                  rm -rf "${output_root}"
+                  mkdir -p "${output_root}/nginx/files"
                   ansible-playbook \
                     -i inventory/inventory.yml \
                     ansible/plays/build_isos.yml \
+                    -e "mounted_data_path=${output_root}" \
+                    -e "host_data_path=${output_root}" \
                     -e "requested_build_distros_json=${requested_distros_json}" \
                     -e "requested_build_types_json=${requested_build_types_json}" \
                     -e '{"force_build":true}'
+
+                  while IFS= read -r distro; do
+                    while IFS= read -r artifact_type; do
+                      artifact_dir="${output_root}/nginx/files/${distro}_${artifact_type}"
+                      if [[ ! -d "${artifact_dir}" ]]; then
+                        echo "Skipping missing artifact directory ${artifact_dir}"
+                        continue
+                      fi
+
+                      archive_path="$(mktemp /tmp/${distro}_${artifact_type}.XXXXXX.tar.gz)"
+                      tar -czf "${archive_path}" -C "${artifact_dir}" .
+                      curl -fsS \
+                        -X POST \
+                        -F "archive=@${archive_path};filename=${distro}_${artifact_type}.tar.gz" \
+                        "${PROV_CONTROLLER_API_URL%/}/isobuilds/${request_id}/artifacts/${distro}/${artifact_type}" >/dev/null
+                      rm -f "${archive_path}"
+                    done < <(printf '%s' "${requested_build_types_json}" | jq -r '.[]')
+                  done < <(printf '%s' "${requested_distros_json}" | jq -r '.[]')
