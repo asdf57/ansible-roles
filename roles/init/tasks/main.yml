@@ -413,6 +413,9 @@
     - mount: kv2
       path: provisioning/ssh/private
       value: "{{ prov_key }}"
+    - mount: kv2
+      path: provisioning/ssh/public
+      value: "{{ prov_ssh_public_key.stdout }}"
     - mount: concourse
       path: main/root_token
       value: "{{ vault_root_password }}"
