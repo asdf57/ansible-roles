@@ -29,6 +29,10 @@ OUTPUT_DIR=""
 DISTRO_ARGS=()
 PROVISIONING_KEY_BACKUP=""
 PROVISIONING_KEY_COPIED=0
+DOCKERD_STARTED=0
+DOCKER_HOST_SOCKET="${DOCKER_HOST_SOCKET:-unix:///tmp/docker.sock}"
+DOCKERD_LOG_PATH="${DOCKERD_LOG_PATH:-/tmp/dockerd.log}"
+DOCKERD_PID_PATH="${DOCKERD_PID_PATH:-/tmp/dockerd.pid}"
 
 function print_help() {
   echo "$help_message"
@@ -144,10 +148,37 @@ function parse_cli_args() {
   fi
 }
 
+function ensure_docker_available() {
+  if docker info >/dev/null 2>&1; then
+    echo "=> Docker daemon already available"
+    return
+  fi
+
+  echo "=> Docker daemon not available; starting local dockerd"
+
+  export DOCKER_HOST="$DOCKER_HOST_SOCKET"
+  sudo rm -f "${DOCKERD_PID_PATH}"
+  sudo sh -c "dockerd --host='${DOCKER_HOST_SOCKET}' --group=docker --pidfile='${DOCKERD_PID_PATH}' >'${DOCKERD_LOG_PATH}' 2>&1 &"
+  DOCKERD_STARTED=1
+
+  for _ in $(seq 1 60); do
+    if docker info >/dev/null 2>&1; then
+      echo "=> Local dockerd is ready"
+      return
+    fi
+    sleep 1
+  done
+
+  echo "Failed to start local dockerd. Last log output:" >&2
+  sudo tail -n 100 "${DOCKERD_LOG_PATH}" >&2 || true
+  exit 1
+}
+
 function build() {
   echo ":: Building ISO for $DISTRO"
 
   prepare_provisioning_key
+  ensure_docker_available
 
   echo "=> Set output directory to $OUTPUT_DIR"
 
@@ -176,6 +207,11 @@ function cleanup() {
   elif (( PROVISIONING_KEY_COPIED == 1 )); then
     echo "=> Removing temporary SSH key copy"
     rm -f "provisioning_key.pub"
+  fi
+
+  if (( DOCKERD_STARTED == 1 )); then
+    echo "=> Stopping local dockerd"
+    sudo sh -c "if [ -f '${DOCKERD_PID_PATH}' ]; then kill \$(cat '${DOCKERD_PID_PATH}') 2>/dev/null || true; fi"
   fi
 }
 

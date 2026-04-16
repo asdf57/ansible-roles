@@ -126,6 +126,7 @@ services:
       - concourse_keys:/concourse-keys
       - "{{ host_data_path }}/vault/vault_stuff/stuff:/stuff"
       - vault_shared:/shared
+      - /var/run/docker.sock:/var/run/docker.sock
     environment:
       CONCOURSE_TSA_HOST: concourse-web:2222
       CONCOURSE_TSA_PUBLIC_KEY: /concourse-keys/tsa_host_key.pub
