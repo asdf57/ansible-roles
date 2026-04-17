@@ -13,8 +13,8 @@ set -euo pipefail
 
 readonly ISO_NAME="debian-trixie-$(date +%Y.%m.%d)-amd64.iso"
 readonly OUTPUT_DIR="${OUTPUT_DIR:-/output}"
-readonly SSH_KEY_SOURCE="/root/.ssh/authorized_keys"
-readonly BUILD_DIR="/build/live-build"
+readonly SSH_KEY_SOURCE="${SSH_KEY_SOURCE:-/root/.ssh/authorized_keys}"
+readonly BUILD_ROOT="${BUILD_ROOT:-/build}"
 readonly DISTRIBUTION="trixie"
 readonly HELP_MESSAGE="Usage: $0 [-t <type>] [-v] [-h]
   -t  The artifact type to build (iso, netboot)
@@ -22,6 +22,7 @@ readonly HELP_MESSAGE="Usage: $0 [-t <type>] [-v] [-h]
   -h  Display this help message"
 
 type="iso"
+build_dir=""
 
 function print_help() {
   echo "$HELP_MESSAGE"
@@ -38,6 +39,12 @@ function write_file() {
 
   mkdir -p "$(dirname "$path")"
   cat > "$path"
+}
+
+function cleanup() {
+  if [[ -n "$build_dir" && -d "$build_dir" ]]; then
+    rm -rf "$build_dir"
+  fi
 }
 
 function parse_cli_args() {
@@ -81,9 +88,9 @@ function prepare_workspace() {
   [[ -f "$SSH_KEY_SOURCE" ]] || die "Provisioning key not found: $SSH_KEY_SOURCE"
 
   echo ":: Preparing Debian Trixie live-build workspace"
-  rm -rf "$BUILD_DIR"
-  mkdir -p "$BUILD_DIR" "$OUTPUT_DIR"
-  cd "$BUILD_DIR"
+  mkdir -p "$BUILD_ROOT" "$OUTPUT_DIR"
+  build_dir=$(mktemp -d -p "$BUILD_ROOT" live-build.XXXXXX)
+  cd "$build_dir"
 
   # Each directory here feeds a different live-build stage:
   # - hooks/live: scripts live-build runs during image creation
@@ -215,6 +222,7 @@ function move_outputs() {
 }
 
 function main() {
+  trap cleanup EXIT
   parse_cli_args "$@"
 
   cat <<EOF

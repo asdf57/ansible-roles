@@ -30,15 +30,11 @@ OUTPUT_DIR=""
 DISTRO_ARGS=()
 PROVISIONING_KEY_BACKUP=""
 PROVISIONING_KEY_COPIED=0
-DIRECT_AUTHORIZED_KEYS_BACKUP=""
-DIRECT_AUTHORIZED_KEYS_WRITTEN=0
 DOCKERD_STARTED=0
 EXECUTION_MODE="${ISO_BUILD_EXECUTION_MODE:-docker}"
 DOCKER_HOST_SOCKET="${DOCKER_HOST_SOCKET:-unix:///tmp/docker.sock}"
 DOCKERD_LOG_PATH="${DOCKERD_LOG_PATH:-/tmp/dockerd.log}"
 DOCKERD_PID_PATH="${DOCKERD_PID_PATH:-/tmp/dockerd.pid}"
-ROOT_SSH_DIR="${ROOT_SSH_DIR:-/root/.ssh}"
-ROOT_AUTHORIZED_KEYS_PATH="${ROOT_AUTHORIZED_KEYS_PATH:-${ROOT_SSH_DIR}/authorized_keys}"
 
 function print_help() {
   echo "$help_message"
@@ -82,21 +78,6 @@ function run_as_root() {
   else
     sudo "$@"
   fi
-}
-
-function prepare_direct_provisioning_key() {
-  echo "=> Installing provisioning key for direct build mode"
-
-  run_as_root mkdir -p "$ROOT_SSH_DIR"
-  run_as_root chmod 700 "$ROOT_SSH_DIR"
-
-  if run_as_root test -f "$ROOT_AUTHORIZED_KEYS_PATH"; then
-    DIRECT_AUTHORIZED_KEYS_BACKUP=$(mktemp)
-    run_as_root cp "$ROOT_AUTHORIZED_KEYS_PATH" "$DIRECT_AUTHORIZED_KEYS_BACKUP"
-  fi
-
-  run_as_root install -m 600 "$PROV_KEY" "$ROOT_AUTHORIZED_KEYS_PATH"
-  DIRECT_AUTHORIZED_KEYS_WRITTEN=1
 }
 
 function direct_builder_script_path() {
@@ -240,14 +221,14 @@ function build_direct() {
     exit 1
   }
 
-  prepare_direct_provisioning_key
+  echo "=> Using provisioning key from $PROV_KEY for direct build mode"
 
   case $DISTRO in
     arch )
-      run_as_root env OUTPUT_DIR="$OUTPUT_DIR" bash "$builder_script" "${DISTRO_ARGS[@]}"
+      run_as_root env OUTPUT_DIR="$OUTPUT_DIR" SSH_KEY_SOURCE="$PROV_KEY" bash "$builder_script" "${DISTRO_ARGS[@]}"
       ;;
     debian_trixie )
-      run_as_root env OUTPUT_DIR="$OUTPUT_DIR" bash "$builder_script" "${DISTRO_ARGS[@]}"
+      run_as_root env OUTPUT_DIR="$OUTPUT_DIR" SSH_KEY_SOURCE="$PROV_KEY" bash "$builder_script" "${DISTRO_ARGS[@]}"
       ;;
   esac
 }
@@ -283,14 +264,6 @@ function cleanup() {
   elif (( PROVISIONING_KEY_COPIED == 1 )); then
     echo "=> Removing temporary SSH key copy"
     rm -f "provisioning_key.pub"
-  fi
-
-  if [[ -n "$DIRECT_AUTHORIZED_KEYS_BACKUP" ]]; then
-    echo "=> Restoring root authorized_keys from backup"
-    run_as_root mv "$DIRECT_AUTHORIZED_KEYS_BACKUP" "$ROOT_AUTHORIZED_KEYS_PATH"
-  elif (( DIRECT_AUTHORIZED_KEYS_WRITTEN == 1 )); then
-    echo "=> Removing temporary root authorized_keys"
-    run_as_root rm -f "$ROOT_AUTHORIZED_KEYS_PATH"
   fi
 
   if (( DOCKERD_STARTED == 1 )); then
