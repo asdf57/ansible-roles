@@ -7,7 +7,8 @@
     iso_build_distros: "{{ (requested_build_distros_json | default('[]', true) | from_json) if (requested_build_distros_json | default('', true) | length > 0) else ['arch', 'debian_trixie'] }}"
     iso_build_types: "{{ (requested_build_types_json | default('[]', true) | from_json) if (requested_build_types_json | default('', true) | length > 0) else (requested_build_types | default(['netboot', 'iso'])) }}"
     iso_builder_script_path: "{{ (lookup('env', 'ANSIBLE_ROLES_PATH') | default('/homelab/ansible/roles', true)) ~ '/os/files/build.sh' }}"
-    iso_provisioning_public_key_path: "{{ (lookup('env', 'HOME') | default('/home/keiichi', true)) ~ '/.ssh/provisioning_key.pub' }}"
+    iso_build_execution_mode: "{{ lookup('env', 'ISO_BUILD_EXECUTION_MODE') | default('docker', true) }}"
+    iso_provisioning_public_key_path: "{{ lookup('env', 'ISO_PROVISIONING_PUBLIC_KEY_PATH') | default((lookup('env', 'HOME') | default('/home/keiichi', true)) ~ '/.ssh/provisioning_key.pub', true) }}"
 
 - name: Check that the ISO builder script exists
   ansible.builtin.stat:
@@ -42,7 +43,7 @@
 - name: Build ISOs in parallel
   ansible.builtin.shell:
     cmd: |
-      VAULT_TOKEN="{{ vault_root_password }}" "{{ iso_builder_script_path }}" -d "{{ item[0] }}" -o "{{ host_data_path }}/nginx/files/{{ item[0] }}_{{ item[1] }}" -p "{{ iso_provisioning_public_key_path }}" -- -t "{{ item[1] }}"
+      ISO_BUILD_EXECUTION_MODE="{{ iso_build_execution_mode }}" VAULT_TOKEN="{{ vault_root_password }}" "{{ iso_builder_script_path }}" -d "{{ item[0] }}" -o "{{ host_data_path }}/nginx/files/{{ item[0] }}_{{ item[1] }}" -p "{{ iso_provisioning_public_key_path }}" -- -t "{{ item[1] }}"
   loop: "{{ what_to_build }}"
   async: 600
   poll: 0

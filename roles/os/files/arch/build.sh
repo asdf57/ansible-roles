@@ -11,7 +11,7 @@ set -euo pipefail
 # changes on top rather than mutating the system copy in-place.
 
 readonly ISO_NAME="archlinux-$(date +%Y.%m.%d)-x86_64.iso"
-readonly OUTPUT_DIR="/output"
+readonly OUTPUT_DIR="${OUTPUT_DIR:-/output}"
 readonly SSH_KEY_SOURCE="/root/.ssh/authorized_keys"
 readonly ARCHISO_ROOT="/usr/share/archiso/configs"
 readonly HELP_MESSAGE="Usage: $0 [-p <profile>] [-t <type>] [-v] [-h]

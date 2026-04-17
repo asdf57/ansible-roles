@@ -1,8 +1,17 @@
+resources:
+  - name: ansible-roles
+    type: git
+    check_every: 720h
+    source:
+      uri: "{{ lookup('env', 'GIT_ANSIBLE_ROLES_REPO') | default('git@github.com:asdf57/ansible-roles.git', true) }}"
+      branch: "{{ lookup('env', 'GIT_ANSIBLE_ROLES_BRANCH') | default('main', true) }}"
+      private_key: ((github_ssh_private_key.key))
+
 jobs:
   - name: build-isos
     plan:
-      - task: build
-        privileged: true
+      - get: ansible-roles
+      - task: prepare-request
         config:
           platform: linux
           image_resource:
@@ -10,80 +19,252 @@ jobs:
             source:
               repository: "{{ registry_fqdn }}/prov"
               tag: latest
+          outputs:
+            - name: request
           params:
-{% for key, value in hostvars['localhost']['ansible_env'].items() %}
-            {{ key }}: {{ value | to_json }}
-{% endfor %}
-            IS_BOOTSTRAP_ENV: "false"
             PROV_CONTROLLER_API_URL: "{{ prov_controller_api_url }}"
-            VAULT_ADDR: "{{ vault_bootstrap_url }}"
-            VAULT_TOKEN: ((root_token.key))
           run:
             path: /bin/bash
             user: keiichi
-            dir: /homelab
+            dir: /tmp
             args:
               - -lc
               - |
                   set -euo pipefail
-                  shopt -s nullglob
 
+                  mkdir -p request
                   request_json="$(curl -fsS "${PROV_CONTROLLER_API_URL%/}/isobuilds/current")"
+                  printf '%s' "${request_json}" > request/request.json
+
                   request_id="$(printf '%s' "${request_json}" | jq -r '.id')"
-                  requested_distros_json="$(printf '%s' "${request_json}" | jq -c '.distros')"
-                  requested_build_types_json="$(printf '%s' "${request_json}" | jq -c '.artifactTypes')"
                   requested_distros_label="$(printf '%s' "${request_json}" | jq -r '.distros | join(", ")')"
                   requested_build_types_label="$(printf '%s' "${request_json}" | jq -r '.artifactTypes | join(", ")')"
-                  output_root="/tmp/iso-build-output"
 
-                  post_status() {
-                    local status="$1"
-                    local message="$2"
+                  curl -fsS \
+                    -X POST \
+                    -H 'Content-Type: application/json' \
+                    -d "$(jq -nc --arg status 'Running' --arg message "Building ${requested_build_types_label} artifacts for ${requested_distros_label}." '{status: $status, message: $message}')" \
+                    "${PROV_CONTROLLER_API_URL%/}/isobuilds/${request_id}/status" >/dev/null
+
+      - in_parallel:
+          fail_fast: true
+          steps:
+            - task: build-arch
+              privileged: true
+              config:
+                platform: linux
+                image_resource:
+                  type: registry-image
+                  source:
+                    repository: "{{ registry_fqdn }}/prov-iso-task-arch"
+                    tag: latest
+                inputs:
+                  - name: ansible-roles
+                  - name: request
+                params:
+                  PROV_CONTROLLER_API_URL: "{{ prov_controller_api_url }}"
+                  VAULT_ADDR: "{{ vault_bootstrap_url }}"
+                  VAULT_TOKEN: ((root_token.key))
+                run:
+                  path: /bin/bash
+                  dir: /work
+                  args:
+                    - -lc
+                    - |
+                        set -euo pipefail
+
+                        request_json="$(cat request/request.json)"
+                        if ! printf '%s' "${request_json}" | jq -e '.distros | index("arch")' >/dev/null; then
+                          echo "Arch build not requested"
+                          exit 0
+                        fi
+
+                        requested_build_types_json="$(printf '%s' "${request_json}" | jq -c '.artifactTypes')"
+                        provisioning_key="$(
+                          curl -fsS \
+                            -H "X-Vault-Token: ${VAULT_TOKEN}" \
+                            "${VAULT_ADDR%/}/v1/kv2/data/provisioning/ssh/public" \
+                          | jq -er '.data.data.key'
+                        )"
+
+                        printf '%s\n' "${provisioning_key}" > /tmp/provisioning_key.pub
+                        chmod 0644 /tmp/provisioning_key.pub
+
+                        export ANSIBLE_HOST_KEY_CHECKING=False
+                        export ANSIBLE_ROLES_PATH="$PWD/ansible-roles/roles"
+                        export ANSIBLE_FILTER_PLUGINS="$PWD/ansible-roles/ansible/filter_plugins"
+                        export ISO_BUILD_EXECUTION_MODE=direct
+                        export ISO_PROVISIONING_PUBLIC_KEY_PATH=/tmp/provisioning_key.pub
+
+                        output_root="/tmp/iso-build-output"
+                        rm -rf "${output_root}"
+                        mkdir -p "${output_root}/nginx/files"
+
+                        ansible-playbook \
+                          -i localhost, \
+                          -c local \
+                          ansible-roles/plays/build_isos.yml \
+                          -e "mounted_data_path=${output_root}" \
+                          -e "host_data_path=${output_root}" \
+                          -e 'requested_build_distros_json=["arch"]' \
+                          -e "requested_build_types_json=${requested_build_types_json}" \
+                          -e '{"force_build":true}'
+
+                        while IFS= read -r artifact_type; do
+                          artifact_dir="${output_root}/nginx/files/arch_${artifact_type}"
+                          if [[ ! -d "${artifact_dir}" ]]; then
+                            echo "Skipping missing artifact directory ${artifact_dir}"
+                            continue
+                          fi
+
+                          archive_path="$(mktemp /tmp/arch_${artifact_type}.XXXXXX.tar.gz)"
+                          tar -czf "${archive_path}" -C "${artifact_dir}" .
+                          request_id="$(printf '%s' "${request_json}" | jq -r '.id')"
+                          curl -fsS \
+                            -X POST \
+                            -F "archive=@${archive_path};filename=arch_${artifact_type}.tar.gz" \
+                            "${PROV_CONTROLLER_API_URL%/}/isobuilds/${request_id}/artifacts/arch/${artifact_type}" >/dev/null
+                          rm -f "${archive_path}"
+                        done < <(printf '%s' "${requested_build_types_json}" | jq -r '.[]')
+
+            - task: build-debian-trixie
+              privileged: true
+              config:
+                platform: linux
+                image_resource:
+                  type: registry-image
+                  source:
+                    repository: "{{ registry_fqdn }}/prov-iso-task-debian-trixie"
+                    tag: latest
+                inputs:
+                  - name: ansible-roles
+                  - name: request
+                params:
+                  PROV_CONTROLLER_API_URL: "{{ prov_controller_api_url }}"
+                  VAULT_ADDR: "{{ vault_bootstrap_url }}"
+                  VAULT_TOKEN: ((root_token.key))
+                run:
+                  path: /bin/bash
+                  dir: /work
+                  args:
+                    - -lc
+                    - |
+                        set -euo pipefail
+
+                        request_json="$(cat request/request.json)"
+                        if ! printf '%s' "${request_json}" | jq -e '.distros | index("debian_trixie")' >/dev/null; then
+                          echo "Debian Trixie build not requested"
+                          exit 0
+                        fi
+
+                        requested_build_types_json="$(printf '%s' "${request_json}" | jq -c '.artifactTypes')"
+                        provisioning_key="$(
+                          curl -fsS \
+                            -H "X-Vault-Token: ${VAULT_TOKEN}" \
+                            "${VAULT_ADDR%/}/v1/kv2/data/provisioning/ssh/public" \
+                          | jq -er '.data.data.key'
+                        )"
+
+                        printf '%s\n' "${provisioning_key}" > /tmp/provisioning_key.pub
+                        chmod 0644 /tmp/provisioning_key.pub
+
+                        export ANSIBLE_HOST_KEY_CHECKING=False
+                        export ANSIBLE_ROLES_PATH="$PWD/ansible-roles/roles"
+                        export ANSIBLE_FILTER_PLUGINS="$PWD/ansible-roles/ansible/filter_plugins"
+                        export ISO_BUILD_EXECUTION_MODE=direct
+                        export ISO_PROVISIONING_PUBLIC_KEY_PATH=/tmp/provisioning_key.pub
+
+                        output_root="/tmp/iso-build-output"
+                        rm -rf "${output_root}"
+                        mkdir -p "${output_root}/nginx/files"
+
+                        ansible-playbook \
+                          -i localhost, \
+                          -c local \
+                          ansible-roles/plays/build_isos.yml \
+                          -e "mounted_data_path=${output_root}" \
+                          -e "host_data_path=${output_root}" \
+                          -e 'requested_build_distros_json=["debian_trixie"]' \
+                          -e "requested_build_types_json=${requested_build_types_json}" \
+                          -e '{"force_build":true}'
+
+                        while IFS= read -r artifact_type; do
+                          artifact_dir="${output_root}/nginx/files/debian_trixie_${artifact_type}"
+                          if [[ ! -d "${artifact_dir}" ]]; then
+                            echo "Skipping missing artifact directory ${artifact_dir}"
+                            continue
+                          fi
+
+                          archive_path="$(mktemp /tmp/debian_trixie_${artifact_type}.XXXXXX.tar.gz)"
+                          tar -czf "${archive_path}" -C "${artifact_dir}" .
+                          request_id="$(printf '%s' "${request_json}" | jq -r '.id')"
+                          curl -fsS \
+                            -X POST \
+                            -F "archive=@${archive_path};filename=debian_trixie_${artifact_type}.tar.gz" \
+                            "${PROV_CONTROLLER_API_URL%/}/isobuilds/${request_id}/artifacts/debian_trixie/${artifact_type}" >/dev/null
+                          rm -f "${archive_path}"
+                        done < <(printf '%s' "${requested_build_types_json}" | jq -r '.[]')
+        on_success:
+          task: mark-succeeded
+          config:
+            platform: linux
+            image_resource:
+              type: registry-image
+              source:
+                repository: "{{ registry_fqdn }}/prov"
+                tag: latest
+            inputs:
+              - name: request
+            params:
+              PROV_CONTROLLER_API_URL: "{{ prov_controller_api_url }}"
+            run:
+              path: /bin/bash
+              user: keiichi
+              dir: /tmp
+              args:
+                - -lc
+                - |
+                    set -euo pipefail
+
+                    request_json="$(cat request/request.json)"
+                    request_id="$(printf '%s' "${request_json}" | jq -r '.id')"
+                    requested_distros_label="$(printf '%s' "${request_json}" | jq -r '.distros | join(", ")')"
+                    requested_build_types_label="$(printf '%s' "${request_json}" | jq -r '.artifactTypes | join(", ")')"
+
                     curl -fsS \
                       -X POST \
                       -H 'Content-Type: application/json' \
-                      -d "$(jq -nc --arg status "${status}" --arg message "${message}" '{status: $status, message: $message}')" \
+                      -d "$(jq -nc --arg status 'Succeeded' --arg message "Built ${requested_build_types_label} artifacts for ${requested_distros_label}." '{status: $status, message: $message}')" \
                       "${PROV_CONTROLLER_API_URL%/}/isobuilds/${request_id}/status" >/dev/null
-                  }
+        on_failure:
+          task: mark-failed
+          config:
+            platform: linux
+            image_resource:
+              type: registry-image
+              source:
+                repository: "{{ registry_fqdn }}/prov"
+                tag: latest
+            inputs:
+              - name: request
+            params:
+              PROV_CONTROLLER_API_URL: "{{ prov_controller_api_url }}"
+            run:
+              path: /bin/bash
+              user: keiichi
+              dir: /tmp
+              args:
+                - -lc
+                - |
+                    set -euo pipefail
 
-                  post_status "Running" "Building ${requested_build_types_label} artifacts for ${requested_distros_label}."
+                    request_json="$(cat request/request.json)"
+                    request_id="$(printf '%s' "${request_json}" | jq -r '.id')"
+                    requested_distros_label="$(printf '%s' "${request_json}" | jq -r '.distros | join(", ")')"
+                    requested_build_types_label="$(printf '%s' "${request_json}" | jq -r '.artifactTypes | join(", ")')"
 
-                  finalize_build() {
-                    local exit_code="$1"
-                    if [[ "${exit_code}" -eq 0 ]]; then
-                      post_status "Succeeded" "Built ${requested_build_types_label} artifacts for ${requested_distros_label}."
-                    else
-                      post_status "Failed" "Build failed for ${requested_distros_label} (${requested_build_types_label})."
-                    fi
-                  }
-
-                  trap 'finalize_build $?' EXIT
-
-                  rm -rf "${output_root}"
-                  mkdir -p "${output_root}/nginx/files"
-                  ansible-playbook \
-                    -i inventory/inventory.yml \
-                    ansible/plays/build_isos.yml \
-                    -e "mounted_data_path=${output_root}" \
-                    -e "host_data_path=${output_root}" \
-                    -e "requested_build_distros_json=${requested_distros_json}" \
-                    -e "requested_build_types_json=${requested_build_types_json}" \
-                    -e '{"force_build":true}'
-
-                  while IFS= read -r distro; do
-                    while IFS= read -r artifact_type; do
-                      artifact_dir="${output_root}/nginx/files/${distro}_${artifact_type}"
-                      if [[ ! -d "${artifact_dir}" ]]; then
-                        echo "Skipping missing artifact directory ${artifact_dir}"
-                        continue
-                      fi
-
-                      archive_path="$(mktemp /tmp/${distro}_${artifact_type}.XXXXXX.tar.gz)"
-                      tar -czf "${archive_path}" -C "${artifact_dir}" .
-                      curl -fsS \
-                        -X POST \
-                        -F "archive=@${archive_path};filename=${distro}_${artifact_type}.tar.gz" \
-                        "${PROV_CONTROLLER_API_URL%/}/isobuilds/${request_id}/artifacts/${distro}/${artifact_type}" >/dev/null
-                      rm -f "${archive_path}"
-                    done < <(printf '%s' "${requested_build_types_json}" | jq -r '.[]')
-                  done < <(printf '%s' "${requested_distros_json}" | jq -r '.[]')
+                    curl -fsS \
+                      -X POST \
+                      -H 'Content-Type: application/json' \
+                      -d "$(jq -nc --arg status 'Failed' --arg message "Build failed for ${requested_distros_label} (${requested_build_types_label})." '{status: $status, message: $message}')" \
+                      "${PROV_CONTROLLER_API_URL%/}/isobuilds/${request_id}/status" >/dev/null

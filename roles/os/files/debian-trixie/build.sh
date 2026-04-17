@@ -12,7 +12,7 @@ set -euo pipefail
 # reproducible and there is no stale state from a previous attempt.
 
 readonly ISO_NAME="debian-trixie-$(date +%Y.%m.%d)-amd64.iso"
-readonly OUTPUT_DIR="/output"
+readonly OUTPUT_DIR="${OUTPUT_DIR:-/output}"
 readonly SSH_KEY_SOURCE="/root/.ssh/authorized_keys"
 readonly BUILD_DIR="/build/live-build"
 readonly DISTRIBUTION="trixie"

@@ -645,6 +645,38 @@
   retries: 5
   delay: 5
 
+- name: Build the Arch ISO task image
+  ansible.builtin.shell:
+    cmd: |
+      docker build --no-cache -t prov-iso-task-arch:latest -f /homelab/ansible/roles/os/files/arch/Dockerfile.task /homelab/ansible/roles/os/files
+  register: arch_iso_task_image_build
+  retries: 3
+  delay: 5
+
+- name: Push the Arch ISO task image to the registry
+  ansible.builtin.shell:
+    cmd: |
+      skopeo copy --dest-tls-verify=false docker-daemon:prov-iso-task-arch:latest docker://{{ registry_ipv4 }}:5000/prov-iso-task-arch:latest
+  register: arch_iso_task_image_push
+  retries: 5
+  delay: 5
+
+- name: Build the Debian Trixie ISO task image
+  ansible.builtin.shell:
+    cmd: |
+      docker build --no-cache -t prov-iso-task-debian-trixie:latest -f /homelab/ansible/roles/os/files/debian-trixie/Dockerfile.task /homelab/ansible/roles/os/files
+  register: debian_iso_task_image_build
+  retries: 3
+  delay: 5
+
+- name: Push the Debian Trixie ISO task image to the registry
+  ansible.builtin.shell:
+    cmd: |
+      skopeo copy --dest-tls-verify=false docker-daemon:prov-iso-task-debian-trixie:latest docker://{{ registry_ipv4 }}:5000/prov-iso-task-debian-trixie:latest
+  register: debian_iso_task_image_push
+  retries: 5
+  delay: 5
+
 - name: Initialize infra pipelines
   import_role:
     name: concourse

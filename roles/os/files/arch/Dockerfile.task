@@ -1,0 +1,44 @@
+FROM archlinux:latest
+
+RUN printf '\nDisableSandbox\n' >> /etc/pacman.conf && \
+    pacman-key --init && \
+    pacman-key --populate archlinux && \
+    pacman -Syu --noconfirm && \
+    pacman -S --needed --noconfirm \
+      ansible \
+      arch-install-scripts \
+      archiso \
+      bash \
+      ca-certificates \
+      coreutils \
+      curl \
+      dosfstools \
+      e2fsprogs \
+      erofs-utils \
+      findutils \
+      git \
+      gnupg \
+      grub \
+      jq \
+      libarchive \
+      libisoburn \
+      mtools \
+      openssh \
+      openssl \
+      python \
+      python-docutils \
+      squashfs-tools \
+      sudo \
+      tar \
+      zsync && \
+    pacman -Scc --noconfirm
+
+RUN useradd -m -u 1000 -s /bin/bash keiichi && \
+    echo '%wheel ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers && \
+    usermod -aG wheel keiichi
+
+WORKDIR /work
+
+ENV ANSIBLE_HOST_KEY_CHECKING=False
+
+CMD ["/bin/bash"]

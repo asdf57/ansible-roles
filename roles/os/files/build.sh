@@ -18,7 +18,8 @@ help_message="Usage: $0 -d <distro> -o <output_dir> -p <public_key_path> [-v] [-
     -h  Display this help message
 
   Notes:
-    Use -- before distro-specific flags so they are forwarded to the distro builder"
+    Use -- before distro-specific flags so they are forwarded to the distro builder
+    Set ISO_BUILD_EXECUTION_MODE=direct to invoke the distro-native builder directly"
 
 
 SUPPORTED_DISTROS=("arch" "debian_trixie")
@@ -29,10 +30,15 @@ OUTPUT_DIR=""
 DISTRO_ARGS=()
 PROVISIONING_KEY_BACKUP=""
 PROVISIONING_KEY_COPIED=0
+DIRECT_AUTHORIZED_KEYS_BACKUP=""
+DIRECT_AUTHORIZED_KEYS_WRITTEN=0
 DOCKERD_STARTED=0
+EXECUTION_MODE="${ISO_BUILD_EXECUTION_MODE:-docker}"
 DOCKER_HOST_SOCKET="${DOCKER_HOST_SOCKET:-unix:///tmp/docker.sock}"
 DOCKERD_LOG_PATH="${DOCKERD_LOG_PATH:-/tmp/dockerd.log}"
 DOCKERD_PID_PATH="${DOCKERD_PID_PATH:-/tmp/dockerd.pid}"
+ROOT_SSH_DIR="${ROOT_SSH_DIR:-/root/.ssh}"
+ROOT_AUTHORIZED_KEYS_PATH="${ROOT_AUTHORIZED_KEYS_PATH:-${ROOT_SSH_DIR}/authorized_keys}"
 
 function print_help() {
   echo "$help_message"
@@ -68,6 +74,40 @@ function prepare_provisioning_key() {
   echo "=> Creating temporary copy of SSH key to allow Docker to copy it"
   cp "$PROV_KEY" "$build_context_key"
   PROVISIONING_KEY_COPIED=1
+}
+
+function run_as_root() {
+  if [[ "$(id -u)" -eq 0 ]]; then
+    "$@"
+  else
+    sudo "$@"
+  fi
+}
+
+function prepare_direct_provisioning_key() {
+  echo "=> Installing provisioning key for direct build mode"
+
+  run_as_root mkdir -p "$ROOT_SSH_DIR"
+  run_as_root chmod 700 "$ROOT_SSH_DIR"
+
+  if run_as_root test -f "$ROOT_AUTHORIZED_KEYS_PATH"; then
+    DIRECT_AUTHORIZED_KEYS_BACKUP=$(mktemp)
+    run_as_root cp "$ROOT_AUTHORIZED_KEYS_PATH" "$DIRECT_AUTHORIZED_KEYS_BACKUP"
+  fi
+
+  run_as_root install -m 600 "$PROV_KEY" "$ROOT_AUTHORIZED_KEYS_PATH"
+  DIRECT_AUTHORIZED_KEYS_WRITTEN=1
+}
+
+function direct_builder_script_path() {
+  case "$DISTRO" in
+    arch )
+      printf '%s\n' "arch/build.sh"
+      ;;
+    debian_trixie )
+      printf '%s\n' "debian-trixie/build.sh"
+      ;;
+  esac
 }
 
 function parse_cli_args() {
@@ -174,13 +214,9 @@ function ensure_docker_available() {
   exit 1
 }
 
-function build() {
-  echo ":: Building ISO for $DISTRO"
-
+function build_with_docker() {
   prepare_provisioning_key
   ensure_docker_available
-
-  echo "=> Set output directory to $OUTPUT_DIR"
 
   case $DISTRO in
     arch )
@@ -191,6 +227,46 @@ function build() {
     debian_trixie )
       docker build --no-cache --platform linux/amd64 -t debian-builder -f debian-trixie/Dockerfile.debian .
       docker run --rm --platform linux/amd64 --privileged -v "${OUTPUT_DIR}:/output" debian-builder "${DISTRO_ARGS[@]}"
+      ;;
+  esac
+}
+
+function build_direct() {
+  local builder_script
+
+  builder_script=$(direct_builder_script_path)
+  [[ -f "$builder_script" ]] || {
+    echo "Distro-native builder script not found: $builder_script" >&2
+    exit 1
+  }
+
+  prepare_direct_provisioning_key
+
+  case $DISTRO in
+    arch )
+      run_as_root env OUTPUT_DIR="$OUTPUT_DIR" bash "$builder_script" "${DISTRO_ARGS[@]}"
+      ;;
+    debian_trixie )
+      run_as_root env OUTPUT_DIR="$OUTPUT_DIR" bash "$builder_script" "${DISTRO_ARGS[@]}"
+      ;;
+  esac
+}
+
+function build() {
+  echo ":: Building ISO for $DISTRO"
+  echo "=> Using execution mode: $EXECUTION_MODE"
+  echo "=> Set output directory to $OUTPUT_DIR"
+
+  case "$EXECUTION_MODE" in
+    docker )
+      build_with_docker
+      ;;
+    direct )
+      build_direct
+      ;;
+    * )
+      echo "Invalid ISO_BUILD_EXECUTION_MODE: $EXECUTION_MODE" >&2
+      exit 1
       ;;
   esac
 
@@ -207,6 +283,14 @@ function cleanup() {
   elif (( PROVISIONING_KEY_COPIED == 1 )); then
     echo "=> Removing temporary SSH key copy"
     rm -f "provisioning_key.pub"
+  fi
+
+  if [[ -n "$DIRECT_AUTHORIZED_KEYS_BACKUP" ]]; then
+    echo "=> Restoring root authorized_keys from backup"
+    run_as_root mv "$DIRECT_AUTHORIZED_KEYS_BACKUP" "$ROOT_AUTHORIZED_KEYS_PATH"
+  elif (( DIRECT_AUTHORIZED_KEYS_WRITTEN == 1 )); then
+    echo "=> Removing temporary root authorized_keys"
+    run_as_root rm -f "$ROOT_AUTHORIZED_KEYS_PATH"
   fi
 
   if (( DOCKERD_STARTED == 1 )); then

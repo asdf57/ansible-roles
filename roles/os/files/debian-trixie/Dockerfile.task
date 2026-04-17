@@ -1,0 +1,39 @@
+FROM debian:trixie
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+      ansible \
+      bash \
+      ca-certificates \
+      coreutils \
+      curl \
+      debootstrap \
+      dosfstools \
+      findutils \
+      git \
+      gnupg \
+      grub-pc-bin \
+      isolinux \
+      jq \
+      live-build \
+      mtools \
+      openssh-client \
+      python3 \
+      squashfs-tools \
+      sudo \
+      syslinux \
+      tar \
+      wget \
+      xorriso && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN useradd -m -u 1000 -s /bin/bash keiichi && \
+    usermod -aG sudo keiichi && \
+    echo '%sudo ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/10-nopasswd-sudo && \
+    chmod 0440 /etc/sudoers.d/10-nopasswd-sudo
+
+WORKDIR /work
+
+ENV ANSIBLE_HOST_KEY_CHECKING=False
+
+CMD ["/bin/bash"]
