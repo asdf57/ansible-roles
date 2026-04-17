@@ -25,16 +25,15 @@ jobs:
             PROV_CONTROLLER_API_URL: "{{ prov_controller_api_url }}"
           run:
             path: /bin/bash
-            user: keiichi
-            dir: /tmp
             args:
               - -lc
               - |
                   set -euo pipefail
 
-                  mkdir -p request
+                  output_dir="$PWD/request"
+                  mkdir -p "${output_dir}"
                   request_json="$(curl -fsS "${PROV_CONTROLLER_API_URL%/}/isobuilds/current")"
-                  printf '%s' "${request_json}" > request/request.json
+                  printf '%s' "${request_json}" > "${output_dir}/request.json"
 
                   request_id="$(printf '%s' "${request_json}" | jq -r '.id')"
                   requested_distros_label="$(printf '%s' "${request_json}" | jq -r '.distros | join(", ")')"
@@ -67,13 +66,12 @@ jobs:
                   VAULT_TOKEN: ((root_token.key))
                 run:
                   path: /bin/bash
-                  dir: /work
                   args:
                     - -lc
                     - |
                         set -euo pipefail
 
-                        request_json="$(cat request/request.json)"
+                        request_json="$(cat "$PWD/request/request.json")"
                         if ! printf '%s' "${request_json}" | jq -e '.distros | index("arch")' >/dev/null; then
                           echo "Arch build not requested"
                           exit 0
@@ -145,13 +143,12 @@ jobs:
                   VAULT_TOKEN: ((root_token.key))
                 run:
                   path: /bin/bash
-                  dir: /work
                   args:
                     - -lc
                     - |
                         set -euo pipefail
 
-                        request_json="$(cat request/request.json)"
+                        request_json="$(cat "$PWD/request/request.json")"
                         if ! printf '%s' "${request_json}" | jq -e '.distros | index("debian_trixie")' >/dev/null; then
                           echo "Debian Trixie build not requested"
                           exit 0
@@ -219,14 +216,18 @@ jobs:
               PROV_CONTROLLER_API_URL: "{{ prov_controller_api_url }}"
             run:
               path: /bin/bash
-              user: keiichi
-              dir: /tmp
               args:
                 - -lc
                 - |
                     set -euo pipefail
 
-                    request_json="$(cat request/request.json)"
+                    request_file="$PWD/request/request.json"
+                    if [[ ! -f "${request_file}" ]]; then
+                      echo "Missing request artifact; skipping success status update"
+                      exit 0
+                    fi
+
+                    request_json="$(cat "${request_file}")"
                     request_id="$(printf '%s' "${request_json}" | jq -r '.id')"
                     requested_distros_label="$(printf '%s' "${request_json}" | jq -r '.distros | join(", ")')"
                     requested_build_types_label="$(printf '%s' "${request_json}" | jq -r '.artifactTypes | join(", ")')"
@@ -251,14 +252,18 @@ jobs:
               PROV_CONTROLLER_API_URL: "{{ prov_controller_api_url }}"
             run:
               path: /bin/bash
-              user: keiichi
-              dir: /tmp
               args:
                 - -lc
                 - |
                     set -euo pipefail
 
-                    request_json="$(cat request/request.json)"
+                    request_file="$PWD/request/request.json"
+                    if [[ ! -f "${request_file}" ]]; then
+                      echo "Missing request artifact; skipping failure status update"
+                      exit 0
+                    fi
+
+                    request_json="$(cat "${request_file}")"
                     request_id="$(printf '%s' "${request_json}" | jq -r '.id')"
                     requested_distros_label="$(printf '%s' "${request_json}" | jq -r '.distros | join(", ")')"
                     requested_build_types_label="$(printf '%s' "${request_json}" | jq -r '.artifactTypes | join(", ")')"
