@@ -184,6 +184,8 @@ services:
   prov-controller:
     build: ./prov-controller
     container_name: prov-controller
+    init: true
+    pids_limit: -1
     depends_on:
       prov-controller-redis:
         condition: service_healthy
@@ -213,6 +215,8 @@ services:
       GIT_AUTHOR_NAME: "{{ groupvars_git_user_name }}"
       GIT_AUTHOR_EMAIL: "{{ groupvars_git_user_email }}"
       GIT_SSH_COMMAND: "ssh -i /run/secrets/git_provisioning_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+    ulimits:
+      nproc: 65535
     volumes:
       - prov_controller_inventory_repo:/repos/homelab-inventory
       - prov_controller_hostvars_repo:/repos/homelab-hostvars
