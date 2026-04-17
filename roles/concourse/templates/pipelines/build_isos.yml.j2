@@ -17,7 +17,7 @@ jobs:
           image_resource:
             type: registry-image
             source:
-              repository: "{{ registry_fqdn }}/prov"
+              repository: "{{ registry_fqdn }}/prov-iso-task-arch"
               tag: latest
           outputs:
             - name: request
@@ -211,7 +211,7 @@ jobs:
             image_resource:
               type: registry-image
               source:
-                repository: "{{ registry_fqdn }}/prov"
+                repository: "{{ registry_fqdn }}/prov-iso-task-arch"
                 tag: latest
             inputs:
               - name: request
@@ -243,7 +243,7 @@ jobs:
             image_resource:
               type: registry-image
               source:
-                repository: "{{ registry_fqdn }}/prov"
+                repository: "{{ registry_fqdn }}/prov-iso-task-arch"
                 tag: latest
             inputs:
               - name: request
