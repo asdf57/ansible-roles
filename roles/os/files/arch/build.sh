@@ -127,6 +127,9 @@ function configure_live_environment() {
   # packages.x86_64 is the package manifest for the live image. Appending
   # openssh here ensures sshd exists inside the final booted environment.
   append_if_missing "openssh" "${profile_dir}/packages.x86_64"
+  # dnsmasq can pull in a virtual dependency on libxtables. Pinning iptables
+  # avoids an interactive provider choice between iptables and iptables-legacy.
+  append_if_missing "iptables" "${profile_dir}/packages.x86_64"
 
   # airootfs/root/.ssh becomes /root/.ssh in the live image at boot time.
   # We pre-seed authorized_keys so the live root account accepts our key.
@@ -201,6 +204,8 @@ function move_outputs() {
 function build_image() {
   local build_output_dir="${work_dir}/out"
   local work_cache_dir="${work_dir}/work"
+  local attempt
+  local max_attempts=3
 
   echo ":: Building Arch Linux ${type}"
   mkdir -p "$build_output_dir"
@@ -209,8 +214,19 @@ function build_image() {
   # mkarchiso writes lots of scratch state while assembling the image.
   # Keeping a dedicated work directory makes cleanup deterministic and
   # avoids polluting the output directory with transient build artifacts.
-  mkarchiso -v -m "$type" -w "$work_cache_dir" -o "$build_output_dir" "$profile_dir"
-  move_outputs
+  for attempt in $(seq 1 "$max_attempts"); do
+    if mkarchiso -v -m "$type" -w "$work_cache_dir" -o "$build_output_dir" "$profile_dir"; then
+      move_outputs
+      return
+    fi
+
+    if [[ "$attempt" -lt "$max_attempts" ]]; then
+      echo "=> mkarchiso failed on attempt ${attempt}/${max_attempts}; retrying in 10 seconds"
+      sleep 10
+    fi
+  done
+
+  die "mkarchiso failed after ${max_attempts} attempts"
 }
 
 function main() {

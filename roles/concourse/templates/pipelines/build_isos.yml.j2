@@ -32,7 +32,45 @@ jobs:
 
                   output_dir="$PWD/request"
                   mkdir -p "${output_dir}"
-                  request_json="$(curl -fsS "${PROV_CONTROLLER_API_URL%/}/isobuilds/current")"
+                  status_code="$(
+                    curl -sS \
+                      -o "${output_dir}/current-response.json" \
+                      -w '%{http_code}' \
+                      "${PROV_CONTROLLER_API_URL%/}/isobuilds/current"
+                  )"
+
+                  if [[ "${status_code}" != "200" ]]; then
+                    echo "Failed to fetch active ISO build request (HTTP ${status_code})" >&2
+
+                    if [[ -s "${output_dir}/current-response.json" ]]; then
+                      echo "Controller response:" >&2
+                      cat "${output_dir}/current-response.json" >&2
+                    fi
+
+                    if [[ "${status_code}" == "404" ]]; then
+                      overview_status="$(
+                        curl -sS \
+                          -o "${output_dir}/overview-response.json" \
+                          -w '%{http_code}' \
+                          "${PROV_CONTROLLER_API_URL%/}/isobuilds/"
+                      )"
+
+                      if [[ "${overview_status}" == "200" ]] && [[ -s "${output_dir}/overview-response.json" ]]; then
+                        current_status="$(jq -r '.currentRequest.status // empty' "${output_dir}/overview-response.json" 2>/dev/null || true)"
+                        current_id="$(jq -r '.currentRequest.id // empty' "${output_dir}/overview-response.json" 2>/dev/null || true)"
+
+                        if [[ -n "${current_status}" ]]; then
+                          echo "Current ISO request ${current_id:-<unknown>} exists but is not active (status=${current_status})." >&2
+                        else
+                          echo "No active ISO build request exists. This usually means the job was run manually or the request already finished." >&2
+                        fi
+                      fi
+                    fi
+
+                    exit 1
+                  fi
+
+                  request_json="$(cat "${output_dir}/current-response.json")"
                   printf '%s' "${request_json}" > "${output_dir}/request.json"
 
                   request_id="$(printf '%s' "${request_json}" | jq -r '.id')"
