@@ -24,6 +24,7 @@ profile="releng"
 type="iso"
 work_dir=""
 profile_dir=""
+pacman_cache_dir=""
 
 function print_help() {
   echo "$HELP_MESSAGE"
@@ -109,10 +110,16 @@ function prepare_workspace() {
 
   work_dir=$(mktemp -d)
   profile_dir="${work_dir}/${profile}"
+  pacman_cache_dir="${work_dir}/pacman-cache"
 
   # The copied profile becomes our writable build recipe for this run.
   # Anything under airootfs is overlaid directly into the live rootfs.
   cp -a "$source_profile_dir" "$profile_dir"
+  mkdir -p "$pacman_cache_dir"
+
+  # Each concurrent build gets its own pacman cache so package downloads do
+  # not race on shared .part files inside /var/cache/pacman/pkg.
+  printf '\nCacheDir = %s\n' "$pacman_cache_dir" >> "${profile_dir}/pacman.conf"
 }
 
 function configure_live_environment() {
@@ -208,13 +215,13 @@ function build_image() {
   local max_attempts=3
 
   echo ":: Building Arch Linux ${type}"
-  mkdir -p "$build_output_dir"
-  mkdir -p "$work_cache_dir"
-
-  # mkarchiso writes lots of scratch state while assembling the image.
-  # Keeping a dedicated work directory makes cleanup deterministic and
-  # avoids polluting the output directory with transient build artifacts.
   for attempt in $(seq 1 "$max_attempts"); do
+    rm -rf "$build_output_dir" "$work_cache_dir" "$pacman_cache_dir"
+    mkdir -p "$build_output_dir" "$work_cache_dir" "$pacman_cache_dir"
+
+    # mkarchiso writes lots of scratch state while assembling the image.
+    # Keeping dedicated work and cache directories makes cleanup deterministic
+    # and avoids cross-build or cross-attempt contamination.
     if mkarchiso -v -m "$type" -w "$work_cache_dir" -o "$build_output_dir" "$profile_dir"; then
       move_outputs
       return
