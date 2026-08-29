@@ -32,12 +32,12 @@
     version: "{{ provisioning_api_version }}"
     force: yes
 
-- name: Clone the provisioning controller repo
-  git:
-    repo: "{{ prov_controller_repo }}"
-    dest: "{{ mounted_data_path }}/prov-controller"
-    version: "{{ prov_controller_version }}"
-    force: yes
+- name: Clone the Stigmergy controller repo
+  ansible.builtin.git:
+    repo: "{{ stigmergy_repo }}"
+    dest: "{{ mounted_data_path }}/stigmergy"
+    version: "{{ stigmergy_version }}"
+    force: true
 
 - name: Clone the webhook repo
   git:
@@ -445,190 +445,33 @@
   delay: 5
   when: item.value | length > 0
 
-- name: Wait for the provisioning controller API to become reachable
+- name: Wait for the Stigmergy API to become reachable
   ansible.builtin.uri:
-    url: "{{ prov_controller_api_url }}/routers/"
+    url: "{{ stigmergy_api_url }}/readyz"
     method: GET
     status_code: 200
-  register: prov_controller_api
+  register: stigmergy_api
   retries: 30
   delay: 3
-  until: prov_controller_api is succeeded
+  until: stigmergy_api is succeeded
 
-- name: Define the bootstrap router resource
-  ansible.builtin.set_fact:
-    bootstrap_router:
-      apiVersion: homelab.io/v1
-      kind: Router
-      metadata:
-        name: "{{ primary_router_name }}"
-      spec:
-        name: "{{ primary_router_name }}"
-        role: "{{ primary_router_role }}"
-        managementIP: "{{ primary_router_management_ip }}"
-        apiPort: "{{ primary_router_api_port }}"
-        apiUsername: "{{ primary_router_api_username }}"
-        apiPassword: "{{ lookup('env', 'PRIMARY_ROUTER_API_PASSWORD') }}"
-
-- name: Check whether the bootstrap router already exists
-  ansible.builtin.uri:
-    url: "{{ prov_controller_api_url }}/routers/{{ primary_router_name }}"
-    method: GET
-    status_code:
-      - 200
-      - 404
-  register: bootstrap_router_check
-
-- name: Create the bootstrap router when it is missing
-  ansible.builtin.uri:
-    url: "{{ prov_controller_api_url }}/routers/"
-    method: POST
-    body_format: json
-    status_code: 200
-    body: "{{ bootstrap_router }}"
-  when: bootstrap_router_check.status == 404
-
-- name: Update the bootstrap router when it already exists
-  ansible.builtin.uri:
-    url: "{{ prov_controller_api_url }}/routers/{{ primary_router_name }}"
-    method: PATCH
-    body_format: json
-    status_code: 200
-    body:
-      spec: "{{ bootstrap_router.spec }}"
-  when: bootstrap_router_check.status == 200
-
-- name: Define the bootstrap inventory capture group
+- name: Configure the bootstrap inventory capture group
   ansible.builtin.set_fact:
     bootstrap_inventory_capture_group:
-      apiVersion: homelab.io/v1
-      kind: InventoryCaptureGroup
-      metadata:
-        name: servers
-      spec:
-        selector:
-          matchLabels:
-            homelab.io/type: server
+      selector:
+        matchKinds:
+          - apiVersion: homelab.io/v1alpha1
+            kind: Server
 
-- name: Check whether the bootstrap inventory capture group already exists
+- name: Create or update the bootstrap inventory capture group
   ansible.builtin.uri:
-    url: "{{ prov_controller_api_url }}/inventorycapturegroups/servers"
-    method: GET
+    url: "{{ stigmergy_api_url }}/api/v1alpha1/inventory-capture-groups/servers"
+    method: PUT
+    body_format: json
     status_code:
       - 200
-      - 404
-  register: bootstrap_inventory_capture_group_check
-
-- name: Create the bootstrap inventory capture group when it is missing
-  ansible.builtin.uri:
-    url: "{{ prov_controller_api_url }}/inventorycapturegroups/"
-    method: POST
-    body_format: json
-    status_code: 200
+      - 201
     body: "{{ bootstrap_inventory_capture_group }}"
-  when: bootstrap_inventory_capture_group_check.status == 404
-
-- name: Update the bootstrap inventory capture group when it already exists
-  ansible.builtin.uri:
-    url: "{{ prov_controller_api_url }}/inventorycapturegroups/servers"
-    method: PATCH
-    body_format: json
-    status_code: 200
-    body:
-      spec: "{{ bootstrap_inventory_capture_group.spec }}"
-  when: bootstrap_inventory_capture_group_check.status == 200
-
-- name: Define desired DNS records for bootstrap services
-  ansible.builtin.set_fact:
-    bootstrap_dns_records:
-      - name: nginx-public
-        fqdn: "{{ nginx_acme_label }}"
-        address: "{{ nginx_ipv4 }}"
-        comment: "homelab nginx"
-      - name: server-api-public
-        fqdn: "{{ server_api_fqdn }}"
-        address: "{{ nginx_ipv4 }}"
-        comment: "homelab server api via nginx"
-      - name: mgmt-public
-        fqdn: "{{ mgmt_fqdn }}"
-        address: "{{ nginx_ipv4 }}"
-        comment: "homelab mgmt via nginx"
-      - name: vault-public
-        fqdn: "{{ vault_acme_label }}"
-        address: "{{ nginx_ipv4 }}"
-        comment: "homelab vault via nginx"
-      - name: vault-api-public
-        fqdn: "{{ vault_api_fqdn }}"
-        address: "{{ nginx_ipv4 }}"
-        comment: "homelab vault api via nginx"
-      - name: ci-public
-        fqdn: "{{ concourse_fqdn }}"
-        address: "{{ nginx_ipv4 }}"
-        comment: "homelab concourse via nginx"
-      - name: registry-public
-        fqdn: "{{ registry_fqdn }}"
-        address: "{{ nginx_ipv4 }}"
-        comment: "homelab registry via nginx"
-      - name: controller-public
-        fqdn: "{{ prov_controller_fqdn }}"
-        address: "{{ nginx_ipv4 }}"
-        comment: "homelab provisioning controller via nginx"
-
-- name: Check existing DNS records in the provisioning controller
-  ansible.builtin.uri:
-    url: "{{ prov_controller_api_url }}/dnsrecords/{{ item.name }}"
-    method: GET
-    status_code:
-      - 200
-      - 404
-  loop: "{{ bootstrap_dns_records }}"
-  loop_control:
-    label: "{{ item.name }}"
-  register: bootstrap_dns_record_checks
-
-- name: Create missing DNS records in the provisioning controller
-  ansible.builtin.uri:
-    url: "{{ prov_controller_api_url }}/dnsrecords/"
-    method: POST
-    body_format: json
-    status_code: 200
-    body:
-      apiVersion: homelab.io/v1
-      kind: DNSRecord
-      metadata:
-        name: "{{ item.item.name }}"
-      spec:
-        providerRef:
-          kind: Router
-          name: "{{ primary_router_name }}"
-        fqdn: "{{ item.item.fqdn }}"
-        address: "{{ item.item.address }}"
-        ttl: 300
-        comment: "{{ item.item.comment }}"
-  loop: "{{ bootstrap_dns_record_checks.results | default([]) }}"
-  loop_control:
-    label: "{{ item.item.name }}"
-  when: item.status == 404
-
-- name: Update existing DNS records in the provisioning controller
-  ansible.builtin.uri:
-    url: "{{ prov_controller_api_url }}/dnsrecords/{{ item.item.name }}"
-    method: PATCH
-    body_format: json
-    status_code: 200
-    body:
-      spec:
-        providerRef:
-          kind: Router
-          name: "{{ primary_router_name }}"
-        fqdn: "{{ item.item.fqdn }}"
-        address: "{{ item.item.address }}"
-        ttl: 300
-        comment: "{{ item.item.comment }}"
-  loop: "{{ bootstrap_dns_record_checks.results | default([]) }}"
-  loop_control:
-    label: "{{ item.item.name }}"
-  when: item.status == 200
 
 # - name: Build ISOs
 #   include_tasks: build_isos.yml
@@ -682,9 +525,9 @@
     name: concourse
     tasks_from: create_commands_pipeline
 
-- name: Fetch the inventory capture groups from API
+- name: Fetch the inventory capture groups from Stigmergy
   ansible.builtin.uri:
-    url: "{{ prov_controller_api_url }}/inventorycapturegroups/"
+    url: "{{ stigmergy_api_url }}/api/v1alpha1/inventory-capture-groups"
     method: GET
     status_code: 200
   register: inventory_capture_groups
