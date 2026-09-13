@@ -15,6 +15,16 @@
   ansible.builtin.include_vars:
     file: "/homelab/inventory/group_vars/all.yaml"
 
+- name: Ensure the mounted data path is provided
+  ansible.builtin.assert:
+    that:
+      - lookup('env', 'MOUNT_DATA_PATH') | length > 0
+    fail_msg: "MOUNT_DATA_PATH must identify the host-data mount inside the bootstrap container."
+
+- name: Configure the mounted data path
+  ansible.builtin.set_fact:
+    mounted_data_path: "{{ lookup('env', 'MOUNT_DATA_PATH') }}"
+
 - name: Template the docker-compose file
   template:
     src: docker-compose.yml.j2
@@ -207,7 +217,7 @@
 
 - name: Build the docker-compose
   community.docker.docker_compose_v2:
-    project_src: "{{ host_data_path }}"
+    project_src: "{{ mounted_data_path }}"
     project_name: infra
     state: present
     build: always
