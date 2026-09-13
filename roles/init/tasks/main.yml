@@ -447,7 +447,7 @@
 
 - name: Wait for the Stigmergy API to become reachable
   ansible.builtin.uri:
-    url: "{{ stigmergy_api_url }}/readyz"
+    url: "{{ lookup('env', 'STIGMERGY_API_URL') }}/readyz"
     method: GET
     status_code: 200
   register: stigmergy_api
@@ -455,17 +455,88 @@
   delay: 3
   until: stigmergy_api is succeeded
 
+- name: Define the bootstrap Secret resources
+  ansible.builtin.set_fact:
+    bootstrap_secrets:
+      - name: vault-root-token
+        path: vault/root_token
+        value: "{{ lookup('env', 'VAULT_TOKEN') | default(vault_root_password, true) }}"
+      - name: primary-router-api-password
+        path: router/primary/api_password
+        value: "{{ lookup('env', 'PRIMARY_ROUTER_API_PASSWORD') }}"
+      - name: github-webhook-secret
+        path: github/webhook
+        value: "{{ lookup('env', 'GITHUB_WEBHOOK_SECRET') }}"
+      - name: concourse-password
+        path: concourse/local_user/password
+        value: "{{ lookup('env', 'CONCOURSE_PASSWORD') }}"
+      - name: concourse-oauth-client-secret
+        path: concourse/oauth/client_secret
+        value: "{{ lookup('env', 'CONCOURSE_OAUTH_CLIENT_SECRET') }}"
+      - name: cloudflare-api-key
+        path: cloudflare/api_key
+        value: "{{ lookup('env', 'CLOUDFLARE_API_KEY') }}"
+      - name: zerossl-eab-kid
+        path: zerossl/eab/kid
+        value: "{{ lookup('env', 'ZEROSSL_EAB_KID') }}"
+      - name: zerossl-eab-hmac-key
+        path: zerossl/eab/hmac_key
+        value: "{{ lookup('env', 'ZEROSSL_EAB_HMAC_KEY') }}"
+      - name: postgres-password
+        path: postgres/osdb/password
+        value: "{{ lookup('env', 'POSTGRES_PASSWORD') }}"
+  no_log: true
+
+- name: Ensure every bootstrap secret has a value
+  ansible.builtin.assert:
+    that:
+      - item.value | length > 0
+    fail_msg: "The value for bootstrap Secret/{{ item.name }} is empty."
+  loop: "{{ bootstrap_secrets }}"
+  loop_control:
+    label: "{{ item.name }}"
+  no_log: true
+
+- name: Create or update the bootstrap Secret resources
+  ansible.builtin.uri:
+    url: "{{ lookup('env', 'STIGMERGY_API_URL') }}/api/v1alpha1/secrets/{{ item.name }}"
+    method: PUT
+    body_format: json
+    status_code:
+      - 200
+      - 201
+    body:
+      apiVersion: homelab.io/v1alpha1
+      kind: Secret
+      metadata:
+        name: "{{ item.name }}"
+      spec:
+        secretStoreRef:
+          name: openbao
+        path: "{{ item.path }}"
+        data:
+          key: "{{ item.value }}"
+  loop: "{{ bootstrap_secrets }}"
+  loop_control:
+    label: "{{ item.name }}"
+  no_log: true
+
 - name: Configure the bootstrap inventory capture group
   ansible.builtin.set_fact:
     bootstrap_inventory_capture_group:
-      selector:
-        matchKinds:
-          - apiVersion: homelab.io/v1alpha1
-            kind: Server
+      apiVersion: homelab.io/v1alpha1
+      kind: InventoryCaptureGroup
+      metadata:
+        name: servers
+      spec:
+        selector:
+          matchKinds:
+            - apiVersion: homelab.io/v1alpha1
+              kind: Server
 
 - name: Create or update the bootstrap inventory capture group
   ansible.builtin.uri:
-    url: "{{ stigmergy_api_url }}/api/v1alpha1/inventory-capture-groups/servers"
+    url: "{{ lookup('env', 'STIGMERGY_API_URL') }}/api/v1alpha1/inventory-capture-groups/servers"
     method: PUT
     body_format: json
     status_code:
@@ -527,14 +598,14 @@
 
 - name: Fetch the inventory capture groups from Stigmergy
   ansible.builtin.uri:
-    url: "{{ stigmergy_api_url }}/api/v1alpha1/inventory-capture-groups"
+    url: "{{ lookup('env', 'STIGMERGY_API_URL') }}/api/v1alpha1/inventory-capture-groups"
     method: GET
     status_code: 200
   register: inventory_capture_groups
 
 - name: Extract the inventory capture group names
   ansible.builtin.set_fact:
-    inventory_capture_group_names: "{{ inventory_capture_groups.json | map(attribute='metadata.name') | list }}"
+    inventory_capture_group_names: "{{ inventory_capture_groups.json['items'] | map(attribute='metadata.name') | list }}"
 
 - name: Show the inventory capture group names
   debug:
