@@ -1,5 +1,6 @@
 - name: Initialize the cluster
   hosts: localhost
+  connection: local
   vars:
     ansible_python_interpreter: >-
       {{ lookup('env', 'VENV_PYTHON') if inventory_hostname == 'localhost' else '/usr/bin/python3' }}
