@@ -45,33 +45,16 @@
         path: "{{ role_path }}/files/nginx/files/ipxe.efi"
         state: absent
 
-- name: Cleanup the vault files
+- name: Cleanup the OpenBao files
   block:
-    - name: Delete the vault internal directory
+    - name: Delete the OpenBao data directory
       ansible.builtin.file:
-        path: "{{ role_path }}/files/vault/internal"
+        path: "{{ role_path }}/files/openbao/data"
         state: absent
 
-    - name: Delete the vault logs directory
+    - name: Delete the OpenBao initialization directory
       ansible.builtin.file:
-        path: "{{ role_path }}/files/vault/logs"
-        state: absent
-
-    - name: Delete the vault secrets directory
-      ansible.builtin.file:
-        path: "{{ role_path }}/files/vault/secrets"
-        state: absent
-
-    - name: Delete the vault vault_stuff directory
-      ansible.builtin.file:
-        path: "{{ role_path }}/files/vault/vault_stuff"
-        state: absent
-
-- name: Cleanup the provisioning-api
-  block:
-    - name: Delete the provisioning-api directory
-      ansible.builtin.file:
-        path: "{{ role_path }}/files/provisioning-api"
+        path: "{{ role_path }}/files/openbao/init"
         state: absent
 
 - name: Delete the docker-compose.yml file

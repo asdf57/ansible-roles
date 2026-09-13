@@ -1,5 +1,5 @@
 ---
-# provisioning API, nginx reverse proxy, create cert, ipxe
+# Stigmergy API, OpenBao, nginx, Concourse, registry, and network bootstrap
 
 - name: Ensure the inventory group vars exist
   ansible.builtin.stat:
@@ -19,7 +19,8 @@
   ansible.builtin.assert:
     that:
       - lookup('env', 'MOUNT_DATA_PATH') | length > 0
-    fail_msg: "MOUNT_DATA_PATH must identify the host-data mount inside the bootstrap container."
+      - lookup('env', 'STIGMERGY_API_URL') | length > 0
+    fail_msg: "MOUNT_DATA_PATH and STIGMERGY_API_URL must be provided to the bootstrap container."
 
 - name: Configure the mounted data path
   ansible.builtin.set_fact:
@@ -30,26 +31,19 @@
     src: docker-compose.yml.j2
     dest: "{{ mounted_data_path }}/docker-compose.yml"
 
-- name: Clone the provisioning API repo
-  git:
-    repo: "{{ provisioning_api_repo }}"
-    dest: "{{ mounted_data_path }}/provisioning-api"
-    version: "{{ provisioning_api_version }}"
-    force: yes
-
 - name: Clone the Stigmergy controller repo
   ansible.builtin.git:
-    repo: "{{ stigmergy_repo }}"
+    repo: "{{ git_stigmergy_repo }}"
     dest: "{{ mounted_data_path }}/stigmergy"
-    version: "{{ stigmergy_version }}"
+    version: "{{ git_stigmergy_branch }}"
     force: true
 
 - name: Clone the webhook repo
-  git:
-    repo: "{{ webhook_repo }}"
+  ansible.builtin.git:
+    repo: "{{ git_webhook_repo }}"
     dest: "{{ mounted_data_path }}/webhook"
-    version: "{{ webhook_version }}"
-    force: yes
+    version: "{{ git_webhook_branch }}"
+    force: true
 
 - name: Create acme directory
   file:
@@ -139,36 +133,27 @@
     src: default.conf.j2
     dest: "{{ mounted_data_path }}/nginx/default.conf"
 
-- name: Create vault directory
+- name: Create OpenBao directory
   file:
-    path: "{{ mounted_data_path }}/vault"
+    path: "{{ mounted_data_path }}/openbao"
     state: directory
 
-- name: Create vault policies directory
-  file:
-    path: "{{ mounted_data_path }}/vault/policies"
-    state: directory
-
-- name: Copy vault policies
+- name: Copy OpenBao configuration
   copy:
-    src: vault/policies/
-    dest: "{{ mounted_data_path }}/vault/policies/"
-
-- name: Copy vault Dockerfile
-  copy:
-    src: vault/Dockerfile
-    dest: "{{ mounted_data_path }}/vault/Dockerfile"
-
-- name: Copy vault entrypoint.sh
-  copy:
-    src: vault/entrypoint.sh
-    dest: "{{ mounted_data_path }}/vault/entrypoint.sh"
-    mode: "0755"
-
-- name: Copy vault.hcl config
-  copy:
-    src: vault/vault.hcl
-    dest: "{{ mounted_data_path }}/vault/vault.hcl"
+    src: "openbao/{{ item.name }}"
+    dest: "{{ mounted_data_path }}/openbao/{{ item.name }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - name: openbao.hcl
+      mode: "0644"
+    - name: openbao-agent.hcl
+      mode: "0644"
+    - name: openbao-api-policy.hcl
+      mode: "0644"
+    - name: openbao-bootstrap.sh
+      mode: "0755"
+    - name: concourse-policy.hcl
+      mode: "0644"
 
 - name: Create registry directory
   file:
@@ -184,13 +169,6 @@
   template:
     src: config.yml.j2
     dest: "{{ mounted_data_path }}/registry/config/config.yml"
-
-- name: Setup vault mounts
-  block:
-    - name: Create the internal directory
-      ansible.builtin.file:
-        path: "{{ mounted_data_path }}/vault/internal"
-        state: directory
 
 - name: Download iPXE efi binary
   ansible.builtin.get_url:
@@ -255,22 +233,16 @@
 
     - name: Create macvlan shim (linux only)
       ansible.builtin.shell: |
-        nsenter --target 1 --net --mount ip link add macvlan-shim link {{ interface }} type macvlan mode bridge
+        nsenter --target 1 --net --mount ip link add macvlan-shim link {{ ansible_default_ipv4.interface }} type macvlan mode bridge
         nsenter --target 1 --net --mount ip addr add {{ macvlan_host_ip }} dev macvlan-shim
         nsenter --target 1 --net --mount ip link set macvlan-shim up
         nsenter --target 1 --net --mount ip route add {{ macvlan_subnet }} dev macvlan-shim || true
       when: macvlan_check.rc != 0
       become: true
 
-- name: Wait for the vault root password file to generate
-  ansible.builtin.wait_for:
-    path: "{{ mounted_data_path }}/vault/vault_stuff/stuff/root_token"
-    state: present
-    timeout: 120
-
-- name: Wait for the Vault API to become reachable
+- name: Wait for the OpenBao API to become reachable
   ansible.builtin.uri:
-    url: "{{ vault_bootstrap_url }}/v1/sys/health"
+    url: "{{ openbao_bootstrap_url }}/v1/sys/health"
     method: GET
     status_code:
       - 200
@@ -280,18 +252,10 @@
       - 501
       - 503
     validate_certs: false
-  register: vault_health
+  register: openbao_health
   retries: 60
   delay: 2
-  until: vault_health is succeeded
-
-- name: Set the vault root password
-  ansible.builtin.set_fact:
-    vault_root_password: "{{ lookup('file', mounted_data_path + '/vault/vault_stuff/stuff/root_token') | trim }}"
-
-- name: Print the vault root password
-  debug:
-    msg: "{{ vault_root_password }}"
+  until: openbao_health is succeeded
 
 # - name: Create git id25519 SSH key
 #   community.crypto.openssh_keypair:
@@ -303,86 +267,6 @@
 #     path: "{{ provisioning_ssh_key_path }}"
 #     type: "ed25519"
 
-- name: Store the git provisioning key
-  set_fact:
-    git_prov_key: "{{ lookup('file', '/etc/ssh/git_provisioning_key') }}"
-
-- name: Store the provisioning key
-  set_fact:
-    prov_key: "{{ lookup('file', '/etc/ssh/provisioning_key') }}"
-
-- name: Generate the public key from the git provisioning private key
-  ansible.builtin.shell:
-    cmd: |
-      echo "{{ git_prov_key }}" > /tmp/temp_key && chmod 600 /tmp/temp_key && ssh-keygen -y -f /tmp/temp_key
-  register: git_ssh_public_key
-
-- name: Generate the public key from the public key
-  ansible.builtin.shell:
-    cmd: |
-      echo "{{ prov_key }}" > /tmp/temp_key && chmod 600 /tmp/temp_key && ssh-keygen -y -f /tmp/temp_key
-  register: prov_ssh_public_key
-
-- name: Upload bootstrap secrets to Vault
-  community.hashi_vault.vault_kv2_write:
-    url: "{{ vault_bootstrap_url }}"
-    engine_mount_point: "{{ item.mount }}"
-    path: "{{ item.path }}"
-    data:
-      key: "{{ item.value }}"
-    token: "{{ vault_root_password }}"
-    validate_certs: false
-  loop:
-    - mount: kv2
-      path: vault/root_token
-      value: "{{ vault_root_password }}"
-    - mount: kv2
-      path: github/ssh/public
-      value: "{{ git_ssh_public_key.stdout }}"
-    - mount: kv2
-      path: github/ssh/private
-      value: "{{ git_prov_key }}"
-    - mount: concourse
-      path: shared/github_ssh_private_key
-      value: "{{ git_prov_key }}"
-    - mount: concourse
-      path: shared/github/webhook
-      value: "{{ lookup('env', 'GITHUB_WEBHOOK_SECRET') }}"
-    - mount: kv2
-      path: provisioning/ssh/private
-      value: "{{ prov_key }}"
-    - mount: kv2
-      path: provisioning/ssh/public
-      value: "{{ prov_ssh_public_key.stdout }}"
-    - mount: concourse
-      path: main/root_token
-      value: "{{ vault_root_password }}"
-    - mount: kv2
-      path: router/primary/api_password
-      value: "{{ lookup('env', 'PRIMARY_ROUTER_API_PASSWORD') }}"
-    - mount: kv2
-      path: concourse/local_user/password
-      value: "{{ lookup('env', 'CONCOURSE_PASSWORD') }}"
-    - mount: kv2
-      path: concourse/oauth/client_secret
-      value: "{{ lookup('env', 'CONCOURSE_OAUTH_CLIENT_SECRET') }}"
-    - mount: kv2
-      path: cloudflare/api_key
-      value: "{{ lookup('env', 'CLOUDFLARE_API_KEY') }}"
-    - mount: kv2
-      path: zerossl/eab/kid
-      value: "{{ lookup('env', 'ZEROSSL_EAB_KID') }}"
-    - mount: kv2
-      path: zerossl/eab/hmac_key
-      value: "{{ lookup('env', 'ZEROSSL_EAB_HMAC_KEY') }}"
-    - mount: kv2
-      path: postgres/osdb/password
-      value: "{{ lookup('env', 'POSTGRES_PASSWORD') }}"
-  no_log: true
-  retries: 50
-  delay: 5
-  when: item.value | length > 0
-
 - name: Wait for the Stigmergy API to become reachable
   ansible.builtin.uri:
     url: "{{ lookup('env', 'STIGMERGY_API_URL') }}/readyz"
@@ -393,12 +277,31 @@
   delay: 3
   until: stigmergy_api is succeeded
 
+- name: Create or update the OpenBao SecretStore resource
+  ansible.builtin.uri:
+    url: "{{ lookup('env', 'STIGMERGY_API_URL') }}/api/v1alpha1/secret-stores/openbao"
+    method: PUT
+    body_format: json
+    status_code:
+      - 200
+      - 201
+    body:
+      apiVersion: homelab.io/v1alpha1
+      kind: SecretStore
+      metadata:
+        name: openbao
+      spec:
+        provider:
+          openBao:
+            address: http://127.0.0.1:8200
+            kvV2Mount: kv2
+            keyPrefix: secrets
+            authentication:
+              tokenFile: /run/openbao/token
+
 - name: Define the bootstrap Secret resources
   ansible.builtin.set_fact:
     bootstrap_secrets:
-      - name: vault-root-token
-        path: vault/root_token
-        value: "{{ lookup('env', 'VAULT_TOKEN') | default(vault_root_password, true) }}"
       - name: primary-router-api-password
         path: router/primary/api_password
         value: "{{ lookup('env', 'PRIMARY_ROUTER_API_PASSWORD') }}"
@@ -485,9 +388,9 @@
 # - name: Build ISOs
 #   include_tasks: build_isos.yml
 
-- name: Show vault URL
+- name: Show OpenBao URL
   debug:
-    var: vault_url
+    var: openbao_url
 
 - name: Push the prov image to the registry
   ansible.builtin.shell:
@@ -529,11 +432,6 @@
   retries: 5
   delay: 5
 
-- name: Initialize infra pipelines
-  import_role:
-    name: concourse
-    tasks_from: create_commands_pipeline
-
 - name: Fetch the inventory capture groups from Stigmergy
   ansible.builtin.uri:
     url: "{{ lookup('env', 'STIGMERGY_API_URL') }}/api/v1alpha1/inventory-capture-groups"
@@ -551,63 +449,3 @@
 
 - name: Create the inventory capture group standup pipelines
   include_tasks: create_inventory_capture_group_pipeline.yml
-
-- name: Initialize ISO build pipeline
-  import_role:
-    name: concourse
-    tasks_from: create_iso_build_pipeline
-# - name: Check if nebula CA private key exists in Vault
-#   community.hashi_vault.vault_read:
-#     url: "https://vault.ryuugu.dev"
-#     path: "kv2/nebula/ca/private_key"
-#     token: "{{ vault_root_password }}"
-#     validate_certs: true
-#   register: nebula_ca_check
-#   failed_when: false
-#   ignore_errors: true
-#   retries: 3
-#   delay: 2
-
-# - name: Init the nebula CA
-#   block:
-#     - name: Create the nebula CA
-#       ansible.builtin.shell: nebula-cert ca -name "homelab"
-#       args:
-#         chdir: "{{ host_roles_path }}/files/nebula"
-#       when: nebula_ca_check is failed or nebula_ca_check.data is not defined
-
-#     - name: Upload the nebula private key to Vault
-#       community.hashi_vault.vault_write:
-#         url: "https://vault.ryuugu.dev"
-#         path: "kv2/nebula/private_key"
-#         data:
-#           key: "{{ lookup('file', '{{ host_roles_path }}/files/nebula/ca.key') }}"
-#         token: "{{ vault_root_password }}"
-#         validate_certs: true
-
-#     - name: Upload the nebula certificate to Vault
-#       community.hashi_vault.vault_write:
-#         url: "https://vault.ryuugu.dev"
-#         path: "kv2/nebula/private_key"
-#         data:
-#           key: "{{ lookup('file', '{{ host_roles_path }}/files/nebula/ca.key') }}"
-#         token: "{{ vault_root_password }}"
-#         validate_certs: true
-
-#     - name: Remove the generated files from host
-#       ansible.builtin.file:
-#         path: "{{ host_roles_path }}/files/nebula/{{ item }}"
-#         state: absent
-#       with_items:
-#         - ca.key
-#         - ca.crt
-#   when: nebula_ca_check is failed or nebula_ca_check.data is not defined
-
-# - name: Build Droplet lighthouse cert
-
-# - name: Build the hss image
-#   ansible.builtin.shell:
-#     cmd: |
-#       docker build -t hss:latest -f Dockerfile.hss .
-#     chdir: "{{ host_roles_path }}/files/provisioning-api"
-#   register: hss_build

@@ -4,9 +4,9 @@ resources:
     check_every: 720h
     webhook_token: ((github/webhook.key))
     source:
-      uri: "{{ inventory_repo }}"
+      uri: "{{ git_inventory_repo }}"
       branch: "((inventory_capture_group_name))"
-      private_key: ((github_ssh_private_key.key))
+      private_key: ((automation/git-ssh-key.privateKey))
 
 jobs:
   - name: standup
@@ -25,11 +25,9 @@ jobs:
           inputs:
             - name: inventory-trigger
           params:
-            PROV_CONTROLLER_API_URL: "{{ prov_controller_api_url }}"
+            STIGMERGY_API_URL: "{{ lookup('env', 'STIGMERGY_API_URL') }}"
             INVENTORY_CAPTURE_GROUP_NAME: "((inventory_capture_group_name))"
             IS_BOOTSTRAP_ENV: "false"
-            VAULT_ADDR: "{{ vault_bootstrap_url }}"
-            VAULT_TOKEN: ((root_token.key))
           run:
             path: /bin/bash
             user: keiichi
@@ -39,4 +37,4 @@ jobs:
               - |
                   set -euo pipefail
                   echo "Standup pipeline for ${INVENTORY_CAPTURE_GROUP_NAME}"
-                  curl -fsS "${PROV_CONTROLLER_API_URL%/}/inventorycapturegroups/${INVENTORY_CAPTURE_GROUP_NAME}" | jq .
+                  curl -fsS "${STIGMERGY_API_URL%/}/api/v1alpha1/inventory-capture-groups/${INVENTORY_CAPTURE_GROUP_NAME}" | jq .

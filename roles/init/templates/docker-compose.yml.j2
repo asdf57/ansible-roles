@@ -1,13 +1,19 @@
 volumes:
   ssl_certs:
     driver: local
-  vault_shared:
+  openbao_shared:
+    driver: local
+  openbao_data:
+    driver: local
+  openbao_init:
+    driver: local
+  openbao_bootstrap:
+    driver: local
+  openbao_runtime:
+    driver: local
+  etcd_data:
     driver: local
   concourse_keys:
-    driver: local
-  prov_controller_inventory_repo:
-    driver: local
-  prov_controller_hostvars_repo:
     driver: local
 
 services:
@@ -84,14 +90,13 @@ services:
         condition: service_healthy
       concourse-keys:
         condition: service_completed_successfully
-      vault:
-        condition: service_healthy
+      openbao-bootstrap:
+        condition: service_completed_successfully
     ports:
-      - "8080:8080"
       - "2222:2222"
     volumes:
       - concourse_keys:/concourse-keys
-      - vault_shared:/shared
+      - openbao_shared:/shared
     environment:
       CONCOURSE_SESSION_SIGNING_KEY: /concourse-keys/session_signing_key
       CONCOURSE_TSA_HOST_KEY: /concourse-keys/tsa_host_key
@@ -104,8 +109,10 @@ services:
       CONCOURSE_ADD_LOCAL_USER: "{{ concourse_user }}:{{ lookup('env', 'CONCOURSE_PASSWORD') }}"
       CONCOURSE_MAIN_TEAM_LOCAL_USER: "{{ concourse_user }}"
       CONCOURSE_CLUSTER_NAME: homelab
-      CONCOURSE_VAULT_URL: "{{ vault_bootstrap_url }}"
-      CONCOURSE_VAULT_SHARED_PATH: shared
+      CONCOURSE_VAULT_URL: "{{ openbao_bootstrap_url }}"
+      CONCOURSE_VAULT_PATH_PREFIX: /kv2/secrets
+      CONCOURSE_VAULT_LOOKUP_TEMPLATES: '/{% raw %}{{.Secret}}{% endraw %}'
+      CONCOURSE_VAULT_ENABLE_KV_MOUNT_CACHE: "true"
     restart: always
     networks:
       clusternet:
@@ -124,8 +131,7 @@ services:
       - concourse-web
     volumes:
       - concourse_keys:/concourse-keys
-      - "{{ host_data_path }}/vault/vault_stuff/stuff:/stuff"
-      - vault_shared:/shared
+      - openbao_shared:/shared
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
       CONCOURSE_TSA_HOST: concourse-web:2222
@@ -133,131 +139,139 @@ services:
       CONCOURSE_TSA_WORKER_PRIVATE_KEY: /concourse-keys/session_signing_key
       CONCOURSE_RUNTIME: containerd
       CONCOURSE_CONTAINERD_ALLOW_HOST_ACCESS: "true"
-      CONCOURSE_VAULT_URL: "{{ vault_bootstrap_url }}"
-      CONCOURSE_VAULT_SHARED_PATH: shared
+      CONCOURSE_VAULT_URL: "{{ openbao_bootstrap_url }}"
       CONCOURSE_CONTAINERD_DNS_PROXY_ENABLE: "true"
     restart: always
     networks:
       - clusternet
 
-  http:
-    build: ./provisioning-api
-    ports:
-      - "3000:3000"
-      - "8000:8000"
-    secrets:
-      - git_provisioning_key
-    restart: always
-    networks:
-      clusternet:
-        ipv4_address: "{{ server_api_ipv4 }}"
-    environment:
-      CONCOURSE_URL: "{{ concourse_url }}"
-      CONCOURSE_USER: "{{ concourse_user }}"
-      CONCOURSE_PASSWORD: "{{ lookup('env', 'CONCOURSE_PASSWORD') }}"
-      CONCOURSE_TEAM: "{{ concourse_team }}"
-      CONCOURSE_COMMANDS_PIPELINE: "{{ concourse_commands_pipeline }}"
-      CONCOURSE_COMMANDS_RESOURCE: "{{ concourse_commands_resource }}"
-      CONCOURSE_OAUTH_CLIENT_ID: "{{ concourse_oauth_client_id }}"
-      CONCOURSE_OAUTH_CLIENT_SECRET: "{{ lookup('env', 'CONCOURSE_OAUTH_CLIENT_SECRET') }}"
-
-  prov-controller-redis:
-    image: redis:7-alpine
-    container_name: prov-controller-redis
+  openbao:
+    image: ghcr.io/openbao/openbao:2.6.1
+    container_name: openbao
     command:
-      - redis-server
-      - --appendonly
-      - "yes"
-      - --appendfsync
-      - everysec
-      - --save
-      - "60 1000"
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    restart: always
-    networks:
-      - clusternet
-
-  prov-controller:
-    build: ./prov-controller
-    container_name: prov-controller
-    init: true
-    pids_limit: -1
-    depends_on:
-      prov-controller-redis:
-        condition: service_healthy
-    secrets:
-      - git_provisioning_key
-    restart: always
-    environment:
-      REDIS_URL: redis://prov-controller-redis:6379
-      CONCOURSE_URL: "{{ concourse_url }}"
-      CONCOURSE_USER: "{{ concourse_user }}"
-      CONCOURSE_PASSWORD: "{{ lookup('env', 'CONCOURSE_PASSWORD') }}"
-      CONCOURSE_TEAM: "{{ concourse_team }}"
-      CONCOURSE_ISO_PIPELINE: build-isos
-      CONCOURSE_ISO_JOB: build-isos
-      NGINX_FILES_BASE_URL: "https://{{ nginx_acme_label }}"
-      NGINX_FILES_DIR: /srv/nginx-files
-      REDIS_ENFORCE_PERSISTENCE: "true"
-      INVENTORY_REPO_DIR: /repos/homelab-inventory
-      HOSTVARS_REPO_DIR: /repos/homelab-hostvars
-      INVENTORY_REPO_URL: "{{ inventory_repo }}"
-      HOSTVARS_REPO_URL: "{{ hostvars_repo }}"
-      INVENTORY_REPO_BRANCH: "{{ inventory_version }}"
-      HOSTVARS_REPO_BRANCH: "{{ hostvars_version }}"
-      GIT_AUTO_CLONE: "true"
-      GIT_PULL_ENABLED: "true"
-      GIT_PUSH_ENABLED: "true"
-      GIT_AUTHOR_NAME: "{{ groupvars_git_user_name }}"
-      GIT_AUTHOR_EMAIL: "{{ groupvars_git_user_email }}"
-      GIT_SSH_COMMAND: "ssh -i /run/secrets/git_provisioning_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
-    ulimits:
-      nproc: 65535
-    volumes:
-      - prov_controller_inventory_repo:/repos/homelab-inventory
-      - prov_controller_hostvars_repo:/repos/homelab-hostvars
-      - "{{ host_data_path }}/nginx/files:/srv/nginx-files"
-    healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8001/api/v1/routers/ >/dev/null || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 10s
-    networks:
-      clusternet:
-        ipv4_address: "{{ prov_controller_ipv4 }}"
-
-  vault:
-    build: ./vault
-    container_name: vault
+      - server
+      - -config=/openbao/config/openbao.hcl
     ports:
       - 8200:8200
     cap_add:
       - IPC_LOCK
     restart: always
     volumes:
-      - "{{ host_data_path }}/vault/vault_stuff/internal:/vault/data"
-      - "{{ host_data_path }}/vault/vault_stuff/config:/vault/config"
-      - "{{ host_data_path }}/vault/vault_stuff/logs:/vault/logs"
-      - "{{ host_data_path }}/vault/vault_stuff/secrets:/vault/secrets"
-      - "{{ host_data_path }}/vault/vault_stuff/stuff:/stuff"
-      - vault_shared:/shared
-      - ssl_certs:/vault/ssl:ro
+      - openbao_data:/openbao/file
+      - ./openbao/openbao.hcl:/openbao/config/openbao.hcl:ro
     environment:
-      VAULT_ADDR: "http://127.0.0.1:8200"
-      VAULT_API_ADDR: "http://vault:8200"
+      BAO_ADDR: "http://127.0.0.1:8200"
+      BAO_API_ADDR: "http://openbao:8200"
     networks:
       clusternet:
-        ipv4_address: "{{ vault_ipv4 }}"
+        ipv4_address: "{{ openbao_ipv4 }}"
     healthcheck:
-      test: ["CMD", "vault", "status"]
-      interval: 5s
-      retries: 5
-      start_period: 5s
+      test:
+        - CMD-SHELL
+        - wget -q --spider 'http://127.0.0.1:8200/v1/sys/health?standbyok=true&sealedcode=200&uninitcode=200'
+      interval: 3s
+      timeout: 2s
+      retries: 20
+      start_period: 3s
+
+  openbao-volume-init:
+    image: ghcr.io/openbao/openbao:2.6.1
+    user: "0:0"
+    entrypoint: [/bin/sh, -ec]
+    command:
+      - |
+        chown 100:1000 /run/openbao-init /run/openbao-bootstrap /run/openbao /shared
+        chmod 0700 /run/openbao-init /run/openbao-bootstrap
+        chmod 0750 /run/openbao /shared
+    volumes:
+      - openbao_init:/run/openbao-init
+      - openbao_bootstrap:/run/openbao-bootstrap
+      - openbao_runtime:/run/openbao
+      - openbao_shared:/shared
+
+  openbao-bootstrap:
+    image: ghcr.io/openbao/openbao:2.6.1
+    entrypoint: [/bin/sh, /openbao/bootstrap/openbao-bootstrap.sh]
+    environment:
+      BAO_ADDR: http://openbao:8200
+    depends_on:
+      openbao:
+        condition: service_healthy
+      openbao-volume-init:
+        condition: service_completed_successfully
+    volumes:
+      - ./openbao/openbao-bootstrap.sh:/openbao/bootstrap/openbao-bootstrap.sh:ro
+      - ./openbao/openbao-api-policy.hcl:/openbao/bootstrap/openbao-api-policy.hcl:ro
+      - ./openbao/concourse-policy.hcl:/openbao/bootstrap/concourse-policy.hcl:ro
+      - openbao_init:/run/openbao-init
+      - openbao_bootstrap:/run/openbao-bootstrap
+      - openbao_shared:/shared
+
+  openbao-agent:
+    image: ghcr.io/openbao/openbao:2.6.1
+    command:
+      - agent
+      - -config=/openbao/agent/openbao-agent.hcl
+    depends_on:
+      openbao-bootstrap:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    volumes:
+      - ./openbao/openbao-agent.hcl:/openbao/agent/openbao-agent.hcl:ro
+      - openbao_bootstrap:/run/openbao-bootstrap:ro
+      - openbao_runtime:/run/openbao
+    healthcheck:
+      test: ["CMD-SHELL", "test -s /run/openbao/token"]
+      interval: 3s
+      timeout: 2s
+      retries: 20
+      start_period: 3s
+
+  etcd:
+    image: gcr.io/etcd-development/etcd:v3.6.13
+    command:
+      - /usr/local/bin/etcd
+      - --name=etcd
+      - --data-dir=/etcd-data
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --advertise-client-urls=http://etcd:2379
+      - --listen-peer-urls=http://0.0.0.0:2380
+      - --initial-advertise-peer-urls=http://etcd:2380
+      - --initial-cluster=etcd=http://etcd:2380
+      - --initial-cluster-state=new
+      - --auto-compaction-mode=periodic
+      - --auto-compaction-retention=1h
+    volumes:
+      - etcd_data:/etcd-data
+    ports:
+      - "127.0.0.1:2379:2379"
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/etcdctl", "--endpoints=http://127.0.0.1:2379", "endpoint", "health"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+      start_period: 2s
+    networks:
+      - clusternet
+
+  stigmergy:
+    build: ./stigmergy
+    container_name: stigmergy
+    environment:
+      HTTP_ADDR: 0.0.0.0:8080
+      ETCD_ENDPOINTS: http://127.0.0.1:2379
+    depends_on:
+      etcd:
+        condition: service_healthy
+      openbao-agent:
+        condition: service_healthy
+    volumes:
+      - openbao_runtime:/run/openbao:ro
+    group_add:
+      - "1000"
+    init: true
+    restart: always
+    network_mode: host
 
   nginx:
     build: ./nginx
@@ -310,33 +324,18 @@ services:
       retries: 5000
       start_period: 10s
 
-  postgres:
-    image: postgres:15
-    container_name: osdb
-    restart: always
-    environment:
-      POSTGRES_USER: "{{ postgres_user }}"
-      POSTGRES_PASSWORD: "{{ lookup('env', 'POSTGRES_PASSWORD') }}"
-      POSTGRES_DB: "{{ postgres_db }}"
-      PGDATA: /var/lib/postgresql/data/pgdata
-    volumes:
-      - "{{ host_data_path }}/postgres/data:/var/lib/postgresql/data:rw"
-    networks:
-      clusternet:
-        ipv4_address: "{{ postgres_ipv4 }}"
-
 secrets:
   git_provisioning_key:
-    file: "{{ host_git_ssh_key_path }}"
+    file: "{{ git_provisioning_key_file }}"
   droplet_ssh_key:
-    file: "{{ droplet_ssh_key_path }}"
+    file: "{{ droplet_key_file }}"
 
 networks:
   clusternet:
     driver: "{{ network_driver }}"
     driver_opts:
       mode: "{{ ipvlan_mode if network_driver == 'ipvlan' else macvlan_mode }}"
-      parent: "{{ interface }}"
+      parent: "{{ ansible_default_ipv4.interface }}"
     ipam:
       config:
         - subnet: "{{ ipvlan_subnet if network_driver == 'ipvlan' else macvlan_subnet }}"
