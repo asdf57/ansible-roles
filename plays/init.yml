@@ -10,7 +10,8 @@
         name: init
         tasks_from: clean
       become: true
-      tags: 
+      tags:
+        - never
         - clean
 
     - name: Run

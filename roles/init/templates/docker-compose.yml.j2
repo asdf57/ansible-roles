@@ -109,12 +109,13 @@ services:
       CONCOURSE_ADD_LOCAL_USER: "{{ concourse_user }}:{{ lookup('env', 'CONCOURSE_PASSWORD') }}"
       CONCOURSE_MAIN_TEAM_LOCAL_USER: "{{ concourse_user }}"
       CONCOURSE_CLUSTER_NAME: homelab
-      CONCOURSE_VAULT_URL: "{{ openbao_bootstrap_url }}"
+      CONCOURSE_VAULT_URL: http://openbao:8200
       CONCOURSE_VAULT_PATH_PREFIX: /kv2/secrets
       CONCOURSE_VAULT_LOOKUP_TEMPLATES: '/{% raw %}{{.Secret}}{% endraw %}'
       CONCOURSE_VAULT_ENABLE_KV_MOUNT_CACHE: "true"
     restart: always
     networks:
+      default:
       clusternet:
         ipv4_address: "{{ concourse_ipv4 }}"
 
@@ -139,10 +140,11 @@ services:
       CONCOURSE_TSA_WORKER_PRIVATE_KEY: /concourse-keys/session_signing_key
       CONCOURSE_RUNTIME: containerd
       CONCOURSE_CONTAINERD_ALLOW_HOST_ACCESS: "true"
-      CONCOURSE_VAULT_URL: "{{ openbao_bootstrap_url }}"
+      CONCOURSE_VAULT_URL: http://openbao:8200
       CONCOURSE_CONTAINERD_DNS_PROXY_ENABLE: "true"
     restart: always
     networks:
+      - default
       - clusternet
 
   openbao:
@@ -162,9 +164,6 @@ services:
     environment:
       BAO_ADDR: "http://127.0.0.1:8200"
       BAO_API_ADDR: "http://openbao:8200"
-    networks:
-      clusternet:
-        ipv4_address: "{{ openbao_ipv4 }}"
     healthcheck:
       test:
         - CMD-SHELL
@@ -251,32 +250,32 @@ services:
       timeout: 2s
       retries: 15
       start_period: 2s
-    networks:
-      - clusternet
 
   stigmergy:
     build: ./stigmergy
     container_name: stigmergy
     environment:
       HTTP_ADDR: 0.0.0.0:8080
-      ETCD_ENDPOINTS: http://127.0.0.1:2379
+      ETCD_ENDPOINTS: http://etcd:2379
     depends_on:
       etcd:
         condition: service_healthy
       openbao-agent:
         condition: service_healthy
+    ports:
+      - "0.0.0.0:8080:8080"
     volumes:
       - openbao_runtime:/run/openbao:ro
     group_add:
       - "1000"
     init: true
     restart: always
-    network_mode: host
 
   nginx:
     build: ./nginx
     container_name: nginx
     networks:
+      default:
       clusternet:
         ipv4_address: "{{ nginx_ipv4 }}"
     ports:
@@ -304,12 +303,12 @@ services:
     network_mode: host
     environment:
       - CF_Token="{{ lookup('env', 'CLOUDFLARE_API_KEY') }}"
-      - CF_Email="{{ cloudflare_email }}"
+      - CF_Email="{{ lookup('env', 'CLOUDFLARE_EMAIL') }}"
       - ACME_DOMAIN={{ cloudflare_domain }}
       - ACME_SERVER={{ cert_authority }}
       - ZEROSSL_EAB_KID={{ lookup('env', 'ZEROSSL_EAB_KID') }}
       - ZEROSSL_EAB_HMAC_KEY={{ lookup('env', 'ZEROSSL_EAB_HMAC_KEY') }}
-      - ZEROSSL_EMAIL={{ zerossl_email }}
+      - ZEROSSL_EMAIL={{ lookup('env', 'ZEROSSL_EMAIL') }}
       - DNS_API=dns_cf
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -335,7 +334,7 @@ networks:
     driver: "{{ network_driver }}"
     driver_opts:
       mode: "{{ ipvlan_mode if network_driver == 'ipvlan' else macvlan_mode }}"
-      parent: "{{ ansible_default_ipv4.interface }}"
+      parent: "{{ ansible_facts['default_ipv4']['interface'] }}"
     ipam:
       config:
         - subnet: "{{ ipvlan_subnet if network_driver == 'ipvlan' else macvlan_subnet }}"
