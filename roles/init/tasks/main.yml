@@ -267,7 +267,7 @@
 - name: Build the Arch ISO task image
   ansible.builtin.shell:
     cmd: |
-      docker build --no-cache -t prov-iso-task-arch:latest -f /homelab/ansible/roles/os/files/arch/Dockerfile.task /homelab/ansible/roles/os/files
+      docker build --no-cache -t prov-iso-task-arch:latest -f /homelab/roles/os/files/arch/Dockerfile.task /homelab/roles/os/files
   register: arch_iso_task_image_build
   retries: 3
   delay: 5
@@ -283,7 +283,7 @@
 - name: Build the Debian Trixie ISO task image
   ansible.builtin.shell:
     cmd: |
-      docker build --no-cache -t prov-iso-task-debian-trixie:latest -f /homelab/ansible/roles/os/files/debian-trixie/Dockerfile.task /homelab/ansible/roles/os/files
+      docker build --no-cache -t prov-iso-task-debian-trixie:latest -f /homelab/roles/os/files/debian-trixie/Dockerfile.task /homelab/roles/os/files
   register: debian_iso_task_image_build
   retries: 3
   delay: 5
