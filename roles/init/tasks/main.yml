@@ -237,21 +237,16 @@
   until: acme_health.stdout == "healthy"
   retries: 1000
 
-- name: macvlan shim
+- name: Configure the macvlan host shim
   when: network_driver == "macvlan" and ansible_facts['os_family'] not in ["Darwin", "Windows"]
   block:
-    - name: Is the macvlan network already created?
-      ansible.builtin.command: ip link show macvlan-shim
-      register: macvlan_check
-      ignore_errors: true
-
-    - name: Create macvlan shim (linux only)
+    - name: Recreate macvlan shim in bridge mode
       ansible.builtin.shell: |
-        nsenter --target 1 --net --mount ip link add macvlan-shim link {{ ansible_facts['default_ipv4']['interface'] }} type macvlan mode bridge
-        nsenter --target 1 --net --mount ip addr add {{ macvlan_host_ip }} dev macvlan-shim
-        nsenter --target 1 --net --mount ip link set macvlan-shim up
-        nsenter --target 1 --net --mount ip route add {{ macvlan_subnet }} dev macvlan-shim || true
-      when: macvlan_check.rc != 0
+        ip link delete macvlan-shim 2>/dev/null || true
+        ip link add macvlan-shim link {{ ansible_facts['default_ipv4']['interface'] }} type macvlan mode bridge
+        ip addr add {{ macvlan_host_ip }} dev macvlan-shim
+        ip link set macvlan-shim up
+        ip route replace {{ macvlan_subnet }} dev macvlan-shim
       become: true
 
 # - name: Build ISOs
@@ -261,11 +256,11 @@
   debug:
     var: openbao_url
 
-- name: Push the prov image to the registry
+- name: Push the Arch provisioner image to the registry
   ansible.builtin.shell:
     cmd: |
-      skopeo copy --dest-tls-verify=false docker-daemon:prov:latest docker://{{ registry_ipv4 }}:5000/prov:latest
-  register: prov_push
+      skopeo copy --dest-tls-verify=false docker-daemon:{{ lookup('env', 'BOOTSTRAP_IMAGE') }} docker://{{ registry_ipv4 }}:5000/arch-provisioner:latest
+  register: arch_provisioner_push
   retries: 5
   delay: 5
 
