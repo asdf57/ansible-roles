@@ -20,9 +20,7 @@ services:
   webhook:
     build: ./webhook
     ports:
-      - "3001:3001"
-    secrets:
-      - droplet_ssh_key
+      - "3001:3000"
     restart: always
     networks:
       clusternet:
@@ -322,12 +320,6 @@ services:
       interval: 10s
       retries: 5000
       start_period: 10s
-
-secrets:
-  git_provisioning_key:
-    file: "{{ git_provisioning_key_file }}"
-  droplet_ssh_key:
-    file: "{{ droplet_key_file }}"
 
 networks:
   clusternet:
