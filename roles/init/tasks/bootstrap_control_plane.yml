@@ -6,7 +6,6 @@
     fail_msg: "{{ item }} must be provided to the bootstrap container."
   loop:
     - MOUNT_DATA_PATH
-    - BOOTSTRAP_IMAGE
     - STIGMERGY_API_URL
     - GIT_STIGMERGY_REPO
     - GIT_STIGMERGY_BRANCH
