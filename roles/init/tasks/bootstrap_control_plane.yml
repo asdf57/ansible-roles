@@ -1,0 +1,173 @@
+---
+- name: Validate control-plane bootstrap environment
+  ansible.builtin.assert:
+    that:
+      - lookup('env', item) | length > 0
+    fail_msg: "{{ item }} must be provided to the bootstrap container."
+  loop:
+    - MOUNT_DATA_PATH
+    - STIGMERGY_API_URL
+    - GIT_STIGMERGY_REPO
+    - GIT_STIGMERGY_BRANCH
+    - GIT_INVENTORY_REPO
+    - INVENTORY_PUBLICATION_GROUP
+
+- name: Configure bootstrap paths
+  ansible.builtin.set_fact:
+    mounted_data_path: "{{ lookup('env', 'MOUNT_DATA_PATH') }}"
+
+- name: Clone Stigmergy for the bootstrap control plane
+  ansible.builtin.git:
+    repo: "{{ lookup('env', 'GIT_STIGMERGY_REPO') }}"
+    dest: "{{ mounted_data_path }}/stigmergy"
+    version: "{{ lookup('env', 'GIT_STIGMERGY_BRANCH') }}"
+    force: true
+
+- name: Create the OpenBao configuration directory
+  ansible.builtin.file:
+    path: "{{ mounted_data_path }}/openbao"
+    state: directory
+
+- name: Copy the OpenBao control-plane configuration
+  ansible.builtin.copy:
+    src: "openbao/{{ item.name }}"
+    dest: "{{ mounted_data_path }}/openbao/{{ item.name }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - {name: openbao.hcl, mode: "0644"}
+    - {name: openbao-agent.hcl, mode: "0644"}
+    - {name: openbao-api-policy.hcl, mode: "0644"}
+    - {name: openbao-bootstrap.sh, mode: "0755"}
+    - {name: concourse-policy.hcl, mode: "0644"}
+
+- name: Render the bootstrap control-plane Compose file
+  ansible.builtin.template:
+    src: docker-compose.bootstrap.yml.j2
+    dest: "{{ mounted_data_path }}/docker-compose.bootstrap.yml"
+
+- name: Start the bootstrap control plane
+  community.docker.docker_compose_v2:
+    project_src: "{{ mounted_data_path }}"
+    project_name: infra
+    files:
+      - docker-compose.bootstrap.yml
+    state: present
+    build: always
+    remove_orphans: false
+
+- name: Wait for OpenBao to become reachable
+  ansible.builtin.uri:
+    url: http://127.0.0.1:8200/v1/sys/health
+    method: GET
+    status_code: [200, 429, 472, 473, 501, 503]
+  register: openbao_health
+  retries: 60
+  delay: 2
+  until: openbao_health is succeeded
+
+- name: Wait for Stigmergy to become ready
+  ansible.builtin.uri:
+    url: "{{ lookup('env', 'STIGMERGY_API_URL') }}/readyz"
+    method: GET
+    status_code: 200
+  register: stigmergy_api
+  retries: 60
+  delay: 2
+  until: stigmergy_api is succeeded
+
+- name: Create or update the OpenBao SecretStore
+  ansible.builtin.uri:
+    url: "{{ lookup('env', 'STIGMERGY_API_URL') }}/api/v1alpha1/secret-stores/openbao"
+    method: PUT
+    body_format: json
+    status_code: [200, 201]
+    body:
+      apiVersion: homelab.io/v1alpha1
+      kind: SecretStore
+      metadata: {name: openbao}
+      spec:
+        provider:
+          openBao:
+            address: http://openbao:8200
+            kvV2Mount: kv2
+            keyPrefix: secrets
+            authentication:
+              tokenFile: /run/openbao/token
+
+- name: Define environment-backed Secret resources
+  ansible.builtin.set_fact:
+    bootstrap_secrets:
+      - {name: primary-router-api-password, path: router/primary/api_password, value: "{{ lookup('env', 'PRIMARY_ROUTER_API_PASSWORD') }}"}
+      - {name: github-webhook-secret, path: github/webhook, value: "{{ lookup('env', 'GITHUB_WEBHOOK_SECRET') }}"}
+      - {name: concourse-password, path: concourse/local_user/password, value: "{{ lookup('env', 'CONCOURSE_PASSWORD') }}"}
+      - {name: concourse-oauth-client-secret, path: concourse/oauth/client_secret, value: "{{ lookup('env', 'CONCOURSE_OAUTH_CLIENT_SECRET') }}"}
+      - {name: cloudflare-api-key, path: cloudflare/api_key, value: "{{ lookup('env', 'CLOUDFLARE_API_KEY') }}"}
+      - {name: zerossl-eab-kid, path: zerossl/eab/kid, value: "{{ lookup('env', 'ZEROSSL_EAB_KID') }}"}
+      - {name: zerossl-eab-hmac-key, path: zerossl/eab/hmac_key, value: "{{ lookup('env', 'ZEROSSL_EAB_HMAC_KEY') }}"}
+      - {name: postgres-password, path: postgres/osdb/password, value: "{{ lookup('env', 'POSTGRES_PASSWORD') }}"}
+  no_log: true
+
+- name: Require every environment-backed secret
+  ansible.builtin.assert:
+    that: item.value | length > 0
+    fail_msg: "The value for bootstrap Secret/{{ item.name }} is empty."
+  loop: "{{ bootstrap_secrets }}"
+  loop_control: {label: "{{ item.name }}"}
+  no_log: true
+
+- name: Create or update environment-backed Secret resources
+  ansible.builtin.uri:
+    url: "{{ lookup('env', 'STIGMERGY_API_URL') }}/api/v1alpha1/secrets/{{ item.name }}"
+    method: PUT
+    body_format: json
+    status_code: [200, 201]
+    body:
+      apiVersion: homelab.io/v1alpha1
+      kind: Secret
+      metadata: {name: "{{ item.name }}"}
+      spec:
+        secretStoreRef: {name: openbao}
+        path: "{{ item.path }}"
+        data: {key: "{{ item.value }}"}
+  loop: "{{ bootstrap_secrets }}"
+  loop_control: {label: "{{ item.name }}"}
+  no_log: true
+
+- name: Wait for the API-managed Git SSH key
+  ansible.builtin.uri:
+    url: "{{ lookup('env', 'STIGMERGY_API_URL') }}/api/v1alpha1/secrets/git-ssh-key"
+    method: GET
+    return_content: true
+    status_code: 200
+  register: git_ssh_secret
+  retries: 60
+  delay: 2
+  until:
+    - git_ssh_secret.json.spec.data.privateKey | default('') | length > 0
+  no_log: true
+
+- name: Install the API-managed Git SSH key
+  ansible.builtin.copy:
+    content: "{{ git_ssh_secret.json.spec.data.privateKey }}"
+    dest: /home/keiichi/.ssh/id_github
+    mode: "0600"
+  no_log: true
+
+- name: Wait for the localhost inventory publication
+  ansible.builtin.uri:
+    url: "{{ lookup('env', 'STIGMERGY_API_URL') }}/api/v1alpha1/inventory-publications/localhost-servers-to-github"
+    method: GET
+    status_code: 200
+  register: localhost_inventory_publication
+  retries: 60
+  delay: 2
+  until: localhost_inventory_publication.json.status.phase | default('') == 'Published'
+
+- name: Fetch the published bootstrap inventory
+  ansible.builtin.git:
+    repo: "{{ lookup('env', 'GIT_INVENTORY_REPO') }}"
+    dest: /homelab/inventory
+    version: "{{ lookup('env', 'INVENTORY_PUBLICATION_GROUP') }}"
+    key_file: /home/keiichi/.ssh/id_github
+    accept_hostkey: true
+    force: true

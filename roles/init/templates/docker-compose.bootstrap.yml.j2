@@ -1,0 +1,124 @@
+volumes:
+  openbao_data:
+  openbao_init:
+  openbao_bootstrap:
+  openbao_runtime:
+  openbao_shared:
+  etcd_data:
+
+services:
+  openbao:
+    image: ghcr.io/openbao/openbao:2.6.1
+    container_name: openbao
+    command: [server, -config=/openbao/config/openbao.hcl]
+    ports:
+      - "8200:8200"
+    cap_add: [IPC_LOCK]
+    restart: always
+    volumes:
+      - openbao_data:/openbao/file
+      - ./openbao/openbao.hcl:/openbao/config/openbao.hcl:ro
+    environment:
+      BAO_ADDR: http://127.0.0.1:8200
+      BAO_API_ADDR: http://openbao:8200
+    healthcheck:
+      test: [CMD-SHELL, "wget -q --spider 'http://127.0.0.1:8200/v1/sys/health?standbyok=true&sealedcode=200&uninitcode=200'"]
+      interval: 3s
+      timeout: 2s
+      retries: 20
+      start_period: 3s
+
+  openbao-volume-init:
+    image: ghcr.io/openbao/openbao:2.6.1
+    user: "0:0"
+    entrypoint: [/bin/sh, -ec]
+    command:
+      - |
+        chown 100:1000 /run/openbao-init /run/openbao-bootstrap /run/openbao /shared
+        chmod 0700 /run/openbao-init /run/openbao-bootstrap
+        chmod 0750 /run/openbao /shared
+    volumes:
+      - openbao_init:/run/openbao-init
+      - openbao_bootstrap:/run/openbao-bootstrap
+      - openbao_runtime:/run/openbao
+      - openbao_shared:/shared
+
+  openbao-bootstrap:
+    image: ghcr.io/openbao/openbao:2.6.1
+    entrypoint: [/bin/sh, /openbao/bootstrap/openbao-bootstrap.sh]
+    environment:
+      BAO_ADDR: http://openbao:8200
+    depends_on:
+      openbao:
+        condition: service_healthy
+      openbao-volume-init:
+        condition: service_completed_successfully
+    volumes:
+      - ./openbao/openbao-bootstrap.sh:/openbao/bootstrap/openbao-bootstrap.sh:ro
+      - ./openbao/openbao-api-policy.hcl:/openbao/bootstrap/openbao-api-policy.hcl:ro
+      - ./openbao/concourse-policy.hcl:/openbao/bootstrap/concourse-policy.hcl:ro
+      - openbao_init:/run/openbao-init
+      - openbao_bootstrap:/run/openbao-bootstrap
+      - openbao_shared:/shared
+
+  openbao-agent:
+    image: ghcr.io/openbao/openbao:2.6.1
+    command: [agent, -config=/openbao/agent/openbao-agent.hcl]
+    depends_on:
+      openbao-bootstrap:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    volumes:
+      - ./openbao/openbao-agent.hcl:/openbao/agent/openbao-agent.hcl:ro
+      - openbao_bootstrap:/run/openbao-bootstrap:ro
+      - openbao_runtime:/run/openbao
+    healthcheck:
+      test: [CMD-SHELL, "test -s /run/openbao/token"]
+      interval: 3s
+      timeout: 2s
+      retries: 20
+      start_period: 3s
+
+  etcd:
+    image: gcr.io/etcd-development/etcd:v3.6.13
+    command:
+      - /usr/local/bin/etcd
+      - --name=etcd
+      - --data-dir=/etcd-data
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --advertise-client-urls=http://etcd:2379
+      - --listen-peer-urls=http://0.0.0.0:2380
+      - --initial-advertise-peer-urls=http://etcd:2380
+      - --initial-cluster=etcd=http://etcd:2380
+      - --initial-cluster-state=new
+      - --auto-compaction-mode=periodic
+      - --auto-compaction-retention=1h
+    volumes:
+      - etcd_data:/etcd-data
+    ports:
+      - "127.0.0.1:2379:2379"
+    healthcheck:
+      test: [CMD, /usr/local/bin/etcdctl, --endpoints=http://127.0.0.1:2379, endpoint, health]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+      start_period: 2s
+
+  stigmergy:
+    build: ./stigmergy
+    container_name: stigmergy
+    environment:
+      HTTP_ADDR: 0.0.0.0:8080
+      ETCD_ENDPOINTS: http://etcd:2379
+    depends_on:
+      etcd:
+        condition: service_healthy
+      openbao-agent:
+        condition: service_healthy
+    ports:
+      - "0.0.0.0:8080:8080"
+    volumes:
+      - openbao_runtime:/run/openbao:ro
+    group_add: ["1000"]
+    init: true
+    restart: always
