@@ -1,0 +1,95 @@
+---
+# DNS records are submitted only after the complete Compose stack has started.
+# The fresh readiness check covers a Stigmergy service recreation by the full
+# Compose project, so bootstrap never relies on records Stigmergy has not yet
+# accepted.
+
+- name: Assemble DNS records for proxied cluster services
+  ansible.builtin.set_fact:
+    init_dns_records:
+      - resource_name: nginx-acme
+        name: "{{ nginx_acme_label }}."
+        zone: "{{ cloudflare_domain }}"
+        value: "{{ nginx_ipv4 }}"
+      - resource_name: openbao-acme
+        name: "{{ openbao_acme_label }}."
+        zone: "{{ cloudflare_domain }}"
+        value: "{{ nginx_ipv4 }}"
+      - resource_name: openbao-api
+        name: "{{ openbao_api_fqdn }}."
+        zone: "{{ cloudflare_domain }}"
+        value: "{{ nginx_ipv4 }}"
+      - resource_name: concourse
+        name: "{{ concourse_fqdn }}."
+        zone: "{{ cloudflare_domain }}"
+        value: "{{ nginx_ipv4 }}"
+      - resource_name: registry
+        name: "{{ registry_fqdn }}."
+        zone: "{{ cloudflare_domain }}"
+        value: "{{ nginx_ipv4 }}"
+      - resource_name: stigmergy
+        name: "{{ stigmergy_fqdn }}."
+        zone: "{{ cloudflare_domain }}"
+        value: "{{ nginx_ipv4 }}"
+
+- name: Add explicitly requested DNS records
+  ansible.builtin.set_fact:
+    init_dns_records: "{{ init_dns_records + (dns_records | default([])) }}"
+
+- name: Resolve the DNS backing Router
+  ansible.builtin.set_fact:
+    effective_dns_record_backing_store_ref: >-
+      {{ dns_record_backing_store_ref
+         | default({'kind': 'Router', 'name': lookup('env', 'PRIMARY_ROUTER_NAME')}) }}
+
+- name: Validate DNS record definitions
+  ansible.builtin.assert:
+    that:
+      - item is mapping
+      - item.resource_name | default('') | length > 0
+      - item.name | default('') | length > 0
+      - item.zone | default('') | length > 0
+      - item.value | default('') | length > 0
+      - (item.backing_store_ref | default(effective_dns_record_backing_store_ref)) is mapping
+      - ((item.backing_store_ref | default(effective_dns_record_backing_store_ref)).kind | default('')) | length > 0
+      - ((item.backing_store_ref | default(effective_dns_record_backing_store_ref)).name | default('')) | length > 0
+    fail_msg: >-
+      Each dns_records item must define resource_name, name, zone, and value,
+      plus a backing_store_ref (or dns_record_backing_store_ref).
+  loop: "{{ init_dns_records }}"
+  loop_control:
+    label: "{{ item.resource_name | default('<unnamed>') }}"
+
+- name: Wait for Stigmergy before submitting DNS records
+  ansible.builtin.uri:
+    url: "{{ lookup('env', 'STIGMERGY_API_URL') }}/readyz"
+    method: GET
+    status_code: 200
+  register: stigmergy_dns_api
+  retries: 60
+  delay: 2
+  until: stigmergy_dns_api is succeeded
+
+- name: Create or update Stigmergy DNS records
+  ansible.builtin.uri:
+    url: "{{ lookup('env', 'STIGMERGY_API_URL') }}/api/v1alpha1/dns-records/{{ item.resource_name }}"
+    method: PUT
+    body_format: json
+    status_code: [200, 201]
+    body:
+      apiVersion: homelab.io/v1alpha1
+      kind: DNSRecord
+      metadata:
+        name: "{{ item.resource_name }}"
+      spec:
+        backingStoreRef:
+          kind: "{{ (item.backing_store_ref | default(effective_dns_record_backing_store_ref)).kind }}"
+          name: "{{ (item.backing_store_ref | default(effective_dns_record_backing_store_ref)).name }}"
+        name: "{{ item.name }}"
+        zone: "{{ item.zone }}"
+        type: "{{ item.type | default('A') }}"
+        value: "{{ item.value }}"
+        ttl: "{{ item.ttl | default(dns_record_ttl | default(300)) | int }}"
+  loop: "{{ init_dns_records }}"
+  loop_control:
+    label: "{{ item.resource_name }}"

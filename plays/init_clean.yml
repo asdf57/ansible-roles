@@ -1,0 +1,15 @@
+---
+- name: Remove initialized platform services and generated files
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  tasks:
+    - name: Load the published platform configuration
+      ansible.builtin.import_role:
+        name: init
+        tasks_from: load_inventory
+
+    - name: Clean the initialized platform
+      ansible.builtin.import_role:
+        name: init
+        tasks_from: clean

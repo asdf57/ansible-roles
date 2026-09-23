@@ -1,0 +1,15 @@
+---
+- name: Configure platform delivery pipelines
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Load the published platform configuration
+      ansible.builtin.import_role:
+        name: init
+        tasks_from: load_inventory
+
+    - name: Configure delivery pipelines
+      ansible.builtin.import_role:
+        name: init
+        tasks_from: configure_pipelines

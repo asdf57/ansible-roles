@@ -8,9 +8,11 @@
     - MOUNT_DATA_PATH
     - STIGMERGY_API_URL
     - GIT_STIGMERGY_REPO
-    - GIT_STIGMERGY_BRANCH
-    - GIT_INVENTORY_REPO
-    - INVENTORY_PUBLICATION_GROUP
+    - GIT_STIGMERGY_REF
+    - INVENTORY_CAPTURE_GROUP
+    - PRIMARY_ROUTER_NAME
+    - PRIMARY_ROUTER_API_USERNAME
+    - PRIMARY_ROUTER_API_PASSWORD
 
 - name: Configure bootstrap paths
   ansible.builtin.set_fact:
@@ -20,7 +22,7 @@
   ansible.builtin.git:
     repo: "{{ lookup('env', 'GIT_STIGMERGY_REPO') }}"
     dest: "{{ mounted_data_path }}/stigmergy"
-    version: "{{ lookup('env', 'GIT_STIGMERGY_BRANCH') }}"
+    version: "{{ lookup('env', 'GIT_STIGMERGY_REF') }}"
     force: true
 
 - name: Create the OpenBao configuration directory
@@ -97,14 +99,26 @@
 - name: Define environment-backed Secret resources
   ansible.builtin.set_fact:
     bootstrap_secrets:
-      - {name: primary-router-api-password, path: router/primary/api_password, value: "{{ lookup('env', 'PRIMARY_ROUTER_API_PASSWORD') }}"}
       - {name: github-webhook-secret, path: github/webhook, value: "{{ lookup('env', 'GITHUB_WEBHOOK_SECRET') }}"}
-      - {name: concourse-password, path: concourse/local_user/password, value: "{{ lookup('env', 'CONCOURSE_PASSWORD') }}"}
-      - {name: concourse-oauth-client-secret, path: concourse/oauth/client_secret, value: "{{ lookup('env', 'CONCOURSE_OAUTH_CLIENT_SECRET') }}"}
-      - {name: cloudflare-api-key, path: cloudflare/api_key, value: "{{ lookup('env', 'CLOUDFLARE_API_KEY') }}"}
-      - {name: zerossl-eab-kid, path: zerossl/eab/kid, value: "{{ lookup('env', 'ZEROSSL_EAB_KID') }}"}
-      - {name: zerossl-eab-hmac-key, path: zerossl/eab/hmac_key, value: "{{ lookup('env', 'ZEROSSL_EAB_HMAC_KEY') }}"}
-      - {name: postgres-password, path: postgres/osdb/password, value: "{{ lookup('env', 'POSTGRES_PASSWORD') }}"}
+  no_log: true
+
+- name: Create or update the primary Router credential
+  ansible.builtin.uri:
+    url: "{{ lookup('env', 'STIGMERGY_API_URL') }}/api/v1alpha1/username-password-credentials/{{ lookup('env', 'PRIMARY_ROUTER_NAME') }}-credentials"
+    method: PUT
+    body_format: json
+    status_code: [200, 201]
+    body:
+      apiVersion: homelab.io/v1alpha1
+      kind: UsernamePasswordCredential
+      metadata:
+        name: "{{ lookup('env', 'PRIMARY_ROUTER_NAME') }}-credentials"
+      spec:
+        username: "{{ lookup('env', 'PRIMARY_ROUTER_API_USERNAME') }}"
+        password: "{{ lookup('env', 'PRIMARY_ROUTER_API_PASSWORD') }}"
+        secretStoreRef:
+          name: openbao
+        path: "router/{{ lookup('env', 'PRIMARY_ROUTER_NAME') }}/credentials"
   no_log: true
 
 - name: Require every environment-backed secret
@@ -133,41 +147,37 @@
   loop_control: {label: "{{ item.name }}"}
   no_log: true
 
-- name: Wait for the API-managed Git SSH key
+- name: Wait for the primary Router credential to become ready
   ansible.builtin.uri:
-    url: "{{ lookup('env', 'STIGMERGY_API_URL') }}/api/v1alpha1/secrets/git-ssh-key"
-    method: GET
-    return_content: true
-    status_code: 200
-  register: git_ssh_secret
-  retries: 60
-  delay: 2
-  until:
-    - git_ssh_secret.json.spec.data.privateKey | default('') | length > 0
-  no_log: true
-
-- name: Install the API-managed Git SSH key
-  ansible.builtin.copy:
-    content: "{{ git_ssh_secret.json.spec.data.privateKey }}"
-    dest: /home/keiichi/.ssh/id_github
-    mode: "0600"
-  no_log: true
-
-- name: Wait for the localhost inventory publication
-  ansible.builtin.uri:
-    url: "{{ lookup('env', 'STIGMERGY_API_URL') }}/api/v1alpha1/inventory-publications/localhost-servers-to-github"
+    url: "{{ lookup('env', 'STIGMERGY_API_URL') }}/api/v1alpha1/username-password-credentials/{{ lookup('env', 'PRIMARY_ROUTER_NAME') }}-credentials"
     method: GET
     status_code: 200
-  register: localhost_inventory_publication
+  register: primary_router_credential
   retries: 60
   delay: 2
-  until: localhost_inventory_publication.json.status.phase | default('') == 'Published'
+  until: primary_router_credential.json.status.phase | default('') == 'Ready'
+  no_log: true
 
-- name: Fetch the published bootstrap inventory
+- name: Resolve the homelab-init source
+  ansible.builtin.set_fact:
+    homelab_init_repo: >-
+      {{ lookup('env', 'GIT_HOMELAB_INIT_REPO')
+         | default('https://github.com/asdf57/homelab-init.git', true) }}
+    homelab_init_ref: >-
+      {{ lookup('env', 'GIT_HOMELAB_INIT_REF') | default('main', true) }}
+
+- name: Clone the static Stigmergy configuration
   ansible.builtin.git:
-    repo: "{{ lookup('env', 'GIT_INVENTORY_REPO') }}"
-    dest: /homelab/inventory
-    version: "{{ lookup('env', 'INVENTORY_PUBLICATION_GROUP') }}"
-    key_file: /home/keiichi/.ssh/id_github
-    accept_hostkey: true
+    repo: "{{ homelab_init_repo }}"
+    dest: "{{ mounted_data_path }}/homelab-init"
+    version: "{{ homelab_init_ref }}"
     force: true
+
+- name: Apply the static Stigmergy configuration
+  ansible.builtin.command:
+    cmd: ./upload.sh
+    chdir: "{{ mounted_data_path }}/homelab-init"
+  environment:
+    STIGMERGY_API_URL: "{{ lookup('env', 'STIGMERGY_API_URL') }}"
+  register: homelab_init_upload
+  changed_when: "'Applying ' in homelab_init_upload.stdout"

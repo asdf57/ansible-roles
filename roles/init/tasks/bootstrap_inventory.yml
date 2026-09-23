@@ -1,0 +1,26 @@
+---
+- name: Wait for the bootstrap inventory
+  ansible.builtin.uri:
+    url: >-
+      {{ lookup('env', 'STIGMERGY_API_URL') }}/api/v1alpha1/inventory-capture-groups/{{ lookup('env', 'INVENTORY_CAPTURE_GROUP') }}
+    method: GET
+    status_code: 200
+  register: bootstrap_inventory
+  retries: 150
+  delay: 2
+  until: bootstrap_inventory.json.status.phase | default('') == 'Ready'
+
+- name: Create the local bootstrap inventory directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - /homelab/inventory
+    - /homelab/inventory/group_vars
+
+- name: Render the platform variables
+  ansible.builtin.copy:
+    content: "{{ bootstrap_inventory.json.status.inventory.all.vars | to_nice_yaml(indent=2, sort_keys=false) }}"
+    dest: /homelab/inventory/group_vars/all.yaml
+    mode: "0644"

@@ -1,0 +1,25 @@
+---
+- name: Configure the mounted data path
+  ansible.builtin.set_fact:
+    mounted_data_path: "{{ lookup('env', 'MOUNT_DATA_PATH') }}"
+
+- name: Require the mounted data path
+  ansible.builtin.assert:
+    that: mounted_data_path | length > 0
+    fail_msg: MOUNT_DATA_PATH must be provided to the bootstrap container.
+
+- name: Check for the published group variables
+  ansible.builtin.stat:
+    path: /homelab/inventory/group_vars/all.yaml
+  register: inventory_group_vars
+
+- name: Require the published group variables
+  ansible.builtin.assert:
+    that: inventory_group_vars.stat.exists
+    fail_msg: >-
+      Expected /homelab/inventory/group_vars/all.yaml. Run init.yml so the
+      platform capture group is applied and rendered first.
+
+- name: Load the published group variables
+  ansible.builtin.include_vars:
+    file: /homelab/inventory/group_vars/all.yaml

@@ -4,8 +4,8 @@ resources:
     check_every: 720h
     webhook_token: ((github/webhook.key))
     source:
-      uri: "{{ git_inventory_repo }}"
-      branch: "((inventory_capture_group_name))"
+      uri: "{{ publication_repository.json.spec.url }}"
+      branch: "{{ inventory_publication.spec.target.branch }}"
       private_key: ((automation/git-ssh-key.privateKey))
 
 jobs:
@@ -26,7 +26,7 @@ jobs:
             - name: inventory-trigger
           params:
             STIGMERGY_API_URL: "{{ lookup('env', 'STIGMERGY_API_URL') }}"
-            INVENTORY_CAPTURE_GROUP_NAME: "((inventory_capture_group_name))"
+            INVENTORY_CAPTURE_GROUP_NAME: "{{ inventory_publication.spec.inventoryCaptureGroupRef.name }}"
             IS_BOOTSTRAP_ENV: "false"
           run:
             path: /bin/bash

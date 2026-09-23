@@ -1,22 +1,5 @@
-- name: Initialize the cluster
-  hosts: localhost
-  connection: local
-  vars:
-    ansible_python_interpreter: >-
-      {{ lookup('env', 'VENV_PYTHON') if inventory_hostname == 'localhost' else '/usr/bin/python3' }}
-  tasks:
-    - name: Clean up
-      import_role:
-        name: init
-        tasks_from: clean
-      become: true
-      tags:
-        - never
-        - clean
-
-    - name: Run
-      import_role:
-        name: init
-        tasks_from: main
-      tags: 
-        - build
+---
+# Core platform initialization. Artifact publication and pipeline setup are
+# explicit opt-ins through their phase playbooks.
+- ansible.builtin.import_playbook: init_bootstrap.yml
+- ansible.builtin.import_playbook: init_platform.yml

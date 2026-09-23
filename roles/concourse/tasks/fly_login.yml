@@ -1,7 +1,15 @@
 - name: Log in to Concourse
-  ansible.builtin.shell: |
-    fly -t {{ concourse_target }} login \
-      -c {{ concourse_url }} \
-      -u {{ concourse_user }} \
-      -p {{ lookup('env', 'CONCOURSE_PASSWORD') }}
+  ansible.builtin.command:
+    argv:
+      - fly
+      - -t
+      - "{{ concourse_target }}"
+      - login
+      - -c
+      - "{{ concourse_url }}"
+      - -u
+      - "{{ concourse_user }}"
+      - -p
+      - "{{ lookup('env', 'CONCOURSE_PASSWORD') }}"
+  no_log: true
   delegate_to: localhost

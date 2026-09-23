@@ -26,7 +26,7 @@ services:
       clusternet:
         ipv4_address: "{{ webhook_ipv4 }}"
     environment:
-        WEBHOOK_TOKEN: "{{ lookup('env', 'GITHUB_WEBHOOK_SECRET') }}"
+        WEBHOOK_TOKEN: "${GITHUB_WEBHOOK_SECRET}"
         CI_URL: "{{ concourse_fqdn }}"
   registry:
     image: registry
@@ -104,7 +104,7 @@ services:
       CONCOURSE_POSTGRES_PASSWORD: concourse_pass
       CONCOURSE_POSTGRES_DATABASE: concourse
       CONCOURSE_EXTERNAL_URL: "{{ concourse_url }}"
-      CONCOURSE_ADD_LOCAL_USER: "{{ concourse_user }}:{{ lookup('env', 'CONCOURSE_PASSWORD') }}"
+      CONCOURSE_ADD_LOCAL_USER: "{{ concourse_user }}:${CONCOURSE_PASSWORD}"
       CONCOURSE_MAIN_TEAM_LOCAL_USER: "{{ concourse_user }}"
       CONCOURSE_CLUSTER_NAME: homelab
       CONCOURSE_VAULT_URL: http://openbao:8200
@@ -300,13 +300,13 @@ services:
     container_name: acme
     network_mode: host
     environment:
-      - CF_Token="{{ lookup('env', 'CLOUDFLARE_API_KEY') }}"
-      - CF_Email="{{ lookup('env', 'CLOUDFLARE_EMAIL') }}"
+      - CF_Token=${CLOUDFLARE_API_KEY}
+      - CF_Email=${CLOUDFLARE_EMAIL}
       - ACME_DOMAIN={{ cloudflare_domain }}
       - ACME_SERVER={{ cert_authority }}
-      - ZEROSSL_EAB_KID={{ lookup('env', 'ZEROSSL_EAB_KID') }}
-      - ZEROSSL_EAB_HMAC_KEY={{ lookup('env', 'ZEROSSL_EAB_HMAC_KEY') }}
-      - ZEROSSL_EMAIL={{ lookup('env', 'ZEROSSL_EMAIL') }}
+      - ZEROSSL_EAB_KID=${ZEROSSL_EAB_KID}
+      - ZEROSSL_EAB_HMAC_KEY=${ZEROSSL_EAB_HMAC_KEY}
+      - ZEROSSL_EMAIL=${ZEROSSL_EMAIL}
       - DNS_API=dns_cf
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro

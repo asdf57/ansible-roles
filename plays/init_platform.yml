@@ -1,0 +1,20 @@
+---
+- name: Read platform configuration and converge the platform
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  tasks:
+    - name: Read the platform inventory from Stigmergy
+      ansible.builtin.import_role:
+        name: init
+        tasks_from: bootstrap_inventory
+
+    - name: Load the published platform configuration
+      ansible.builtin.import_role:
+        name: init
+        tasks_from: load_inventory
+
+    - name: Start and configure platform services
+      ansible.builtin.import_role:
+        name: init
+        tasks_from: platform

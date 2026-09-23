@@ -1,0 +1,176 @@
+---
+- name: Validate required platform variables
+  ansible.builtin.assert:
+    that:
+      - required_init_group_vars | difference(vars.keys() | list) | length == 0
+    fail_msg: >-
+      Missing required values from inventory/group_vars/all.yaml:
+      {{ required_init_group_vars | difference(vars.keys() | list) | sort | join(', ') }}
+  vars:
+    required_init_group_vars:
+      - cert_authority
+      - cloudflare_domain
+      - concourse_db_ipv4
+      - concourse_fqdn
+      - concourse_ipv4
+      - concourse_target
+      - concourse_team
+      - concourse_url
+      - concourse_user
+      - concourse_version
+      - concourse_worker_kernel_modules
+      - git_webhook_branch
+      - git_webhook_repo
+      - ipvlan_gateway
+      - ipvlan_mode
+      - ipvlan_subnet
+      - macvlan_gateway
+      - macvlan_host_ip
+      - macvlan_mode
+      - macvlan_subnet
+      - network_driver
+      - nginx_acme_label
+      - nginx_ipv4
+      - openbao_acme_label
+      - openbao_api_fqdn
+      - registry_fqdn
+      - registry_ipv4
+      - stigmergy_fqdn
+      - webhook_ipv4
+
+- name: Validate certificate account inputs
+  ansible.builtin.assert:
+    that:
+      - lookup('env', 'CLOUDFLARE_EMAIL') | length > 0
+      - lookup('env', 'ZEROSSL_EMAIL') | length > 0
+    fail_msg: >-
+      CLOUDFLARE_EMAIL and ZEROSSL_EMAIL must be provided to the bootstrap container.
+
+- name: Use the CLI data path for host bind mounts
+  ansible.builtin.set_fact:
+    host_data_path: "{{ lookup('env', 'HOST_DATA_PATH') }}"
+
+- name: Require the host data path
+  ansible.builtin.assert:
+    that: host_data_path | length > 0
+    fail_msg: HOST_DATA_PATH must be provided by homelabc.
+
+- name: Render the full infrastructure Compose file
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ mounted_data_path }}/docker-compose.yml"
+    mode: "0644"
+
+- name: Clone the webhook source
+  ansible.builtin.git:
+    repo: "{{ git_webhook_repo }}"
+    dest: "{{ mounted_data_path }}/webhook"
+    version: "{{ git_webhook_branch }}"
+    force: true
+
+- name: Create service build directories
+  ansible.builtin.file:
+    path: "{{ mounted_data_path }}/{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - acme
+    - concourse
+    - dnsmasq
+    - nginx
+    - nginx/files
+    - registry
+    - registry/config
+
+- name: Install service build files
+  ansible.builtin.copy:
+    src: "{{ item.src }}"
+    dest: "{{ mounted_data_path }}/{{ item.dest }}"
+    mode: "{{ item.mode | default('0644') }}"
+  loop:
+    - {src: acme/Dockerfile, dest: acme/Dockerfile}
+    - {src: acme/entrypoint.sh, dest: acme/entrypoint.sh, mode: "0755"}
+    - {src: concourse/Dockerfile, dest: concourse/Dockerfile}
+    - {src: concourse/entrypoint.sh, dest: concourse/entrypoint.sh, mode: "0755"}
+    - {src: dnsmasq/Dockerfile, dest: dnsmasq/Dockerfile}
+    - {src: nginx/Dockerfile, dest: nginx/Dockerfile}
+    - {src: nginx/entrypoint.sh, dest: nginx/entrypoint.sh, mode: "0755"}
+    - {src: nginx/boot.ipxe, dest: nginx/files/boot.ipxe}
+    - {src: nginx/arch_boot.ipxe, dest: nginx/files/arch_boot.ipxe}
+    - {src: nginx/debian_boot.ipxe, dest: nginx/files/debian_boot.ipxe}
+
+- name: Render service configuration
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "{{ mounted_data_path }}/{{ item.dest }}"
+    mode: "0644"
+  loop:
+    - {src: dnsmasq.conf.j2, dest: dnsmasq/dnsmasq.conf}
+    - {src: default.conf.j2, dest: nginx/default.conf}
+    - {src: config.yml.j2, dest: registry/config/config.yml}
+
+- name: Download iPXE boot binaries
+  ansible.builtin.get_url:
+    url: "{{ item.url }}"
+    dest: "{{ mounted_data_path }}/nginx/files/{{ item.name }}"
+    mode: "0644"
+  loop:
+    - {name: ipxe.efi, url: "https://boot.ipxe.org/x86_64-efi/ipxe.efi"}
+    - {name: ipxe.iso, url: "https://boot.ipxe.org/ipxe.iso"}
+
+- name: Load kernel modules required by Concourse workers
+  become: true
+  ansible.builtin.command:
+    cmd: "modprobe {{ item }}"
+  loop: "{{ concourse_worker_kernel_modules }}"
+  changed_when: false
+
+- name: Start the full infrastructure stack
+  block:
+    - name: Converge the infrastructure Compose project
+      community.docker.docker_compose_v2:
+        project_src: "{{ mounted_data_path }}"
+        project_name: infra
+        state: present
+        build: always
+        check_files_existing: false
+        remove_orphans: true
+      register: docker_compose_result
+      retries: 5
+      delay: 5
+      until: docker_compose_result is succeeded
+  rescue:
+    - name: Show the Compose failure
+      ansible.builtin.debug:
+        var: docker_compose_result
+
+    - name: Stop after the Compose failure
+      ansible.builtin.fail:
+        msg: Docker Compose failed to converge after five attempts.
+
+- name: Reconcile Stigmergy-managed DNS records
+  ansible.builtin.include_tasks: reconcile_dns_records.yml
+  when: manage_dns_records | default(true) | bool
+
+- name: Wait for certificate provisioning
+  ansible.builtin.command:
+    cmd: docker inspect --format={% raw %}{{.State.Health.Status}}{% endraw %} acme
+  register: acme_health
+  changed_when: false
+  retries: 100
+  delay: 3
+  until: acme_health.stdout == "healthy"
+
+- name: Configure the macvlan host shim
+  when:
+    - network_driver == "macvlan"
+    - ansible_facts['os_family'] not in ["Darwin", "Windows"]
+  become: true
+  block:
+    - name: Recreate the macvlan host shim
+      ansible.builtin.shell: |
+        ip link delete macvlan-shim 2>/dev/null || true
+        ip link add macvlan-shim link {{ ansible_facts['default_ipv4']['interface'] }} type macvlan mode bridge
+        ip addr add {{ macvlan_host_ip }} dev macvlan-shim
+        ip link set macvlan-shim up
+        ip route replace {{ macvlan_subnet }} dev macvlan-shim

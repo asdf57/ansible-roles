@@ -1,55 +1,73 @@
-# init
+# init task library
 
-Bootstraps the homelab infrastructure Compose stack, including OpenBao, nginx,
-Concourse, etcd, and Stigmergy.
+The `init` role is a task library used by the phase playbooks in `plays/`.
 
-The role clones the Stigmergy source, starts it as the only API server with the
-required etcd and OpenBao services, exposes it through nginx, and creates the `servers`
-`InventoryCaptureGroup` using Stigmergy's `/api/v1alpha1` API.
+## Lifecycle boundary
 
-## Required Stigmergy variables
+The bootstrap phase starts the minimum control plane:
 
-Provide these variables in the active inventory's `group_vars/all.yaml`:
+- OpenBao and its Agent
+- etcd
+- Stigmergy on the direct bootstrap API address
+- the OpenBao `SecretStore` and environment-backed bootstrap secrets
+
+The phase then clones and applies the declarative resources from
+`homelab-init`. Those resources create the Git repository, SSH key pairs,
+inventory capture groups, inventory publications, servers, and other static
+desired state. `GIT_HOMELAB_INIT_REPO` and `GIT_HOMELAB_INIT_REF` may
+override the default repository and `main` revision.
+
+The platform phase reads the ready `platform` capture group directly from
+Stigmergy, renders `group_vars/all.yaml`, and starts
+the complete infrastructure Compose stack. Git publication remains an output
+for normal operator runs, but it is not a bootstrap dependency.
+
+## DNS records
+
+After the full Compose stack starts and Stigmergy reports ready, the platform
+phase creates `A` records for every FQDN nginx exposes: nginx ACME, OpenBao
+ACME/API, Concourse, registry, and Stigmergy. These records use `nginx_ipv4`.
+
+Configure their backing Router in the published group variables:
 
 ```yaml
-git_stigmergy_repo: https://github.com/asdf57/stigmergy.git
-git_stigmergy_branch: main
-stigmergy_ipv4: 10.0.0.10
-stigmergy_fqdn: stigmergy.example.net
+dns_record_backing_store_ref:
+  kind: Router
+  name: mikrotik-1
+dns_record_ttl: 300
 ```
 
-The proxied public endpoint uses `stigmergy_fqdn` over HTTPS.
+If `dns_record_backing_store_ref` is omitted, the role uses
+`PRIMARY_ROUTER_NAME` with kind `Router`.
 
-## Bootstrap secrets
+Additional records can be declared with:
 
-The Stigmergy API address and secret values are supplied to the provisioning
-container as environment variables. Other referenced configuration belongs in
-the active inventory's `group_vars/all.yaml`.
+```yaml
+dns_records:
+  - resource_name: webhook
+    name: webhook.
+    zone: homelab.example.net
+    value: "{{ webhook_ipv4 }}"
+```
 
-`MOUNT_DATA_PATH` is the container-visible mount of `host_data_path`. The role
-writes generated infrastructure files there and uses it as the Docker Compose
-project directory.
+`resource_name` is the Stigmergy resource name. A trailing dot makes the DNS
+name absolute; `@` selects the zone apex. Optional records default to type `A`
+and the shared TTL, and may override `type`, `ttl`, or `backing_store_ref`.
+Set `manage_dns_records: false` to disable DNS reconciliation.
 
-The role starts the complete Compose stack first, including OpenBao, its Agent,
-etcd, and Stigmergy. After Stigmergy reports ready, the role creates the
-`openbao` `SecretStore` and creates or replaces these Secret resources:
+The Router may be created after the DNS resources. Stigmergy keeps them pending
+and reconciles them when the Router and its credential become ready, avoiding a
+bootstrap dependency on managed DNS.
 
-- `primary-router-api-password`
-- `github-webhook-secret`
-- `concourse-password`
-- `concourse-oauth-client-secret`
-- `cloudflare-api-key`
-- `zerossl-eab-kid`
-- `zerossl-eab-hmac-key`
-- `postgres-password`
+The bootstrap phase creates the Router's `UsernamePasswordCredential` directly
+from `PRIMARY_ROUTER_NAME`, `PRIMARY_ROUTER_API_USERNAME`, and
+`PRIMARY_ROUTER_API_PASSWORD` in the container environment. Its resource name
+is `<PRIMARY_ROUTER_NAME>-credentials`. The Router manifest in `homelab-init`
+should reference that name, for example:
 
-`STIGMERGY_API_URL` selects the API server. The corresponding secret values
-come from `PRIMARY_ROUTER_API_PASSWORD`,
-`GITHUB_WEBHOOK_SECRET`, `CONCOURSE_PASSWORD`,
-`CONCOURSE_OAUTH_CLIENT_SECRET`, `CLOUDFLARE_API_KEY`, `ZEROSSL_EAB_KID`,
-`ZEROSSL_EAB_HMAC_KEY`, and `POSTGRES_PASSWORD`. OpenBao initialization and
-AppRole credentials remain isolated in Docker volumes and are not uploaded as
-Secret resources.
-
-Concourse uses its Vault-compatible credential manager against the same `kv2`
-mount and reads the Stigmergy-managed secrets beneath the `secrets` prefix.
+```yaml
+spec:
+  authentication:
+    type: UsernamePasswordCredential
+    name: mikrotik-1-credentials
+```

@@ -1,0 +1,10 @@
+---
+- name: Bootstrap the Stigmergy and OpenBao control plane
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Start the minimum control plane
+      ansible.builtin.import_role:
+        name: init
+        tasks_from: bootstrap_control_plane
