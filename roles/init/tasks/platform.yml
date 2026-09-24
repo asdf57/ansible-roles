@@ -55,6 +55,45 @@
     that: host_data_path | length > 0
     fail_msg: HOST_DATA_PATH must be provided by homelabc.
 
+- name: Require the Concourse credential input
+  ansible.builtin.assert:
+    that: lookup('env', 'CONCOURSE_PASSWORD') | length > 0
+    fail_msg: CONCOURSE_PASSWORD must be provided to the bootstrap container.
+  no_log: true
+
+- name: Create or update the Concourse credential
+  ansible.builtin.uri:
+    url: "{{ lookup('env', 'STIGMERGY_API_URL') }}/api/v1alpha1/username-password-credentials/concourse-creds"
+    method: PUT
+    body_format: json
+    status_code: [200, 201]
+    body:
+      apiVersion: homelab.io/v1alpha1
+      kind: UsernamePasswordCredential
+      metadata: {name: concourse-creds}
+      spec:
+        username: "{{ concourse_user }}"
+        password: "{{ lookup('env', 'CONCOURSE_PASSWORD') }}"
+        secretStoreRef: {name: openbao}
+        path: concourse/credentials
+  no_log: true
+
+- name: Create or update the Concourse pipeline provider
+  ansible.builtin.uri:
+    url: "{{ lookup('env', 'STIGMERGY_API_URL') }}/api/v1alpha1/pipeline-providers/concourse"
+    method: PUT
+    body_format: json
+    status_code: [200, 201]
+    body:
+      apiVersion: homelab.io/v1alpha1
+      kind: PipelineProvider
+      metadata: {name: concourse}
+      spec:
+        type: concourse
+        url: "{{ concourse_url }}"
+        team: "{{ concourse_team }}"
+        credentialRef: {name: concourse-creds}
+
 - name: Render the full infrastructure Compose file
   ansible.builtin.template:
     src: docker-compose.yml.j2

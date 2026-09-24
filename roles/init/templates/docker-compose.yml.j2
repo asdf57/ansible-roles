@@ -255,6 +255,10 @@ services:
     environment:
       HTTP_ADDR: 0.0.0.0:8080
       ETCD_ENDPOINTS: http://etcd:2379
+      PUBLIC_API_URL: "https://{{ stigmergy_fqdn }}"
+      COMMAND_RUNNER_IMAGE: "{{ registry_fqdn }}/arch-provisioner:latest"
+      ANSIBLE_ROLES_REPOSITORY: "{{ lookup('env', 'GIT_ANSIBLE_ROLES_REPO') }}"
+      ANSIBLE_ROLES_REVISION: "{{ lookup('env', 'GIT_ANSIBLE_ROLES_REF') }}"
     depends_on:
       etcd:
         condition: service_healthy
