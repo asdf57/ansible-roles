@@ -9,8 +9,8 @@
 
 - name: Render the publication pipeline
   ansible.builtin.template:
-    src: server-standup.yml.j2
-    dest: "/tmp/standup-{{ inventory_publication.metadata.name }}.yml"
+    src: provision-group-commands.yml.j2
+    dest: "/tmp/commands-{{ inventory_publication.metadata.name }}.yml"
     mode: "0600"
 
 - name: Configure the publication pipeline
@@ -21,10 +21,10 @@
       - "{{ concourse_target }}"
       - set-pipeline
       - -p
-      - "standup-{{ inventory_publication.spec.inventoryCaptureGroupRef.name }}"
+      - "commands-{{ inventory_publication.spec.inventoryCaptureGroupRef.name }}"
       - --non-interactive
       - -c
-      - "/tmp/standup-{{ inventory_publication.metadata.name }}.yml"
+      - "/tmp/commands-{{ inventory_publication.metadata.name }}.yml"
 
 - name: Unpause the publication pipeline
   ansible.builtin.command:
@@ -34,4 +34,4 @@
       - "{{ concourse_target }}"
       - unpause-pipeline
       - -p
-      - "standup-{{ inventory_publication.spec.inventoryCaptureGroupRef.name }}"
+      - "commands-{{ inventory_publication.spec.inventoryCaptureGroupRef.name }}"

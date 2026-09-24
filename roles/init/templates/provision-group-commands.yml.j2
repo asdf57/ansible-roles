@@ -1,0 +1,52 @@
+resources:
+  - name: command-repository
+    type: git
+    check_every: 1m
+    webhook_token: ((github/webhook.key))
+    source:
+      uri: "{{ publication_repository.json.spec.url }}"
+      branch: "{{ inventory_publication.spec.target.branch }}"
+      private_key: ((automation/git-ssh-key.privateKey))
+      paths:
+        - "commands/{{ inventory_publication.spec.inventoryCaptureGroupRef.name }}.sh"
+      sparse_paths:
+        - "commands/{{ inventory_publication.spec.inventoryCaptureGroupRef.name }}.sh"
+
+jobs:
+  - name: run
+    serial: true
+    plan:
+      - get: command-repository
+        trigger: true
+      - task: run-command
+        privileged: true
+        config:
+          platform: linux
+          image_resource:
+            type: registry-image
+            source:
+              repository: "{{ registry_fqdn }}/arch-provisioner"
+              tag: latest
+          inputs:
+            - name: command-repository
+          params:
+            CONTAINER_MODE: normal
+            INVENTORY_CAPTURE_GROUP: "{{ inventory_publication.spec.inventoryCaptureGroupRef.name }}"
+            STIGMERGY_API_URL: "https://{{ stigmergy_fqdn }}"
+            GIT_ANSIBLE_ROLES_REPO: "{{ lookup('env', 'GIT_ANSIBLE_ROLES_REPO') }}"
+            GIT_ANSIBLE_ROLES_REF: "{{ lookup('env', 'GIT_ANSIBLE_ROLES_REF') }}"
+            COMMAND_FILE: "commands/{{ inventory_publication.spec.inventoryCaptureGroupRef.name }}.sh"
+          run:
+            path: /bin/bash
+            user: keiichi
+            args:
+              - -lc
+              - |
+                  set -euo pipefail
+                  script="${PWD}/command-repository/${COMMAND_FILE}"
+                  if [[ ! -f "${script}" ]]; then
+                    echo "Command file not found: ${COMMAND_FILE}" >&2
+                    exit 1
+                  fi
+                  echo "Running ${COMMAND_FILE} for ${INVENTORY_CAPTURE_GROUP}"
+                  exec bash "${script}"
