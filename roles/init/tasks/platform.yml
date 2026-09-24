@@ -116,6 +116,7 @@
     - acme
     - concourse
     - dnsmasq
+    - iso-sync
     - nginx
     - nginx/files
     - registry
@@ -132,6 +133,7 @@
     - {src: concourse/Dockerfile, dest: concourse/Dockerfile}
     - {src: concourse/entrypoint.sh, dest: concourse/entrypoint.sh, mode: "0755"}
     - {src: dnsmasq/Dockerfile, dest: dnsmasq/Dockerfile}
+    - {src: iso-sync/sync.sh, dest: iso-sync/sync.sh, mode: "0755"}
     - {src: nginx/Dockerfile, dest: nginx/Dockerfile}
     - {src: nginx/entrypoint.sh, dest: nginx/entrypoint.sh, mode: "0755"}
     - {src: nginx/boot.ipxe, dest: nginx/files/boot.ipxe}

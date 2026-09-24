@@ -40,6 +40,18 @@ services:
       clusternet:
         ipv4_address: "{{ registry_ipv4 }}"
 
+  iso-sync:
+    image: ghcr.io/oras-project/oras:v1.3.4
+    entrypoint: [/bin/sh, /sync/sync.sh]
+    depends_on:
+      - registry
+    volumes:
+      - "{{ host_data_path }}/iso-sync/sync.sh:/sync/sync.sh:ro"
+      - "{{ host_data_path }}/nginx/files:/www/data"
+    restart: always
+    networks:
+      - clusternet
+
   concourse-keys:
     image: alpine
     container_name: concourse-keys
