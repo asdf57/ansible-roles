@@ -158,7 +158,7 @@ services:
     restart: always
     volumes:
       - openbao_data:/openbao/file
-      - ./openbao/openbao.hcl:/openbao/config/openbao.hcl:ro
+      - "{{ host_data_path }}/openbao/openbao.hcl:/openbao/config/openbao.hcl:ro"
     environment:
       BAO_ADDR: "http://127.0.0.1:8200"
       BAO_API_ADDR: "http://openbao:8200"
@@ -197,9 +197,9 @@ services:
       openbao-volume-init:
         condition: service_completed_successfully
     volumes:
-      - ./openbao/openbao-bootstrap.sh:/openbao/bootstrap/openbao-bootstrap.sh:ro
-      - ./openbao/openbao-api-policy.hcl:/openbao/bootstrap/openbao-api-policy.hcl:ro
-      - ./openbao/concourse-policy.hcl:/openbao/bootstrap/concourse-policy.hcl:ro
+      - "{{ host_data_path }}/openbao/openbao-bootstrap.sh:/openbao/bootstrap/openbao-bootstrap.sh:ro"
+      - "{{ host_data_path }}/openbao/openbao-api-policy.hcl:/openbao/bootstrap/openbao-api-policy.hcl:ro"
+      - "{{ host_data_path }}/openbao/concourse-policy.hcl:/openbao/bootstrap/concourse-policy.hcl:ro"
       - openbao_init:/run/openbao-init
       - openbao_bootstrap:/run/openbao-bootstrap
       - openbao_shared:/shared
@@ -214,7 +214,7 @@ services:
         condition: service_completed_successfully
     restart: unless-stopped
     volumes:
-      - ./openbao/openbao-agent.hcl:/openbao/agent/openbao-agent.hcl:ro
+      - "{{ host_data_path }}/openbao/openbao-agent.hcl:/openbao/agent/openbao-agent.hcl:ro"
       - openbao_bootstrap:/run/openbao-bootstrap:ro
       - openbao_runtime:/run/openbao
     healthcheck:
