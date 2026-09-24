@@ -18,32 +18,3 @@
   retries: 5
   delay: 5
   until: arch_provisioner_push is succeeded
-
-- name: Build provisioning ISO task images
-  ansible.builtin.command:
-    cmd: >-
-      docker build --no-cache -t {{ item.image }}:latest
-      -f /homelab/roles/os/files/{{ item.directory }}/Dockerfile.task
-      /homelab/roles/os/files
-  loop:
-    - {image: prov-iso-task-arch, directory: arch}
-    - {image: prov-iso-task-debian-trixie, directory: debian-trixie}
-  loop_control:
-    label: "{{ item.image }}"
-  register: iso_task_image_build
-  retries: 3
-  delay: 5
-  until: iso_task_image_build is succeeded
-
-- name: Publish provisioning ISO task images
-  ansible.builtin.command:
-    cmd: >-
-      skopeo copy --dest-tls-verify=false docker-daemon:{{ item }}:latest
-      docker://{{ registry_ipv4 }}:5000/{{ item }}:latest
-  loop:
-    - prov-iso-task-arch
-    - prov-iso-task-debian-trixie
-  register: iso_task_image_push
-  retries: 5
-  delay: 5
-  until: iso_task_image_push is succeeded

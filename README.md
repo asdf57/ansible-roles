@@ -16,15 +16,16 @@ Initialization is intentionally divided into independently runnable phases:
 | --- | --- |
 | `plays/init_bootstrap.yml` | Start OpenBao, etcd, and Stigmergy; initialize the secret store and bootstrap secrets. |
 | `plays/init_platform.yml` | Read bootstrap inventory from Stigmergy, start the full Compose stack, and reconcile DNS. |
-| `plays/init_artifacts.yml` | Build and publish the Arch provisioner and ISO task images. |
+| `plays/init_artifacts.yml` | Publish the normal command-runner image. |
 | `plays/init_clean.yml` | Remove the Compose project and generated platform data. |
 
 The main entry point runs the bootstrap and platform phases. Artifact
 publication is an explicit opt-in. Stigmergy reconciles command pipelines from
 `CommandsPipeline` resources during normal operation.
 
-Run `homelabc init`. Add `--artifacts` when provisioning images should also be
-built and published.
+Run `homelabc init`. Add `--artifacts` when the command-runner image should
+also be published. ISO builds use public base images and are owned by the
+Stigmergy `Pipeline/build-isos` resource.
 
 For targeted reruns, invoke `init_bootstrap.yml`, `init_platform.yml`,
 or `init_artifacts.yml` directly. The bootstrap defaults to

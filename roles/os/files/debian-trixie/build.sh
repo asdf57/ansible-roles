@@ -11,9 +11,13 @@ set -euo pipefail
 # We generate that tree from scratch for each run so the build is
 # reproducible and there is no stale state from a previous attempt.
 
-readonly ISO_NAME="debian-trixie-$(date +%Y.%m.%d)-amd64.iso"
 readonly OUTPUT_DIR="${OUTPUT_DIR:-/output}"
 readonly SSH_KEY_SOURCE="${SSH_KEY_SOURCE:-/root/.ssh/authorized_keys}"
+readonly HOMELABD_BINARY_SOURCE="${HOMELABD_BINARY_SOURCE:-}"
+readonly HOMELABD_SERVICE_SOURCE="${HOMELABD_SERVICE_SOURCE:-}"
+readonly HOMELABD_SSHD_CONFIG_SOURCE="${HOMELABD_SSHD_CONFIG_SOURCE:-}"
+readonly HOMELAB_API_ENDPOINT="${HOMELAB_API_ENDPOINT:-https://stigmergy.ryuugu.dev}"
+readonly ISO_VERSION="${ISO_VERSION:-$(date +%Y.%m.%d)}"
 readonly BUILD_ROOT="${BUILD_ROOT:-/build}"
 readonly DISTRIBUTION="trixie"
 readonly HELP_MESSAGE="Usage: $0 [-t <type>] [-v] [-h]
@@ -86,6 +90,9 @@ function parse_cli_args() {
 
 function prepare_workspace() {
   [[ -f "$SSH_KEY_SOURCE" ]] || die "Provisioning key not found: $SSH_KEY_SOURCE"
+  [[ -f "$HOMELABD_BINARY_SOURCE" ]] || die "homelabd binary not found: $HOMELABD_BINARY_SOURCE"
+  [[ -f "$HOMELABD_SERVICE_SOURCE" ]] || die "homelabd service not found: $HOMELABD_SERVICE_SOURCE"
+  [[ -f "$HOMELABD_SSHD_CONFIG_SOURCE" ]] || die "homelabd sshd config not found: $HOMELABD_SSHD_CONFIG_SOURCE"
 
   echo ":: Preparing Debian Trixie live-build workspace"
   mkdir -p "$BUILD_ROOT" "$OUTPUT_DIR"
@@ -128,7 +135,15 @@ parted
 debootstrap
 arch-install-scripts
 locales
+lldpd
 EOF
+
+  "$(dirname "$0")/../install-homelabd.sh" \
+    "$PWD/config/includes.chroot" \
+    "$HOMELABD_BINARY_SOURCE" \
+    "$HOMELABD_SERVICE_SOURCE" \
+    "$HOMELABD_SSHD_CONFIG_SOURCE" \
+    "$HOMELAB_API_ENDPOINT"
 
   # As with Arch, we prefer a small drop-in file over replacing the full
   # sshd_config shipped by the base system.
@@ -161,6 +176,8 @@ EOF
     config/includes.chroot/etc/systemd/system/multi-user.target.wants/generate-ssh-host-keys.service
   ln -sf /lib/systemd/system/ssh.service \
     config/includes.chroot/etc/systemd/system/multi-user.target.wants/ssh.service
+  ln -sf /lib/systemd/system/lldpd.service \
+    config/includes.chroot/etc/systemd/system/multi-user.target.wants/lldpd.service
 
   if [[ "$type" == "netboot" ]]; then
     # includes.binary affects the boot medium contents rather than the live
@@ -206,8 +223,9 @@ function move_outputs() {
       iso_path=$(find . -maxdepth 1 -type f -name '*.iso' | head -n 1)
       [[ -n "$iso_path" ]] || die "Failed to locate generated ISO artifact"
 
-      mv "$iso_path" "${OUTPUT_DIR}/${ISO_NAME}"
-      echo "=> ISO is available at ${OUTPUT_DIR}/${ISO_NAME}"
+      local output_name="debian-trixie-${ISO_VERSION}-amd64.iso"
+      mv "$iso_path" "${OUTPUT_DIR}/${output_name}"
+      echo "=> ISO is available at ${OUTPUT_DIR}/${output_name}"
       ;;
     netboot )
       # For Debian netboot we serve the kernel and initrd directly and the

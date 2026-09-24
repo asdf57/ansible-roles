@@ -10,9 +10,13 @@ set -euo pipefail
 # of those stock profiles into a temporary workspace and layer our own
 # changes on top rather than mutating the system copy in-place.
 
-readonly ISO_NAME="archlinux-$(date +%Y.%m.%d)-x86_64.iso"
 readonly OUTPUT_DIR="${OUTPUT_DIR:-/output}"
 readonly SSH_KEY_SOURCE="${SSH_KEY_SOURCE:-/root/.ssh/authorized_keys}"
+readonly HOMELABD_BINARY_SOURCE="${HOMELABD_BINARY_SOURCE:-}"
+readonly HOMELABD_SERVICE_SOURCE="${HOMELABD_SERVICE_SOURCE:-}"
+readonly HOMELABD_SSHD_CONFIG_SOURCE="${HOMELABD_SSHD_CONFIG_SOURCE:-}"
+readonly HOMELAB_API_ENDPOINT="${HOMELAB_API_ENDPOINT:-https://stigmergy.ryuugu.dev}"
+readonly ISO_VERSION="${ISO_VERSION:-$(date +%Y.%m.%d)}"
 readonly ARCHISO_ROOT="/usr/share/archiso/configs"
 readonly HELP_MESSAGE="Usage: $0 [-p <profile>] [-t <type>] [-v] [-h]
   -p  The profile to build (releng, baseline)
@@ -104,6 +108,9 @@ function prepare_workspace() {
 
   [[ -d "$source_profile_dir" ]] || die "Archiso profile not found: $source_profile_dir"
   [[ -f "$SSH_KEY_SOURCE" ]] || die "Provisioning key not found: $SSH_KEY_SOURCE"
+  [[ -f "$HOMELABD_BINARY_SOURCE" ]] || die "homelabd binary not found: $HOMELABD_BINARY_SOURCE"
+  [[ -f "$HOMELABD_SERVICE_SOURCE" ]] || die "homelabd service not found: $HOMELABD_SERVICE_SOURCE"
+  [[ -f "$HOMELABD_SSHD_CONFIG_SOURCE" ]] || die "homelabd sshd config not found: $HOMELABD_SSHD_CONFIG_SOURCE"
 
   echo ":: Preparing Archiso workspace"
   mkdir -p "$OUTPUT_DIR"
@@ -137,6 +144,7 @@ function configure_live_environment() {
   # dnsmasq can pull in a virtual dependency on libxtables. Pinning iptables
   # avoids an interactive provider choice between iptables and iptables-legacy.
   append_if_missing "iptables" "${profile_dir}/packages.x86_64"
+  append_if_missing "lldpd" "${profile_dir}/packages.x86_64"
 
   # airootfs/root/.ssh becomes /root/.ssh in the live image at boot time.
   # We pre-seed authorized_keys so the live root account accepts our key.
@@ -174,11 +182,19 @@ EOF
   # apart from an installed system.
   touch "${root_fs}/var/lib/is_live_env"
 
+  "$(dirname "$0")/../install-homelabd.sh" \
+    "$root_fs" \
+    "$HOMELABD_BINARY_SOURCE" \
+    "$HOMELABD_SERVICE_SOURCE" \
+    "$HOMELABD_SSHD_CONFIG_SOURCE" \
+    "$HOMELAB_API_ENDPOINT"
+
   # Enabling a service in a systemd image build usually means creating the
   # symlink that would exist under multi-user.target.wants after
   # `systemctl enable`. That is what these links are doing.
   ln -sf /usr/lib/systemd/system/dhcpcd.service "${wants_dir}/dhcpcd.service"
   ln -sf /usr/lib/systemd/system/sshd.service "${wants_dir}/sshd.service"
+  ln -sf /usr/lib/systemd/system/lldpd.service "${wants_dir}/lldpd.service"
   ln -sf /etc/systemd/system/generate-ssh-host-keys.service "${wants_dir}/generate-ssh-host-keys.service"
 }
 
@@ -192,8 +208,9 @@ function move_outputs() {
       [[ -n "$iso_path" ]] || die "Failed to locate generated ISO artifact"
 
       echo ":: Moving the ISO to ${OUTPUT_DIR}"
-      mv "$iso_path" "${OUTPUT_DIR}/${ISO_NAME}"
-      echo "=> ISO is available at ${OUTPUT_DIR}/${ISO_NAME}"
+      local output_name="archlinux-${ISO_VERSION}-x86_64.iso"
+      mv "$iso_path" "${OUTPUT_DIR}/${output_name}"
+      echo "=> ISO is available at ${OUTPUT_DIR}/${output_name}"
       ;;
     netboot )
       # Arch netboot wants the kernel/initramfs at the top level and the
