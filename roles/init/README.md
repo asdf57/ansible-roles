@@ -26,7 +26,8 @@ for normal operator runs, but it is not a bootstrap dependency.
 
 After the full Compose stack starts and Stigmergy reports ready, the platform
 phase creates `A` records for every FQDN nginx exposes: nginx ACME, OpenBao
-ACME/API, Concourse, registry, and Stigmergy. These records use `nginx_ipv4`.
+ACME/API, Concourse, registry, Stigmergy, and Vikunja. These records use
+`nginx_ipv4`.
 
 Configure their backing Router in the published group variables:
 

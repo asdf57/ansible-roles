@@ -36,6 +36,9 @@
       - registry_fqdn
       - registry_ipv4
       - stigmergy_fqdn
+      - vikunja_fqdn
+      - vikunja_ipv4
+      - vikunja_version
       - webhook_ipv4
 
 - name: Validate certificate account inputs
@@ -121,6 +124,34 @@
     - nginx/files
     - registry
     - registry/config
+    - vikunja
+    - vikunja/db
+    - vikunja/files
+
+- name: Set ownership on Vikunja's persistent storage
+  ansible.builtin.file:
+    path: "{{ mounted_data_path }}/{{ item }}"
+    state: directory
+    owner: "1000"
+    group: "1000"
+    mode: "0750"
+  loop:
+    - vikunja/db
+    - vikunja/files
+
+- name: Create or reuse the Vikunja service secret
+  ansible.builtin.set_fact:
+    vikunja_service_secret: >-
+      {{ lookup('password', mounted_data_path + '/vikunja/service-secret length=64 chars=ascii_letters,digits') }}
+  no_log: true
+
+- name: Protect the Vikunja service secret
+  ansible.builtin.file:
+    path: "{{ mounted_data_path }}/vikunja/service-secret"
+    state: file
+    owner: "1000"
+    group: "1000"
+    mode: "0400"
 
 - name: Install service build files
   ansible.builtin.copy:

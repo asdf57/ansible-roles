@@ -31,6 +31,10 @@
         name: "{{ stigmergy_fqdn }}."
         zone: "{{ cloudflare_domain }}"
         value: "{{ nginx_ipv4 }}"
+      - resource_name: vikunja
+        name: "{{ vikunja_fqdn }}."
+        zone: "{{ cloudflare_domain }}"
+        value: "{{ nginx_ipv4 }}"
 
 - name: Add explicitly requested DNS records
   ansible.builtin.set_fact:

@@ -40,6 +40,22 @@ services:
       clusternet:
         ipv4_address: "{{ registry_ipv4 }}"
 
+  vikunja:
+    image: "vikunja/vikunja:{{ vikunja_version }}"
+    container_name: vikunja
+    environment:
+      VIKUNJA_DATABASE_PATH: /db/vikunja.db
+      VIKUNJA_SERVICE_PUBLICURL: "https://{{ vikunja_fqdn }}/"
+      VIKUNJA_SERVICE_SECRET_FILE: /run/secrets/vikunja-service-secret
+    volumes:
+      - "{{ host_data_path }}/vikunja/files:/app/vikunja/files"
+      - "{{ host_data_path }}/vikunja/db:/db"
+      - "{{ host_data_path }}/vikunja/service-secret:/run/secrets/vikunja-service-secret:ro"
+    restart: unless-stopped
+    networks:
+      clusternet:
+        ipv4_address: "{{ vikunja_ipv4 }}"
+
   iso-sync:
     image: ghcr.io/oras-project/oras:v1.3.4
     entrypoint: [/bin/sh, /sync/sync.sh]

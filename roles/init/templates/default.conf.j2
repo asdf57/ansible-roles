@@ -176,3 +176,31 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 }
+
+server {
+    listen 80;
+    server_name {{ vikunja_fqdn }};
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    server_name {{ vikunja_fqdn }};
+
+    ssl_certificate /etc/nginx/ssl/ryuugu.dev/full.pem;
+    ssl_certificate_key /etc/nginx/ssl/ryuugu.dev/key.pem;
+    ssl_trusted_certificate /etc/nginx/ssl/ryuugu.dev/ca.pem;
+
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+
+    client_max_body_size 20M;
+
+    location / {
+        proxy_pass http://{{ vikunja_ipv4 }}:3456;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
