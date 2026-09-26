@@ -35,6 +35,7 @@ services:
     ports:
       - 5000:5000
     volumes:
+      - "{{ host_data_path }}/registry/config/config.yml:/etc/distribution/config.yml:ro"
       - "{{ host_data_path }}/registry/data:/var/lib/registry:rw"
     networks:
       clusternet:
