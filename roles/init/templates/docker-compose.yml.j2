@@ -306,6 +306,10 @@ services:
   nginx:
     build: ./nginx
     container_name: nginx
+    depends_on:
+      stigmergy:
+        condition: service_started
+        restart: true
     networks:
       default:
       clusternet:
