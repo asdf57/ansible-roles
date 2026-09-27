@@ -100,7 +100,7 @@
   ansible.builtin.set_fact:
     bootstrap_secrets:
       - {name: github-webhook-secret, path: github/webhook, key: key, value: "{{ lookup('env', 'GITHUB_WEBHOOK_SECRET') }}"}
-      - {name: file-registry-secret, path: file-registry, key: password, value: "{{ lookup('env', 'FILE_REGISTRY_PASSWORD') }}"}
+      - {name: file-registry-secret, path: file-registry, key: value, value: "{{ lookup('env', 'FILE_REGISTRY_PASSWORD') }}"}
   no_log: true
 
 - name: Create or update the primary Router credential
