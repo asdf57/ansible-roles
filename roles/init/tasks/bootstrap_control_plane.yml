@@ -143,7 +143,7 @@
       spec:
         secretStoreRef: {name: openbao}
         path: "{{ item.path }}"
-        data: {"{{ item.key }}": "{{ item.value }}"}
+        data: "{{ {item.key: item.value} }}"
   loop: "{{ bootstrap_secrets }}"
   loop_control: {label: "{{ item.name }}"}
   no_log: true
