@@ -122,6 +122,13 @@ function prepare_workspace() {
   # The copied profile becomes our writable build recipe for this run.
   # Anything under airootfs is overlaid directly into the live rootfs.
   cp -a "$source_profile_dir" "$profile_dir"
+
+  # mkarchiso copies airootfs without preserving modes and then restores only
+  # the paths declared in profiledef.sh's file_permissions table. Keep the
+  # agent executable when the overlay is copied into the live root filesystem.
+  printf '\nfile_permissions["/usr/local/bin/homelabd"]="0:0:755"\n' \
+    >> "${profile_dir}/profiledef.sh"
+
   mkdir -p "$pacman_cache_dir"
 
   # Each concurrent build gets its own pacman cache so package downloads do
