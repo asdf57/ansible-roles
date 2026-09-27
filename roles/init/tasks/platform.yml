@@ -64,6 +64,12 @@
     fail_msg: CONCOURSE_PASSWORD must be provided to the bootstrap container.
   no_log: true
 
+- name: Require the file registry credential input
+  ansible.builtin.assert:
+    that: lookup('env', 'FILE_REGISTRY_PASSWORD') | length > 0
+    fail_msg: FILE_REGISTRY_PASSWORD must be provided to the bootstrap container.
+  no_log: true
+
 - name: Create or update the Concourse credential
   ansible.builtin.uri:
     url: "{{ lookup('env', 'STIGMERGY_API_URL') }}/api/v1alpha1/username-password-credentials/concourse-creds"
@@ -119,9 +125,19 @@
     - acme
     - concourse
     - dnsmasq
-    - iso-sync
     - nginx
     - nginx/files
+    - file-registry
+    - file-registry/config
+    - file-registry/data
+    - file-registry/data/iso
+    - file-registry/data/iso/arch
+    - file-registry/data/iso/debian-trixie
+    - file-registry/data/netboot
+    - file-registry/data/netboot/arch
+    - file-registry/data/netboot/arch/arch
+    - file-registry/data/netboot/arch/arch/x86_64
+    - file-registry/data/netboot/debian-trixie
     - registry
     - registry/config
     - vikunja
@@ -138,6 +154,15 @@
   loop:
     - vikunja/db
     - vikunja/files
+
+- name: Set ownership on Copyparty's persistent storage
+  ansible.builtin.file:
+    path: "{{ mounted_data_path }}/file-registry"
+    state: directory
+    owner: "1000"
+    group: "1000"
+    mode: "0750"
+    recurse: true
 
 - name: Create or reuse the Vikunja service secret
   ansible.builtin.set_fact:
@@ -164,7 +189,6 @@
     - {src: concourse/Dockerfile, dest: concourse/Dockerfile}
     - {src: concourse/entrypoint.sh, dest: concourse/entrypoint.sh, mode: "0755"}
     - {src: dnsmasq/Dockerfile, dest: dnsmasq/Dockerfile}
-    - {src: iso-sync/sync.sh, dest: iso-sync/sync.sh, mode: "0755"}
     - {src: nginx/Dockerfile, dest: nginx/Dockerfile}
     - {src: nginx/entrypoint.sh, dest: nginx/entrypoint.sh, mode: "0755"}
     - {src: nginx/boot.ipxe, dest: nginx/files/boot.ipxe}

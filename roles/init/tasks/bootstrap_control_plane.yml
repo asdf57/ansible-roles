@@ -99,7 +99,8 @@
 - name: Define environment-backed Secret resources
   ansible.builtin.set_fact:
     bootstrap_secrets:
-      - {name: github-webhook-secret, path: github/webhook, value: "{{ lookup('env', 'GITHUB_WEBHOOK_SECRET') }}"}
+      - {name: github-webhook-secret, path: github/webhook, key: key, value: "{{ lookup('env', 'GITHUB_WEBHOOK_SECRET') }}"}
+      - {name: file-registry-secret, path: file-registry, key: password, value: "{{ lookup('env', 'FILE_REGISTRY_PASSWORD') }}"}
   no_log: true
 
 - name: Create or update the primary Router credential
@@ -142,7 +143,7 @@
       spec:
         secretStoreRef: {name: openbao}
         path: "{{ item.path }}"
-        data: {key: "{{ item.value }}"}
+        data: {"{{ item.key }}": "{{ item.value }}"}
   loop: "{{ bootstrap_secrets }}"
   loop_control: {label: "{{ item.name }}"}
   no_log: true

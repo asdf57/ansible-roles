@@ -2,13 +2,13 @@
 
 echo Arch iPXE bootloader
 
-kernel http://nginx.ryuugu.dev/arch_netboot/vmlinuz \
+kernel http://nginx.ryuugu.dev/registry/netboot/arch/vmlinuz \
     ip=dhcp \
     cow_spacesize=512M \
     archisobasedir=arch \
-    archiso_http_srv=http://nginx.ryuugu.dev/arch_netboot/ \
+    archiso_http_srv=http://nginx.ryuugu.dev/registry/netboot/arch/ \
     initrd=initrd
 
-initrd http://nginx.ryuugu.dev/arch_netboot/initrd.img
+initrd http://nginx.ryuugu.dev/registry/netboot/arch/initrd.img
 
 boot

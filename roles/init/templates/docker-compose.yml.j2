@@ -42,6 +42,31 @@ services:
       clusternet:
         ipv4_address: "{{ registry_ipv4 }}"
 
+  file-registry:
+    image: copyparty/min:1.20.24
+    container_name: file-registry
+    user: "1000:1000"
+    command:
+      - --usernames
+      - -a
+      - "pipeline:${FILE_REGISTRY_PASSWORD}"
+      - -v
+      - /w::r:rwmd,pipeline:c,daw:c,nohtml:c,hist=/cfg/hists
+      - --rp-loc
+      - /registry
+      - --no-readme
+      - --no-logues
+      - --dotpart
+      - --vc-url
+      - https://api.copyparty.eu/advisories
+      - --vc-exit
+    volumes:
+      - "{{ host_data_path }}/file-registry/data:/w"
+      - "{{ host_data_path }}/file-registry/config:/cfg"
+    restart: always
+    networks:
+      - default
+
   vikunja:
     image: "vikunja/vikunja:{{ vikunja_version }}"
     container_name: vikunja
@@ -57,18 +82,6 @@ services:
     networks:
       clusternet:
         ipv4_address: "{{ vikunja_ipv4 }}"
-
-  iso-sync:
-    image: ghcr.io/oras-project/oras:v1.3.4
-    entrypoint: [/bin/sh, /sync/sync.sh]
-    depends_on:
-      - registry
-    volumes:
-      - "{{ host_data_path }}/iso-sync/sync.sh:/sync/sync.sh:ro"
-      - "{{ host_data_path }}/nginx/files:/www/data"
-    restart: always
-    networks:
-      - clusternet
 
   concourse-keys:
     image: alpine
@@ -308,6 +321,9 @@ services:
     container_name: nginx
     depends_on:
       stigmergy:
+        condition: service_started
+        restart: true
+      file-registry:
         condition: service_started
         restart: true
     networks:
