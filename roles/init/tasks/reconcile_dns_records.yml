@@ -23,6 +23,10 @@
         name: "{{ concourse_fqdn }}."
         zone: "{{ cloudflare_domain }}"
         value: "{{ nginx_ipv4 }}"
+      - resource_name: copyparty
+        name: "{{ copyparty_fqdn }}."
+        zone: "{{ cloudflare_domain }}"
+        value: "{{ nginx_ipv4 }}"
       - resource_name: registry
         name: "{{ registry_fqdn }}."
         zone: "{{ cloudflare_domain }}"

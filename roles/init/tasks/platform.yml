@@ -18,6 +18,8 @@
       - concourse_url
       - concourse_user
       - concourse_version
+      - copyparty_fqdn
+      - copyparty_ipv4
       - concourse_worker_kernel_modules
       - git_webhook_branch
       - git_webhook_repo
@@ -64,7 +66,7 @@
     fail_msg: CONCOURSE_PASSWORD must be provided to the bootstrap container.
   no_log: true
 
-- name: Require the file registry credential input
+- name: Require the Copyparty credential input
   ansible.builtin.assert:
     that: lookup('env', 'FILE_REGISTRY_PASSWORD') | length > 0
     fail_msg: FILE_REGISTRY_PASSWORD must be provided to the bootstrap container.

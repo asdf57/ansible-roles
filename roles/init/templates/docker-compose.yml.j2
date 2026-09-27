@@ -42,9 +42,9 @@ services:
       clusternet:
         ipv4_address: "{{ registry_ipv4 }}"
 
-  file-registry:
+  copyparty:
     image: copyparty/min:1.20.24
-    container_name: file-registry
+    container_name: copyparty
     user: "1000:1000"
     command:
       - --usernames
@@ -52,8 +52,8 @@ services:
       - "pipeline:${FILE_REGISTRY_PASSWORD}"
       - -v
       - /w::r:rwmd,pipeline:c,daw:c,nohtml:c,hist=/cfg/hists
-      - --rp-loc
-      - /registry
+      - --site
+      - "https://{{ copyparty_fqdn }}/"
       - --no-readme
       - --no-logues
       - --dotpart
@@ -65,7 +65,8 @@ services:
       - "{{ host_data_path }}/file-registry/config:/cfg"
     restart: always
     networks:
-      - default
+      clusternet:
+        ipv4_address: "{{ copyparty_ipv4 }}"
 
   vikunja:
     image: "vikunja/vikunja:{{ vikunja_version }}"
@@ -323,7 +324,7 @@ services:
       stigmergy:
         condition: service_started
         restart: true
-      file-registry:
+      copyparty:
         condition: service_started
         restart: true
     networks:
