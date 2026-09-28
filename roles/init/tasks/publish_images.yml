@@ -1,8 +1,8 @@
 ---
-- name: Require the registry address
+- name: Require the registry hostname
   ansible.builtin.assert:
-    that: registry_ipv4 | default('') | length > 0
-    fail_msg: registry_ipv4 is required to publish provisioning images.
+    that: registry_fqdn | default('') | length > 0
+    fail_msg: registry_fqdn is required to publish provisioning images.
 
 - name: Require the operator image name
   ansible.builtin.assert:
@@ -13,7 +13,7 @@
   ansible.builtin.command:
     cmd: >-
       skopeo copy --dest-tls-verify=false docker-daemon:{{ lookup('env', 'HOMELAB_IMAGE') }}
-      docker://{{ registry_ipv4 }}:5000/arch-provisioner:latest
+      docker://{{ registry_fqdn }}/arch-provisioner:latest
   register: arch_provisioner_push
   retries: 5
   delay: 5

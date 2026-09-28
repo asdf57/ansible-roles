@@ -35,6 +35,10 @@
         name: "{{ stigmergy_fqdn }}."
         zone: "{{ cloudflare_domain }}"
         value: "{{ nginx_ipv4 }}"
+      - resource_name: stigmergy-ui
+        name: "{{ stigmergy_ui_fqdn }}."
+        zone: "{{ cloudflare_domain }}"
+        value: "{{ nginx_ipv4 }}"
       - resource_name: vikunja
         name: "{{ vikunja_fqdn }}."
         zone: "{{ cloudflare_domain }}"

@@ -10,19 +10,19 @@
     required_init_group_vars:
       - cert_authority
       - cloudflare_domain
-      - concourse_db_ipv4
       - concourse_fqdn
-      - concourse_ipv4
+      - concourse_internal_url
       - concourse_target
       - concourse_team
       - concourse_url
       - concourse_user
       - concourse_version
       - copyparty_fqdn
-      - copyparty_ipv4
       - concourse_worker_kernel_modules
       - git_webhook_branch
       - git_webhook_repo
+      - git_stigmergy_web_branch
+      - git_stigmergy_web_repo
       - ipvlan_gateway
       - ipvlan_mode
       - ipvlan_subnet
@@ -36,12 +36,10 @@
       - openbao_acme_label
       - openbao_api_fqdn
       - registry_fqdn
-      - registry_ipv4
       - stigmergy_fqdn
+      - stigmergy_ui_fqdn
       - vikunja_fqdn
-      - vikunja_ipv4
       - vikunja_version
-      - webhook_ipv4
 
 - name: Validate certificate account inputs
   ansible.builtin.assert:
@@ -101,7 +99,7 @@
       metadata: {name: concourse}
       spec:
         type: concourse
-        url: "{{ concourse_url }}"
+        url: "{{ concourse_internal_url }}"
         team: "{{ concourse_team }}"
         credentialRef: {name: concourse-creds}
 
@@ -116,6 +114,13 @@
     repo: "{{ git_webhook_repo }}"
     dest: "{{ mounted_data_path }}/webhook"
     version: "{{ git_webhook_branch }}"
+    force: true
+
+- name: Clone the Stigmergy web console source
+  ansible.builtin.git:
+    repo: "{{ git_stigmergy_web_repo }}"
+    dest: "{{ mounted_data_path }}/stigmergy-web"
+    version: "{{ git_stigmergy_web_branch }}"
     force: true
 
 - name: Create service build directories

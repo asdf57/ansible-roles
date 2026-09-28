@@ -12,7 +12,7 @@ services:
     container_name: openbao
     command: [server, -config=/openbao/config/openbao.hcl]
     ports:
-      - "8200:8200"
+      - "127.0.0.1:8200:8200"
     cap_add: [IPC_LOCK]
     restart: always
     volumes:
@@ -116,7 +116,7 @@ services:
       openbao-agent:
         condition: service_healthy
     ports:
-      - "0.0.0.0:8080:8080"
+      - "127.0.0.1:8080:8080"
     volumes:
       - openbao_runtime:/run/openbao:ro
     group_add: ["1000"]

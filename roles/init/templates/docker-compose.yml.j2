@@ -19,28 +19,18 @@ volumes:
 services:
   webhook:
     build: ./webhook
-    ports:
-      - "3001:3000"
     restart: always
-    networks:
-      clusternet:
-        ipv4_address: "{{ webhook_ipv4 }}"
     environment:
         WEBHOOK_TOKEN: "${GITHUB_WEBHOOK_SECRET}"
-        CI_URL: "{{ concourse_fqdn }}"
+        CI_URL: "{{ concourse_url }}"
   registry:
     image: registry
     container_name: registry
     restart: always
     environment:
       REGISTRY_STORAGE_DELETE_ENABLED: "true"
-    ports:
-      - 5000:5000
     volumes:
       - "{{ host_data_path }}/registry/data:/var/lib/registry:rw"
-    networks:
-      clusternet:
-        ipv4_address: "{{ registry_ipv4 }}"
 
   copyparty:
     image: copyparty/min:1.20.24
@@ -64,9 +54,6 @@ services:
       - "{{ host_data_path }}/file-registry/data:/w"
       - "{{ host_data_path }}/file-registry/config:/cfg"
     restart: always
-    networks:
-      clusternet:
-        ipv4_address: "{{ copyparty_ipv4 }}"
 
   vikunja:
     image: "vikunja/vikunja:{{ vikunja_version }}"
@@ -80,9 +67,6 @@ services:
       - "{{ host_data_path }}/vikunja/db:/db"
       - "{{ host_data_path }}/vikunja/service-secret:/run/secrets/vikunja-service-secret:ro"
     restart: unless-stopped
-    networks:
-      clusternet:
-        ipv4_address: "{{ vikunja_ipv4 }}"
 
   concourse-keys:
     image: alpine
@@ -115,9 +99,6 @@ services:
       interval: 3s
       timeout: 3s
       retries: 5
-    networks:
-      clusternet:
-        ipv4_address: "{{ concourse_db_ipv4 }}"
 
   concourse-web:
     container_name: concourse-web
@@ -134,8 +115,6 @@ services:
         condition: service_completed_successfully
       openbao-bootstrap:
         condition: service_completed_successfully
-    ports:
-      - "2222:2222"
     volumes:
       - concourse_keys:/concourse-keys
       - openbao_shared:/shared
@@ -143,7 +122,7 @@ services:
       CONCOURSE_SESSION_SIGNING_KEY: /concourse-keys/session_signing_key
       CONCOURSE_TSA_HOST_KEY: /concourse-keys/tsa_host_key
       CONCOURSE_TSA_AUTHORIZED_KEYS: /concourse-keys/authorized_worker_keys
-      CONCOURSE_POSTGRES_HOST: "{{ concourse_db_ipv4 }}"
+      CONCOURSE_POSTGRES_HOST: concourse-db
       CONCOURSE_POSTGRES_USER: concourse_user
       CONCOURSE_POSTGRES_PASSWORD: concourse_pass
       CONCOURSE_POSTGRES_DATABASE: concourse
@@ -156,10 +135,6 @@ services:
       CONCOURSE_VAULT_LOOKUP_TEMPLATES: '/{% raw %}{{.Secret}}{% endraw %}'
       CONCOURSE_VAULT_ENABLE_KV_MOUNT_CACHE: "true"
     restart: always
-    networks:
-      default:
-      clusternet:
-        ipv4_address: "{{ concourse_ipv4 }}"
 
   concourse-worker:
     container_name: concourse-worker
@@ -185,9 +160,6 @@ services:
       CONCOURSE_VAULT_URL: http://openbao:8200
       CONCOURSE_CONTAINERD_DNS_PROXY_ENABLE: "true"
     restart: always
-    networks:
-      - default
-      - clusternet
 
   openbao:
     image: ghcr.io/openbao/openbao:2.6.1
@@ -195,8 +167,6 @@ services:
     command:
       - server
       - -config=/openbao/config/openbao.hcl
-    ports:
-      - 8200:8200
     cap_add:
       - IPC_LOCK
     restart: always
@@ -284,8 +254,6 @@ services:
       - --auto-compaction-retention=1h
     volumes:
       - etcd_data:/etcd-data
-    ports:
-      - "127.0.0.1:2379:2379"
     healthcheck:
       test: ["CMD", "/usr/local/bin/etcdctl", "--endpoints=http://127.0.0.1:2379", "endpoint", "health"]
       interval: 2s
@@ -309,12 +277,23 @@ services:
       openbao-agent:
         condition: service_healthy
     ports:
-      - "0.0.0.0:8080:8080"
+      - "127.0.0.1:8080:8080"
     volumes:
       - openbao_runtime:/run/openbao:ro
     group_add:
       - "1000"
     init: true
+    restart: always
+
+  stigmergy-web:
+    build:
+      context: ./stigmergy-web
+      args:
+        VITE_FILE_REGISTRY_URL: "https://{{ copyparty_fqdn }}/"
+    container_name: stigmergy-web
+    depends_on:
+      stigmergy:
+        condition: service_started
     restart: always
 
   nginx:
@@ -324,7 +303,22 @@ services:
       stigmergy:
         condition: service_started
         restart: true
+      stigmergy-web:
+        condition: service_started
+        restart: true
       copyparty:
+        condition: service_started
+        restart: true
+      openbao:
+        condition: service_healthy
+        restart: true
+      concourse-web:
+        condition: service_started
+        restart: true
+      registry:
+        condition: service_started
+        restart: true
+      vikunja:
         condition: service_started
         restart: true
     networks:

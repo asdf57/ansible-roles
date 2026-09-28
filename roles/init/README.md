@@ -26,8 +26,9 @@ for normal operator runs, but it is not a bootstrap dependency.
 
 After the full Compose stack starts and Stigmergy reports ready, the platform
 phase creates `A` records for every FQDN nginx exposes: nginx ACME, OpenBao
-ACME/API, Concourse, Copyparty, registry, Stigmergy, and Vikunja. These records
-use `nginx_ipv4`; nginx reaches Copyparty at `copyparty_ipv4`.
+ACME/API, Concourse, Copyparty, registry, Stigmergy, the Stigmergy UI, and
+Vikunja. These records use `nginx_ipv4`; nginx reaches the backing HTTP
+services by name on the internal Compose network.
 
 Configure their backing Router in the published group variables:
 
@@ -45,10 +46,10 @@ Additional records can be declared with:
 
 ```yaml
 dns_records:
-  - resource_name: webhook
-    name: webhook.
+  - resource_name: docs
+    name: docs.
     zone: homelab.example.net
-    value: "{{ webhook_ipv4 }}"
+    value: "{{ nginx_ipv4 }}"
 ```
 
 `resource_name` is the Stigmergy resource name. A trailing dot makes the DNS
