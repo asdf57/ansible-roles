@@ -209,6 +209,11 @@ function build_image() {
     bios) bootloader=syslinux ;;
     *) die 'Unsupported boot mode' ;;
   esac
+  # Netboot emits kernel/initrd/rootfs for iPXE, not a GRUB-bootable image.
+  # live-build only accepts syslinux for this artifact family.
+  if [[ "$type" == netboot ]]; then
+    bootloader=syslinux
+  fi
   lb config \
     --bootloaders "$bootloader" \
     --mode debian \
