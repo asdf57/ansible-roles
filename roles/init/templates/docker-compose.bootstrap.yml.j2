@@ -110,6 +110,7 @@ services:
     environment:
       HTTP_ADDR: 0.0.0.0:8080
       ETCD_ENDPOINTS: http://etcd:2379
+      API_AUTH_FILE: /run/stigmergy/api-access.json
     depends_on:
       etcd:
         condition: service_healthy
@@ -119,6 +120,7 @@ services:
       - "127.0.0.1:8080:8080"
     volumes:
       - openbao_runtime:/run/openbao:ro
+      - "{{ lookup('env', 'HOST_DATA_PATH') }}/stigmergy-api-access.json:/run/stigmergy/api-access.json:ro"
     group_add: ["1000"]
     init: true
     restart: always

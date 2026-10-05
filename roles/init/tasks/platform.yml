@@ -73,6 +73,8 @@
 - name: Create or update the Concourse credential
   ansible.builtin.uri:
     url: "{{ lookup('env', 'STIGMERGY_API_URL') }}/api/v1alpha1/username-password-credentials/concourse-creds"
+    headers:
+      Authorization: "Bearer {{ lookup('env', 'STIGMERGY_API_TOKEN') }}"
     method: PUT
     body_format: json
     status_code: [200, 201]
@@ -90,6 +92,8 @@
 - name: Create or update the Concourse pipeline provider
   ansible.builtin.uri:
     url: "{{ lookup('env', 'STIGMERGY_API_URL') }}/api/v1alpha1/pipeline-providers/concourse"
+    headers:
+      Authorization: "Bearer {{ lookup('env', 'STIGMERGY_API_TOKEN') }}"
     method: PUT
     body_format: json
     status_code: [200, 201]
@@ -102,6 +106,7 @@
         url: "{{ concourse_internal_url }}"
         team: "{{ concourse_team }}"
         credentialRef: {name: concourse-creds}
+  no_log: true
 
 - name: Render the full infrastructure Compose file
   ansible.builtin.template:

@@ -3,12 +3,15 @@
   ansible.builtin.uri:
     url: >-
       {{ lookup('env', 'STIGMERGY_API_URL') }}/api/v1alpha1/inventory-capture-groups/{{ lookup('env', 'INVENTORY_CAPTURE_GROUP') }}
+    headers:
+      Authorization: "Bearer {{ lookup('env', 'STIGMERGY_API_TOKEN') }}"
     method: GET
     status_code: 200
   register: bootstrap_inventory
   retries: 150
   delay: 2
   until: bootstrap_inventory.json.status.phase | default('') == 'Ready'
+  no_log: true
 
 - name: Create the local bootstrap inventory directories
   ansible.builtin.file:

@@ -15,6 +15,8 @@ volumes:
     driver: local
   concourse_keys:
     driver: local
+  concourse_db:
+    driver: local
 
 services:
   webhook:
@@ -94,6 +96,8 @@ services:
       POSTGRES_USER: concourse_user
       PGDATA: /database
       POSTGRES_HOST_AUTH_METHOD: trust
+    volumes:
+      - concourse_db:/database
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U concourse_user -d concourse"]
       interval: 3s
@@ -269,6 +273,11 @@ services:
       ETCD_ENDPOINTS: http://etcd:2379
       PUBLIC_API_URL: "https://{{ stigmergy_fqdn }}"
       COMMAND_RUNNER_IMAGE: "{{ registry_fqdn }}/arch-provisioner:latest"
+      API_AUTH_FILE: /run/stigmergy/api-access.json
+      ISO_ARTIFACT_BASE_URL: "https://{{ copyparty_fqdn }}"
+      ISO_BUILDER_REPOSITORY: "{{ lookup('env', 'ISO_BUILDER_REPOSITORY') | default('https://github.com/asdf57/ansible-roles.git', true) }}"
+      COMMAND_RUNNER_PARAMETERS: >-
+        {{ lookup('env', 'COMMAND_RUNNER_PARAMETERS') | default('{"STIGMERGY_API_TOKEN":"((stigmergy-runner-token))","ANSIBLE_PRIVATE_KEY":"((ssh/clients/ansible-runner.privateKey))","ANSIBLE_CERTIFICATE":"((ansible-runner-certificate))","ANSIBLE_KNOWN_HOSTS":"((ansible-known-hosts))"}', true) }}
       ANSIBLE_ROLES_REPOSITORY: "{{ lookup('env', 'GIT_ANSIBLE_ROLES_REPO') }}"
       ANSIBLE_ROLES_REVISION: "{{ lookup('env', 'GIT_ANSIBLE_ROLES_REF') }}"
     depends_on:
@@ -280,6 +289,7 @@ services:
       - "127.0.0.1:8080:8080"
     volumes:
       - openbao_runtime:/run/openbao:ro
+      - "{{ host_data_path }}/stigmergy-api-access.json:/run/stigmergy/api-access.json:ro"
     group_add:
       - "1000"
     init: true

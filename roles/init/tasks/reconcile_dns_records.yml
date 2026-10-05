@@ -85,6 +85,8 @@
 - name: Create or update Stigmergy DNS records
   ansible.builtin.uri:
     url: "{{ lookup('env', 'STIGMERGY_API_URL') }}/api/v1alpha1/dns-records/{{ item.resource_name }}"
+    headers:
+      Authorization: "Bearer {{ lookup('env', 'STIGMERGY_API_TOKEN') }}"
     method: PUT
     body_format: json
     status_code: [200, 201]
@@ -105,3 +107,4 @@
   loop: "{{ init_dns_records }}"
   loop_control:
     label: "{{ item.resource_name }}"
+  no_log: true

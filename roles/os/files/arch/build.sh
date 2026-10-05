@@ -11,7 +11,8 @@ set -euo pipefail
 # changes on top rather than mutating the system copy in-place.
 
 readonly OUTPUT_DIR="${OUTPUT_DIR:-/output}"
-readonly SSH_KEY_SOURCE="${SSH_KEY_SOURCE:-/root/.ssh/authorized_keys}"
+readonly SSH_CA_BUNDLE_SOURCE="${SSH_CA_BUNDLE_SOURCE:-}"
+readonly HOMELABD_MANAGEMENT_INSTALL_SOURCE="${HOMELABD_MANAGEMENT_INSTALL_SOURCE:-}"
 readonly HOMELABD_BINARY_SOURCE="${HOMELABD_BINARY_SOURCE:-}"
 readonly HOMELABD_SERVICE_SOURCE="${HOMELABD_SERVICE_SOURCE:-}"
 readonly HOMELABD_SSHD_CONFIG_SOURCE="${HOMELABD_SSHD_CONFIG_SOURCE:-}"
@@ -107,7 +108,8 @@ function prepare_workspace() {
   local source_profile_dir="${ARCHISO_ROOT}/${profile}"
 
   [[ -d "$source_profile_dir" ]] || die "Archiso profile not found: $source_profile_dir"
-  [[ -f "$SSH_KEY_SOURCE" ]] || die "Provisioning key not found: $SSH_KEY_SOURCE"
+  [[ -f "$SSH_CA_BUNDLE_SOURCE" ]] || die "Public CA bundle not found: $SSH_CA_BUNDLE_SOURCE"
+  [[ -f "$HOMELABD_MANAGEMENT_INSTALL_SOURCE" ]] || die "Management installer not found"
   [[ -f "$HOMELABD_BINARY_SOURCE" ]] || die "homelabd binary not found: $HOMELABD_BINARY_SOURCE"
   [[ -f "$HOMELABD_SERVICE_SOURCE" ]] || die "homelabd service not found: $HOMELABD_SERVICE_SOURCE"
   [[ -f "$HOMELABD_SSHD_CONFIG_SOURCE" ]] || die "homelabd sshd config not found: $HOMELABD_SSHD_CONFIG_SOURCE"
@@ -128,6 +130,14 @@ function prepare_workspace() {
   # agent executable when the overlay is copied into the live root filesystem.
   printf '\nfile_permissions["/usr/local/bin/homelabd"]="0:0:755"\n' \
     >> "${profile_dir}/profiledef.sh"
+  printf '\nfile_permissions["/usr/local/libexec/ensure-ansible-user"]="0:0:755"\nfile_permissions["/etc/sudoers.d/ansible-management"]="0:0:440"\n' >> "${profile_dir}/profiledef.sh"
+  # Restrict the stock profile to the explicitly requested boot family.
+  case "${IMAGE_BOOT_MODE:-uefi}" in
+    uefi) printf '\nbootmodes=("${bootmodes[@]/bios.*/}")\n' >> "${profile_dir}/profiledef.sh" ;;
+    bios) printf '\nbootmodes=("${bootmodes[@]/uefi.*/}")\n' >> "${profile_dir}/profiledef.sh" ;;
+    *) die 'Unsupported boot mode' ;;
+  esac
+  printf 'bootmodes=($(printf "%%s\\n" "${bootmodes[@]}" | sed "/^$/d"))\n' >> "${profile_dir}/profiledef.sh"
 
   mkdir -p "$pacman_cache_dir"
 
@@ -138,7 +148,6 @@ function prepare_workspace() {
 
 function configure_live_environment() {
   local root_fs="${profile_dir}/airootfs"
-  local ssh_dir="${root_fs}/root/.ssh"
   local ssh_config_dir="${root_fs}/etc/ssh/sshd_config.d"
   local systemd_dir="${root_fs}/etc/systemd/system"
   local wants_dir="${systemd_dir}/multi-user.target.wants"
@@ -152,19 +161,16 @@ function configure_live_environment() {
   # avoids an interactive provider choice between iptables and iptables-legacy.
   append_if_missing "iptables" "${profile_dir}/packages.x86_64"
   append_if_missing "lldpd" "${profile_dir}/packages.x86_64"
+  append_if_missing "sudo" "${profile_dir}/packages.x86_64"
 
-  # airootfs/root/.ssh becomes /root/.ssh in the live image at boot time.
-  # We pre-seed authorized_keys so the live root account accepts our key.
-  mkdir -p "$ssh_dir" "$ssh_config_dir" "$wants_dir" "${root_fs}/var/lib"
-  cp "$SSH_KEY_SOURCE" "${ssh_dir}/authorized_keys"
-  chmod 700 "$ssh_dir"
-  chmod 600 "${ssh_dir}/authorized_keys"
+  mkdir -p "$ssh_config_dir" "$wants_dir" "${root_fs}/var/lib"
+  bash "$HOMELABD_MANAGEMENT_INSTALL_SOURCE" "$root_fs" "$SSH_CA_BUNDLE_SOURCE"
 
   # sshd_config.d is preferred over editing the base sshd_config directly
   # because it keeps our changes small and clearly isolated.
   cat > "${ssh_config_dir}/99-live.conf" <<'EOF'
 PasswordAuthentication no
-PermitRootLogin prohibit-password
+PermitRootLogin no
 MaxAuthTries 5
 EOF
 

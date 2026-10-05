@@ -13,10 +13,23 @@
     - PRIMARY_ROUTER_NAME
     - PRIMARY_ROUTER_API_USERNAME
     - PRIMARY_ROUTER_API_PASSWORD
+    - STIGMERGY_API_TOKEN
+    - STIGMERGY_API_POLICY
+    - STIGMERGY_RUNNER_API_TOKEN
 
 - name: Configure bootstrap paths
   ansible.builtin.set_fact:
     mounted_data_path: "{{ lookup('env', 'MOUNT_DATA_PATH') }}"
+
+- name: Install the operator-supplied API access policy for the non-root API
+  ansible.builtin.copy:
+    content: "{{ lookup('env', 'STIGMERGY_API_POLICY') | from_json | to_nice_json }}"
+    dest: "{{ mounted_data_path }}/stigmergy-api-access.json"
+    owner: '65532'
+    group: '65532'
+    mode: '0400'
+  become: true
+  no_log: true
 
 - name: Clone Stigmergy for the bootstrap control plane
   ansible.builtin.git:
@@ -80,6 +93,8 @@
 - name: Create or update the OpenBao SecretStore
   ansible.builtin.uri:
     url: "{{ lookup('env', 'STIGMERGY_API_URL') }}/api/v1alpha1/secret-stores/openbao"
+    headers:
+      Authorization: "Bearer {{ lookup('env', 'STIGMERGY_API_TOKEN') }}"
     method: PUT
     body_format: json
     status_code: [200, 201]
@@ -95,17 +110,21 @@
             keyPrefix: secrets
             authentication:
               tokenFile: /run/openbao/token
+  no_log: true
 
 - name: Define environment-backed Secret resources
   ansible.builtin.set_fact:
     bootstrap_secrets:
       - {name: github-webhook-secret, path: github/webhook, key: key, value: "{{ lookup('env', 'GITHUB_WEBHOOK_SECRET') }}"}
       - {name: file-registry-secret, path: file-registry, key: value, value: "{{ lookup('env', 'FILE_REGISTRY_PASSWORD') }}"}
+      - {name: stigmergy-runner-token, path: stigmergy-runner-token, key: value, value: "{{ lookup('env', 'STIGMERGY_RUNNER_API_TOKEN') }}"}
   no_log: true
 
 - name: Create or update the primary Router credential
   ansible.builtin.uri:
     url: "{{ lookup('env', 'STIGMERGY_API_URL') }}/api/v1alpha1/username-password-credentials/{{ lookup('env', 'PRIMARY_ROUTER_NAME') }}-credentials"
+    headers:
+      Authorization: "Bearer {{ lookup('env', 'STIGMERGY_API_TOKEN') }}"
     method: PUT
     body_format: json
     status_code: [200, 201]
@@ -133,6 +152,8 @@
 - name: Create or update environment-backed Secret resources
   ansible.builtin.uri:
     url: "{{ lookup('env', 'STIGMERGY_API_URL') }}/api/v1alpha1/secrets/{{ item.name }}"
+    headers:
+      Authorization: "Bearer {{ lookup('env', 'STIGMERGY_API_TOKEN') }}"
     method: PUT
     body_format: json
     status_code: [200, 201]
@@ -151,6 +172,8 @@
 - name: Wait for the primary Router credential to become ready
   ansible.builtin.uri:
     url: "{{ lookup('env', 'STIGMERGY_API_URL') }}/api/v1alpha1/username-password-credentials/{{ lookup('env', 'PRIMARY_ROUTER_NAME') }}-credentials"
+    headers:
+      Authorization: "Bearer {{ lookup('env', 'STIGMERGY_API_TOKEN') }}"
     method: GET
     status_code: 200
   register: primary_router_credential
@@ -180,5 +203,6 @@
     chdir: "{{ mounted_data_path }}/homelab-init"
   environment:
     STIGMERGY_API_URL: "{{ lookup('env', 'STIGMERGY_API_URL') }}"
+    STIGMERGY_API_TOKEN: "{{ lookup('env', 'STIGMERGY_API_TOKEN') }}"
   register: homelab_init_upload
   changed_when: "'Applying ' in homelab_init_upload.stdout"

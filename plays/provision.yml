@@ -23,6 +23,7 @@
 - name: Pre-provision setup
   hosts: all
   gather_facts: true
+  become: true
   tasks:
     - name: Check if /var/lib/is_live_env exists
       ansible.builtin.stat:
@@ -60,8 +61,36 @@
         msg: "Failed to enter live environment."
       when: not is_live_env | bool
 
+    - name: Require separate daemon enrollment before destructive provisioning
+      ansible.builtin.stat:
+        path: /etc/homelabd/environment
+      register: agent_enrollment
+      when: management_access_enabled | default(true) | bool
+
+    - name: Refuse provisioning without the daemon identity to preserve
+      ansible.builtin.assert:
+        that: agent_enrollment.stat.exists and agent_enrollment.stat.isreg and agent_enrollment.stat.uid == 0 and agent_enrollment.stat.mode == '0600'
+        fail_msg: Enroll the live daemon with its restricted API token before provisioning.
+      when: management_access_enabled | default(true) | bool
+
+    - name: Read the separately enrolled daemon identity
+      ansible.builtin.slurp:
+        src: /etc/homelabd/environment
+      register: enrolled_agent_environment
+      no_log: true
+      when: management_access_enabled | default(true) | bool
+
+    - name: Refuse provisioning with an empty or short daemon token
+      ansible.builtin.assert:
+        that:
+          - (enrolled_agent_environment.content | b64decode) is search('(?m)^API_TOKEN=\S{32,}$')
+        fail_msg: Enroll the live daemon with its restricted API token before provisioning.
+      no_log: true
+      when: management_access_enabled | default(true) | bool
+
 - name: Provision
   hosts: all
+  become: true
   tasks:
     - name: Perform prereqs
       include_role:

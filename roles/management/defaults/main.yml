@@ -1,0 +1,6 @@
+---
+management_target_root: /
+# Point to a checkout of homelabd on the Ansible control host. Provisioning copies
+# setup/ plus its prebuilt binary, avoiding a second implementation of the policy.
+homelabd_setup_source: "{{ lookup('env', 'HOMELABD_SETUP_SOURCE') }}"
+homelabd_binary_source: "{{ lookup('env', 'HOMELABD_BINARY_SOURCE') }}"

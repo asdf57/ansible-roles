@@ -253,6 +253,7 @@
       delegate_to: localhost
 
 - name: Fetch the public root ssh key from Vault
+  when: not (management_access_enabled | default(true) | bool)
   community.hashi_vault.vault_kv2_get:
     url: "https://vault.ryuugu.dev"
     engine_mount_point: "kv2"
@@ -262,6 +263,7 @@
   delegate_to: localhost
 
 - name: Install root public key
+  when: not (management_access_enabled | default(true) | bool)
   ansible.builtin.authorized_key:
     user: "root"
     key: "{{ root_ssh_key.data.data.key }}"
@@ -270,7 +272,7 @@
 
 - name: Setup users
   include_tasks: create_user.yml
-  loop: "{{ users }}"
+  loop: "{{ users | rejectattr('username', 'equalto', 'ansible') | list }}"
   loop_control:
     loop_var: item
   vars:
@@ -303,12 +305,12 @@
   block:
     - name: Install openssh (Arch)
       ansible.builtin.shell:
-        cmd: "arch-chroot /mnt pacman -S --noconfirm openssh"
+        cmd: "arch-chroot /mnt pacman -S --noconfirm openssh lldpd"
       when: ansible_distribution == 'Archlinux'
 
     - name: Install openssh (Debian)
       ansible.builtin.shell:
-        cmd: "chroot /mnt apt-get install -y openssh-server"
+        cmd: "chroot /mnt apt-get install -y openssh-server lldpd"
       when: ansible_distribution == 'Debian'
 
     - name: Enable sshd (Arch)
@@ -328,10 +330,17 @@
         line: "{{ item.line }}"
         state: present
       loop:
-        - { regexp: '^#?PermitRootLogin', line: 'PermitRootLogin prohibit-password' }
+        - { regexp: '^#?PermitRootLogin', line: "PermitRootLogin {{ 'no' if management_access_enabled | default(true) | bool else 'prohibit-password' }}" }
         - { regexp: '^#?PasswordAuthentication', line: 'PasswordAuthentication no' }
         - { regexp: '^#?PubkeyAuthentication', line: 'PubkeyAuthentication yes' }
         - { regexp: '^#?X11Forwarding', line: 'X11Forwarding no' }
+
+- name: Install shared management access in the new OS before reboot
+  ansible.builtin.include_role:
+    name: management
+  vars:
+    management_target_root: /mnt
+  when: management_access_enabled | default(true) | bool
 
 - name: Configure the bootloader
   block:
@@ -416,6 +425,7 @@
       become: true
 
 - name: Get the SSH key from Vault
+  when: not (management_access_enabled | default(true) | bool)
   community.hashi_vault.vault_kv2_get:
     url: "https://vault.ryuugu.dev"
     engine_mount_point: "kv2"
@@ -443,7 +453,7 @@
         mode: '0600'
         owner: root
         group: root
-  when: ssh_key.data is defined and ssh_key.data.data is defined and ssh_key.data.data.key is defined
+  when: not (management_access_enabled | default(true) | bool) and ssh_key.data is defined and ssh_key.data.data is defined and ssh_key.data.data.key is defined
 
 - name: Cleanup chroot mounts before reboot
   block:

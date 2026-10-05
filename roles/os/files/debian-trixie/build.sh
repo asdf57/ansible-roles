@@ -12,7 +12,8 @@ set -euo pipefail
 # reproducible and there is no stale state from a previous attempt.
 
 readonly OUTPUT_DIR="${OUTPUT_DIR:-/output}"
-readonly SSH_KEY_SOURCE="${SSH_KEY_SOURCE:-/root/.ssh/authorized_keys}"
+readonly SSH_CA_BUNDLE_SOURCE="${SSH_CA_BUNDLE_SOURCE:-}"
+readonly HOMELABD_MANAGEMENT_INSTALL_SOURCE="${HOMELABD_MANAGEMENT_INSTALL_SOURCE:-}"
 readonly HOMELABD_BINARY_SOURCE="${HOMELABD_BINARY_SOURCE:-}"
 readonly HOMELABD_SERVICE_SOURCE="${HOMELABD_SERVICE_SOURCE:-}"
 readonly HOMELABD_SSHD_CONFIG_SOURCE="${HOMELABD_SSHD_CONFIG_SOURCE:-}"
@@ -89,7 +90,8 @@ function parse_cli_args() {
 }
 
 function prepare_workspace() {
-  [[ -f "$SSH_KEY_SOURCE" ]] || die "Provisioning key not found: $SSH_KEY_SOURCE"
+  [[ -f "$SSH_CA_BUNDLE_SOURCE" ]] || die "Public CA bundle not found: $SSH_CA_BUNDLE_SOURCE"
+  [[ -f "$HOMELABD_MANAGEMENT_INSTALL_SOURCE" ]] || die "Management installer not found"
   [[ -f "$HOMELABD_BINARY_SOURCE" ]] || die "homelabd binary not found: $HOMELABD_BINARY_SOURCE"
   [[ -f "$HOMELABD_SERVICE_SOURCE" ]] || die "homelabd service not found: $HOMELABD_SERVICE_SOURCE"
   [[ -f "$HOMELABD_SSHD_CONFIG_SOURCE" ]] || die "homelabd sshd config not found: $HOMELABD_SSHD_CONFIG_SOURCE"
@@ -107,7 +109,6 @@ function prepare_workspace() {
     config/hooks/live \
     config/includes.chroot/etc/ssh/sshd_config.d \
     config/includes.chroot/etc/systemd/system/multi-user.target.wants \
-    config/includes.chroot/root/.ssh \
     config/includes.chroot/var/lib \
     config/package-lists
 }
@@ -115,11 +116,7 @@ function prepare_workspace() {
 function configure_live_environment() {
   echo ":: Configuring the Debian Trixie live environment"
 
-  # includes.chroot/root/.ssh becomes /root/.ssh in the booted live system.
-  # Preloading authorized_keys gives us passwordless root SSH access.
-  cp "$SSH_KEY_SOURCE" config/includes.chroot/root/.ssh/authorized_keys
-  chmod 700 config/includes.chroot/root/.ssh
-  chmod 600 config/includes.chroot/root/.ssh/authorized_keys
+  bash "$HOMELABD_MANAGEMENT_INSTALL_SOURCE" "$PWD/config/includes.chroot" "$SSH_CA_BUNDLE_SOURCE"
   touch config/includes.chroot/var/lib/is_live_env
 
   # package-lists/*.list.chroot are merged into the package set installed
@@ -136,6 +133,7 @@ debootstrap
 arch-install-scripts
 locales
 lldpd
+sudo
 EOF
 
   "$(dirname "$0")/../install-homelabd.sh" \
@@ -149,7 +147,7 @@ EOF
   # sshd_config shipped by the base system.
   write_file config/includes.chroot/etc/ssh/sshd_config.d/99-live.conf <<'EOF'
 PasswordAuthentication no
-PermitRootLogin prohibit-password
+PermitRootLogin no
 MaxAuthTries 5
 EOF
 
@@ -205,7 +203,14 @@ function build_image() {
   #
   # The archive areas include firmware and other packages Debian keeps
   # outside of plain "main", which is often useful on installer/live media.
+  local bootloader
+  case "${IMAGE_BOOT_MODE:-uefi}" in
+    uefi) bootloader=grub-efi ;;
+    bios) bootloader=syslinux ;;
+    *) die 'Unsupported boot mode' ;;
+  esac
   lb config \
+    --bootloaders "$bootloader" \
     --mode debian \
     --distribution "$DISTRIBUTION" \
     --architecture amd64 \
