@@ -1,3 +1,53 @@
+{% if reverse_proxy_hosts | default([]) | length > 0 %}
+map $http_upgrade $external_proxy_connection {
+    default upgrade;
+    '' close;
+}
+
+{% for proxy in reverse_proxy_hosts %}
+server {
+    listen 80;
+    server_name {{ proxy.fqdn }};
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    server_name {{ proxy.fqdn }};
+
+    ssl_certificate /etc/nginx/ssl/{{ cloudflare_domain }}/full.pem;
+    ssl_certificate_key /etc/nginx/ssl/{{ cloudflare_domain }}/key.pem;
+    ssl_trusted_certificate /etc/nginx/ssl/{{ cloudflare_domain }}/ca.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+
+    client_max_body_size 0;
+    location / {
+        proxy_pass {{ proxy.upstream }};
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Scheme $scheme;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Port $server_port;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $external_proxy_connection;
+        proxy_ssl_server_name on;
+        # LAN appliances may use self-signed certificates, as PiKVM does.
+        proxy_ssl_verify off;
+        postpone_output 0;
+        proxy_buffering off;
+        proxy_ignore_headers X-Accel-Buffering;
+        proxy_request_buffering off;
+        proxy_connect_timeout 10s;
+        proxy_read_timeout 1d;
+        proxy_send_timeout 1d;
+    }
+}
+{% endfor %}
+{% endif %}
+
 # server block for nginx
 server {
     listen 80;
