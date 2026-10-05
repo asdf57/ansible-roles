@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# All desired inputs come from the fetched snapshot; never query the live API.
+# Do not trace task credentials. Artifacts from this task must be private.
+set +x
+[[ "${HOMELABD_API_TOKEN:-}" =~ ^[a-f0-9]{64}$ ]] || { echo 'A restricted agent API token is required' >&2; exit 1; }
+export HOMELABD_API_TOKEN
+# Public desired inputs come from the snapshot; credentials arrive privately.
 input="$PWD/image-inputs/${IMAGE_INPUT_PATH:?}/image.yaml"
 bundle="$PWD/image-inputs/$IMAGE_INPUT_PATH/ssh-user-ca.pub"
 if [[ -f /etc/arch-release ]]; then

@@ -44,6 +44,8 @@ services:
       - "pipeline:${FILE_REGISTRY_PASSWORD}"
       - -v
       - /w::r:rwmd,pipeline:c,daw:c,nohtml:c,hist=/cfg/hists
+      - -v
+      - /w/iso-resources:iso-resources:rwmd,pipeline:c,nohtml:c,hist=/cfg/iso-hists
       - --site
       - "https://{{ copyparty_fqdn }}/"
       - --no-readme
@@ -90,6 +92,7 @@ services:
   concourse-db:
     container_name: concourse-db
     image: postgres
+    restart: unless-stopped
     environment:
       POSTGRES_DB: concourse
       POSTGRES_PASSWORD: concourse_pass
@@ -244,6 +247,7 @@ services:
 
   etcd:
     image: gcr.io/etcd-development/etcd:v3.6.13
+    restart: unless-stopped
     command:
       - /usr/local/bin/etcd
       - --name=etcd
@@ -275,6 +279,7 @@ services:
       COMMAND_RUNNER_IMAGE: "{{ registry_fqdn }}/arch-provisioner:latest"
       API_AUTH_FILE: /run/stigmergy/api-access.json
       ISO_ARTIFACT_BASE_URL: "https://{{ copyparty_fqdn }}"
+      ISO_ARTIFACT_PASSWORD: "${FILE_REGISTRY_PASSWORD}"
       ISO_BUILDER_REPOSITORY: "{{ lookup('env', 'ISO_BUILDER_REPOSITORY') | default('https://github.com/asdf57/ansible-roles.git', true) }}"
       COMMAND_RUNNER_PARAMETERS: >-
         {{ lookup('env', 'COMMAND_RUNNER_PARAMETERS') | default('{"STIGMERGY_API_TOKEN":"((stigmergy-runner-token))","ANSIBLE_PRIVATE_KEY":"((ssh/clients/ansible-runner.privateKey))","ANSIBLE_CERTIFICATE":"((ansible-runner-certificate))","ANSIBLE_KNOWN_HOSTS":"((ansible-known-hosts))"}', true) }}

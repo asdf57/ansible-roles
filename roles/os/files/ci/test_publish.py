@@ -23,6 +23,8 @@ class PublishingTests(unittest.TestCase):
         requests = []
         class Opener:
             def open(self, request, **kwargs):
+                if isinstance(request, str):
+                    raise publisher.urllib.error.HTTPError(request, 403, "private", {}, None)
                 payload = request.data.read()
                 self.assert_size = len(payload) == int(request.headers["Content-length"])
                 requests.append((request.full_url, payload, self.assert_size))
@@ -42,6 +44,20 @@ class PublishingTests(unittest.TestCase):
         manifest = json.loads(requests[-1][1])
         self.assertEqual(len(manifest["artifacts"]), 4)
         self.assertTrue(all("/builds/build-id/" in item["url"] and len(item["sha256"]) == 64 for item in manifest["artifacts"]))
+
+    def test_public_storage_is_rejected_before_upload(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "image.yaml").write_text(json.dumps({"artifactBaseURL": "https://files.example"}))
+            (root / "build.json").write_text("{}")
+            class Opener:
+                def open(self, request, **kwargs):
+                    if not isinstance(request, str):
+                        raise AssertionError("Attempted upload to public storage")
+                    return Response()
+            with patch.object(publisher.urllib.request, "build_opener", return_value=Opener()):
+                with self.assertRaisesRegex(ValueError, "anonymous reads"):
+                    publisher.publish(root)
 
     def test_unsafe_endpoint_and_redirects_are_rejected(self):
         with tempfile.TemporaryDirectory() as temporary:

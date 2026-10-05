@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import time
 import urllib.request
+import urllib.error
 from urllib.parse import urlsplit
 
 
@@ -21,6 +22,16 @@ def publish(root=Path("image-output")):
     if (endpoint.scheme != "https" and not (endpoint.scheme == "http" and endpoint.hostname in ("localhost", "127.0.0.1"))) or not endpoint.hostname or endpoint.username or endpoint.password or endpoint.query or endpoint.fragment:
         raise ValueError("Artifact uploads require HTTPS (loopback HTTP is test-only)")
     opener = urllib.request.build_opener(NoRedirects())
+    # Never upload credential-bearing images to an anonymously readable volume.
+    private_volume = configuration["artifactBaseURL"].rstrip("/") + "/iso-resources/?ls"
+    try:
+        with opener.open(private_volume, timeout=30):
+            pass
+    except urllib.error.HTTPError as error:
+        if error.code not in (401, 403):
+            raise ValueError("Cannot verify private ISO artifact storage") from None
+    else:
+        raise ValueError("Refusing to publish: ISO artifact storage permits anonymous reads")
     base = configuration["artifactBaseURL"].rstrip("/") + "/iso-resources/" + metadata["isoUid"]
     build_path = base + "/builds/" + metadata["buildId"] + "/"
     isos = list((root / "iso").glob("*.iso"))

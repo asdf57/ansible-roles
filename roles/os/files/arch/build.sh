@@ -130,6 +130,10 @@ function prepare_workspace() {
   # agent executable when the overlay is copied into the live root filesystem.
   printf '\nfile_permissions["/usr/local/bin/homelabd"]="0:0:755"\n' \
     >> "${profile_dir}/profiledef.sh"
+  printf '\nfile_permissions["/etc/homelabd"]="0:0:700"\n' >> "${profile_dir}/profiledef.sh"
+  if [[ -n "${HOMELABD_API_TOKEN:-}" ]]; then
+    printf '\nfile_permissions["/etc/homelabd/environment"]="0:0:600"\n' >> "${profile_dir}/profiledef.sh"
+  fi
   printf '\nfile_permissions["/usr/local/libexec/ensure-ansible-user"]="0:0:755"\nfile_permissions["/etc/sudoers.d/ansible-management"]="0:0:440"\n' >> "${profile_dir}/profiledef.sh"
   # Restrict the stock profile to the explicitly requested boot family.
   case "${IMAGE_BOOT_MODE:-uefi}" in

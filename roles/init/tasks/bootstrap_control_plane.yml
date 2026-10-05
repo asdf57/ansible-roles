@@ -16,6 +16,7 @@
     - STIGMERGY_API_TOKEN
     - STIGMERGY_API_POLICY
     - STIGMERGY_RUNNER_API_TOKEN
+    - STIGMERGY_AGENT_API_TOKEN
 
 - name: Configure bootstrap paths
   ansible.builtin.set_fact:
@@ -118,6 +119,7 @@
       - {name: github-webhook-secret, path: github/webhook, key: key, value: "{{ lookup('env', 'GITHUB_WEBHOOK_SECRET') }}"}
       - {name: file-registry-secret, path: file-registry, key: value, value: "{{ lookup('env', 'FILE_REGISTRY_PASSWORD') }}"}
       - {name: stigmergy-runner-token, path: stigmergy-runner-token, key: value, value: "{{ lookup('env', 'STIGMERGY_RUNNER_API_TOKEN') }}"}
+      - {name: stigmergy-agent-token, path: stigmergy-agent-token, key: value, value: "{{ lookup('env', 'STIGMERGY_AGENT_API_TOKEN') }}"}
   no_log: true
 
 - name: Create or update the primary Router credential
