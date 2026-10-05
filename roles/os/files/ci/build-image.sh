@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# Do not trace task credentials. Artifacts from this task must be private.
+# Do not trace task credentials. Published images contain the agent token.
 set +x
 [[ "${HOMELABD_API_TOKEN:-}" =~ ^[a-f0-9]{64}$ ]] || { echo 'A restricted agent API token is required' >&2; exit 1; }
 export HOMELABD_API_TOKEN
