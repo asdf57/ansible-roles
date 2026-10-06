@@ -135,7 +135,7 @@ class ProvisioningTests(unittest.TestCase):
                 p.reconcile(api, api.get('servers', 'node'), {}, Path(tmp), 'revision')
         self.assertEqual(stages, [('prime', 'PreparingBoot'), ('refresh-prepare', 'PreparingBoot'),
                                   ('refresh-boot', 'AwaitingLive')])
-        self.assertIsNone(api.server['status']['provisioning']['liveBootID'])
+        self.assertIsNone(api.server['status']['provisioning'].get('liveBootID'))
         self.assertTrue(api.server['status']['provisioning']['maintenance'])
 
     def test_regular_reboot_uses_managed_node_playbook(self):
