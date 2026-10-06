@@ -55,6 +55,7 @@
     - {name: openbao-api-policy.hcl, mode: "0644"}
     - {name: openbao-bootstrap.sh, mode: "0755"}
     - {name: concourse-policy.hcl, mode: "0644"}
+    - {name: ssh-host-operator-policy.hcl, mode: "0644"}
 
 - name: Render the bootstrap control-plane Compose file
   ansible.builtin.template:

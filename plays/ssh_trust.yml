@@ -6,7 +6,7 @@
   become: true
   remote_user: ansible
   vars:
-    ansible_ssh_common_args: '-o HostKeyAlias={{ inventory_hostname }}'
+    ansible_ssh_common_args: '-o HostKeyAlias={{ host_key_alias | default(inventory_hostname) }}'
   roles:
     - management
   post_tasks:
@@ -14,23 +14,3 @@
       ansible.builtin.meta: reset_connection
     - name: Verify certificate-authenticated management access
       ansible.builtin.ping:
-
-    - name: Record authenticated convergence without granting Server spec writes
-      ansible.builtin.uri:
-        url: "{{ lookup('env', 'STIGMERGY_API_URL') }}/api/v1alpha1/servers/{{ inventory_hostname | urlencode }}/status"
-        method: PATCH
-        headers:
-          Authorization: "Bearer {{ lookup('env', 'STIGMERGY_API_TOKEN') }}"
-          Content-Type: application/merge-patch+json
-          If-Match: '"{{ management_server.json.metadata.resourceVersion }}"'
-        body_format: json
-        body:
-          metadata:
-            uid: "{{ management_server.json.metadata.uid }}"
-          status:
-            installedSSHTrustBundleDigest: "{{ installed_ssh_ca_bundle_digest }}"
-        status_code: 200
-        validate_certs: true
-      delegate_to: localhost
-      become: false
-      no_log: true

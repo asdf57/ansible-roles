@@ -51,6 +51,16 @@ fi
 
 bao policy write stigmergy-api /openbao/bootstrap/openbao-api-policy.hcl
 bao policy write concourse /openbao/bootstrap/concourse-policy.hcl
+bao policy write ssh-host-operator /openbao/bootstrap/ssh-host-operator-policy.hcl
+bao write auth/approle/role/ssh-host-operator \
+  token_policies=ssh-host-operator token_no_default_policy=true \
+  token_ttl=10m token_max_ttl=10m secret_id_ttl=0 secret_id_num_uses=0
+# Preserve AppRole enrollment credentials across bootstrap reruns.
+if ! bao kv get -mount=kv2 secrets/ssh-host-operator-auth >/dev/null 2>&1; then
+  operator_role_id="$(bao read -field=role_id auth/approle/role/ssh-host-operator/role-id)"
+  operator_secret_id="$(bao write -field=secret_id -f auth/approle/role/ssh-host-operator/secret-id)"
+  bao kv put -mount=kv2 secrets/ssh-host-operator-auth roleId="$operator_role_id" secretId="$operator_secret_id" >/dev/null
+fi
 
 bao write auth/approle/role/stigmergy-api \
   token_policies=stigmergy-api \

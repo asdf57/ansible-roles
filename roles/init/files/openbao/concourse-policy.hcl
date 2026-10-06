@@ -6,4 +6,4 @@ path "kv2/data/secrets/github/webhook" { capabilities = ["read"] }
 path "kv2/data/secrets/stigmergy-runner-token" { capabilities = ["read"] }
 path "kv2/data/secrets/stigmergy-agent-token" { capabilities = ["read"] }
 path "kv2/data/secrets/ansible-runner-certificate" { capabilities = ["read"] }
-path "kv2/data/secrets/ansible-known-hosts" { capabilities = ["read"] }
+path "kv2/data/secrets/ssh-host-operator-auth" { capabilities = ["read"] }

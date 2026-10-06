@@ -57,6 +57,7 @@ services:
       - "{{ lookup('env', 'HOST_DATA_PATH') }}/openbao/openbao-bootstrap.sh:/openbao/bootstrap/openbao-bootstrap.sh:ro"
       - "{{ lookup('env', 'HOST_DATA_PATH') }}/openbao/openbao-api-policy.hcl:/openbao/bootstrap/openbao-api-policy.hcl:ro"
       - "{{ lookup('env', 'HOST_DATA_PATH') }}/openbao/concourse-policy.hcl:/openbao/bootstrap/concourse-policy.hcl:ro"
+      - "{{ lookup('env', 'HOST_DATA_PATH') }}/openbao/ssh-host-operator-policy.hcl:/openbao/bootstrap/ssh-host-operator-policy.hcl:ro"
       - openbao_init:/run/openbao-init
       - openbao_bootstrap:/run/openbao-bootstrap
       - openbao_shared:/shared

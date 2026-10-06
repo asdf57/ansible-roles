@@ -110,6 +110,39 @@
         mode: '0700'
       when: management_target_root == '/mnt'
 
+    - name: Read managed host identity when public bundle was supplied separately
+      ansible.builtin.uri:
+        url: "{{ lookup('env', 'STIGMERGY_API_URL') }}/api/v1alpha1/servers/{{ inventory_hostname | urlencode }}"
+        headers:
+          Authorization: "Bearer {{ lookup('env', 'STIGMERGY_API_TOKEN') }}"
+        return_content: true
+        validate_certs: true
+      delegate_to: localhost
+      become: false
+      register: provisioning_host_identity
+      when: management_target_root == '/mnt'
+      no_log: true
+
+    - name: Require the managed host identity before installed-system provisioning
+      ansible.builtin.assert:
+        that:
+          - provisioning_host_identity.json.status.hostSSH.phase == 'Ready'
+          - provisioning_host_identity.json.status.hostSSH.installedKeyPairRef == provisioning_host_identity.json.status.hostSSH.keyPairRef
+          - provisioning_host_identity.json.status.hostSSH.installedFingerprint == provisioning_host_identity.json.status.hostSSH.fingerprint
+      when: management_target_root == '/mnt'
+
+    - name: Derive the live host identity before preserving it to disk
+      ansible.builtin.command: ssh-keygen -y -f /etc/ssh/ssh_host_ed25519_key
+      register: provisioning_live_host_public_key
+      changed_when: false
+      when: management_target_root == '/mnt'
+      no_log: true
+
+    - name: Require the live identity to match the API-managed public key
+      ansible.builtin.assert:
+        that: provisioning_live_host_public_key.stdout.split()[:2] | join(' ') == provisioning_host_identity.json.status.hostSSH.publicKey.split()[:2] | join(' ')
+      when: management_target_root == '/mnt'
+
     - name: Find the already verified live SSH host identity
       ansible.builtin.find:
         paths: /etc/ssh
@@ -130,6 +163,13 @@
       loop: "{{ management_host_keys.files | default([]) }}"
       when: management_target_root == '/mnt'
       no_log: true
+
+    - name: Ensure the installed sshd serves the same managed host identity
+      ansible.builtin.lineinfile:
+        path: /mnt/etc/ssh/sshd_config
+        line: HostKey /etc/ssh/ssh_host_ed25519_key
+        insertbefore: BOF
+      when: management_target_root == '/mnt'
 
     - name: Preserve the separately enrolled daemon identity in the installed OS
       ansible.builtin.copy:

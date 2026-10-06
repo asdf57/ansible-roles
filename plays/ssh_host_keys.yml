@@ -1,0 +1,8 @@
+---
+- name: Reconcile the managed SSH host identity without provisioning disks
+  hosts: all
+  gather_facts: true
+  become: true
+  remote_user: ansible
+  roles:
+    - ssh_host_key

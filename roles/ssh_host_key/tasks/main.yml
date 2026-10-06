@@ -1,0 +1,114 @@
+---
+- name: Validate managed host-key inputs
+  ansible.builtin.assert:
+    that:
+      - managed_host_private_key_file is defined
+      - managed_host_public_key is defined
+      - managed_host_public_key.startswith('ssh-ed25519 ')
+
+- name: Stage and validate the managed private key before installation
+  block:
+    - name: Create a root-only host-key staging directory
+      ansible.builtin.tempfile:
+        state: directory
+        prefix: homelab-host-key.
+      register: host_key_stage
+
+    - name: Stage the managed host private key
+      ansible.builtin.copy:
+        src: "{{ managed_host_private_key_file }}"
+        dest: "{{ host_key_stage.path }}/key"
+        owner: root
+        group: root
+        mode: '0600'
+      no_log: true
+
+    - name: Derive the staged public key
+      ansible.builtin.command:
+        argv: [ssh-keygen, -y, -f, "{{ host_key_stage.path }}/key"]
+      register: staged_host_public_key
+      changed_when: false
+      no_log: true
+
+    - name: Require the staged key to match the desired public identity
+      ansible.builtin.assert:
+        that: staged_host_public_key.stdout.split()[:2] | join(' ') == managed_host_public_key | trim
+      no_log: true
+
+    - name: Validate the current sshd configuration and staged host key
+      ansible.builtin.command:
+        argv: [sshd, -t, -h, "{{ host_key_stage.path }}/key"]
+      changed_when: false
+
+    - name: Install the managed Ed25519 identity atomically
+      ansible.builtin.copy:
+        src: "{{ host_key_stage.path }}/key"
+        dest: /etc/ssh/ssh_host_ed25519_key
+        remote_src: true
+        owner: root
+        group: root
+        mode: '0600'
+        backup: true
+      register: installed_host_key
+      no_log: true
+
+    - name: Install the corresponding public host key
+      ansible.builtin.copy:
+        content: "{{ managed_host_public_key | trim }}\n"
+        dest: /etc/ssh/ssh_host_ed25519_key.pub
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Configure the managed identity before any Match block
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config
+        line: HostKey /etc/ssh/ssh_host_ed25519_key
+        insertbefore: BOF
+        backup: true
+      register: installed_host_key_config
+
+    - name: Validate SSH configuration before reload
+      ansible.builtin.command: sshd -t
+      changed_when: false
+
+    - name: Reload sshd without terminating existing sessions
+      ansible.builtin.systemd_service:
+        name: "{{ 'ssh' if ansible_os_family == 'Debian' else 'sshd' }}"
+        state: reloaded
+      when: installed_host_key.changed or installed_host_key_config.changed
+
+  rescue:
+    - name: Restore the previous host private key on failed installation
+      ansible.builtin.copy:
+        src: "{{ installed_host_key.backup_file }}"
+        dest: /etc/ssh/ssh_host_ed25519_key
+        remote_src: true
+        owner: root
+        group: root
+        mode: '0600'
+      when: installed_host_key.backup_file is defined
+      no_log: true
+
+    - name: Restore the previous SSH configuration
+      ansible.builtin.copy:
+        src: "{{ installed_host_key_config.backup_file }}"
+        dest: /etc/ssh/sshd_config
+        remote_src: true
+        owner: root
+        group: root
+        mode: '0644'
+      when: installed_host_key_config.backup_file is defined
+
+    - name: Refuse to report convergence after failed installation
+      ansible.builtin.fail:
+        msg: Managed host-key installation failed; previous available configuration restored.
+
+  always:
+    - name: Remove staged and backup private material
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop: "{{ [host_key_stage.path | default('')] + [installed_host_key.backup_file | default('')] + [installed_host_key_config.backup_file | default('')] }}"
+      when: item | length > 0
+      no_log: true
