@@ -120,6 +120,30 @@ class ProvisioningTests(unittest.TestCase):
             invalid = copy.deepcopy(data); mutate(invalid)
             with self.assertRaises(RuntimeError): p.verify_installed(value, invalid)
 
+    def test_stale_live_bootstrap_checkpoints_before_kexec_and_never_installs_early(self):
+        api = API(); api.server = claimed()
+        api.server['status']['provisioning']['liveBootID'] = None
+        old = facts(); old['liveBuildID'] = ''
+        stages = []
+        def stage(value, directory, known, name):
+            stages.append((name, value['status']['provisioning']['phase']))
+        with tempfile.TemporaryDirectory() as tmp, patch.object(p, 'inspect', return_value=old), \
+                patch.object(p, 'verify_dependencies'), patch.object(p, 'drain_commands'), \
+                patch.object(p, 'artifact_preflight'), patch.object(p, 'run_stage', side_effect=stage), \
+                patch.object(p, 'await_session', side_effect=p.OperatorError('ProvisioningBlocked', 'fixture wait')):
+            with self.assertRaises(p.OperatorError):
+                p.reconcile(api, api.get('servers', 'node'), {}, Path(tmp), 'revision')
+        self.assertEqual(stages, [('prime', 'PreparingBoot'), ('refresh-prepare', 'PreparingBoot'),
+                                  ('refresh-boot', 'AwaitingLive')])
+        self.assertIsNone(api.server['status']['provisioning']['liveBootID'])
+        self.assertTrue(api.server['status']['provisioning']['maintenance'])
+
+    def test_regular_reboot_uses_managed_node_playbook(self):
+        value = claimed()
+        with patch.object(p, 'run_stage') as stage:
+            p.reboot(value, Path('/private/known_hosts'))
+        stage.assert_called_once_with(value, Path('/private'), Path('/private/known_hosts'), 'reboot')
+
     def test_successful_live_first_flow_executes_install_once(self):
         api = API(); api.server = host()
         def observed(value, known):

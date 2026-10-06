@@ -1,0 +1,77 @@
+---
+- name: Inspect the current live session before loading a replacement kernel
+  ansible.builtin.script:
+    cmd: "{{ role_path }}/files/probe.py {{ provision_target_disk | quote }}"
+    executable: python3
+  register: bootstrap_probe
+  changed_when: false
+
+- name: Require a verified independent Arch live session
+  ansible.builtin.assert:
+    that:
+      - (bootstrap_probe.stdout | from_json).live
+      - (bootstrap_probe.stdout | from_json).os.ID | trim('"') == 'arch'
+      - (bootstrap_probe.stdout | from_json).bootID == provision_source_boot_id
+      - (bootstrap_probe.stdout | from_json).disk == provision_disk_identity
+      - not (bootstrap_probe.stdout | from_json).mounted
+      - (bootstrap_probe.stdout | from_json).uefi
+      - (bootstrap_probe.stdout | from_json).secureBoot == false
+      - provision_operating_system.distribution == 'arch'
+
+- name: Require kexec to be permitted by the running kernel
+  ansible.builtin.command:
+    argv: [cat, /proc/sys/kernel/kexec_load_disabled]
+  register: kexec_disabled
+  changed_when: false
+
+- name: Refuse a kernel with disabled kexec loading
+  ansible.builtin.assert:
+    that: kexec_disabled.stdout == '0'
+
+- name: Resolve the immutable bootstrap artifacts
+  ansible.builtin.set_fact:
+    bootstrap_kernel: "{{ provision_live_artifacts | selectattr('type', 'equalto', 'kernel') | first }}"
+    bootstrap_initrd: "{{ provision_live_artifacts | selectattr('type', 'equalto', 'initrd') | first }}"
+    bootstrap_rootfs: "{{ provision_live_artifacts | selectattr('type', 'equalto', 'rootfs') | first }}"
+
+- name: Require the supported HTTPS netboot artifact layout
+  ansible.builtin.assert:
+    that:
+      - bootstrap_rootfs.url is match('^https://.+/arch/x86_64/airootfs.sfs$')
+      - bootstrap_kernel.url is match('^https://')
+      - bootstrap_initrd.url is match('^https://')
+      - bootstrap_kernel.sha256 is match('^[a-f0-9]{64}$')
+      - bootstrap_initrd.sha256 is match('^[a-f0-9]{64}$')
+
+- name: Install the live-only kernel transition utility
+  ansible.builtin.package:
+    name: kexec-tools
+    state: present
+
+- name: Create a protected RAM-backed live bootstrap directory
+  ansible.builtin.file:
+    path: /run/homelab-live-bootstrap
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Download and checksum the pinned kernel and initramfs
+  ansible.builtin.get_url:
+    url: "{{ item.artifact.url }}"
+    checksum: "sha256:{{ item.artifact.sha256 }}"
+    dest: "/run/homelab-live-bootstrap/{{ item.name }}"
+    mode: '0600'
+    validate_certs: true
+  loop:
+    - {name: kernel, artifact: "{{ bootstrap_kernel }}"}
+    - {name: initrd, artifact: "{{ bootstrap_initrd }}"}
+
+- name: Load only the pinned replacement live kernel without booting it yet
+  ansible.builtin.command:
+    argv:
+      - kexec
+      - --load
+      - /run/homelab-live-bootstrap/kernel
+      - --initrd=/run/homelab-live-bootstrap/initrd
+      - "--command-line=archisobasedir=arch archiso_http_srv={{ bootstrap_rootfs.url | regex_replace('arch/x86_64/airootfs.sfs$', '') }} ip=dhcp"

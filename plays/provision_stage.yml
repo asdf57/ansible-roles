@@ -7,7 +7,7 @@
     - name: Require an explicit supported stage and pinned attempt
       ansible.builtin.assert:
         that:
-          - provision_stage in ['prime', 'arm', 'clear', 'install', 'post']
+          - provision_stage in ['prime', 'arm', 'clear', 'install', 'post', 'refresh-prepare', 'refresh-boot', 'reboot']
           - provision_attempt_id is defined
           - provision_server_uid is defined
     - name: Prime the boot NIC
@@ -29,6 +29,27 @@
         name: provision
         tasks_from: install
       when: provision_stage == 'install'
+    - name: Prepare the pinned live bootstrap without changing disks
+      ansible.builtin.include_role:
+        name: provision
+        tasks_from: refresh_live
+      when: provision_stage == 'refresh-prepare'
+    - name: Require the prepared kexec image before live bootstrap
+      ansible.builtin.command:
+        argv: [cat, /sys/kernel/kexec_loaded]
+      register: prepared_kexec
+      changed_when: false
+      when: provision_stage == 'refresh-boot'
+    - name: Refuse an unprepared live bootstrap
+      ansible.builtin.assert:
+        that: prepared_kexec.stdout == '1'
+      when: provision_stage == 'refresh-boot'
+    - name: Request the checkpointed reboot through systemd
+      ansible.builtin.command:
+        argv: [systemctl, "{{ 'kexec' if provision_stage == 'refresh-boot' else 'reboot' }}"]
+      async: 30
+      poll: 0
+      when: provision_stage in ['refresh-boot', 'reboot']
     - name: Apply installed-system packages
       ansible.builtin.package:
         name: "{{ provision_server_spec.packages | default([]) }}"

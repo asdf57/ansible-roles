@@ -151,7 +151,8 @@ def plan(api, server, variables, facts, revision):
         raise OperatorError("ProvisioningBlocked", "Machine binding is stale")
     build_id = image_status["completedBuild"]["id"]
     if facts["live"] and facts.get("liveBuildID") != build_id:
-        raise OperatorError("ProvisioningBlocked", "Current live image is not the selected immutable ISO build; boot a freshly built image deliberately")
+        if image['spec']['distribution'] != 'arch' or facts['os'].get('ID', '').strip('"') != 'arch':
+            raise OperatorError("ProvisioningBlocked", "Refreshing an older live session currently requires Arch-to-Arch bootstrap")
     if desired["operatingSystem"]["distribution"] == "arch" and image["spec"]["distribution"] != "arch":
         raise OperatorError("ProvisioningBlocked", "Arch targets currently require the Arch live installation tools")
     storage = {"partitions": [{field: part[field] for field in ('fs_type', 'alloc_type', 'size', 'flags') if field in part}
@@ -261,22 +262,23 @@ def run_stage(server, directory, known, stage, facts=None):
                  "provision_disk_identity": snapshot["diskIdentity"], "provision_live_build_id": snapshot["isoBuildID"],
                  "provision_live_boot_id": p.get("liveBootID", ""), "provision_destructive_authorized": stage == "install",
                  "ssh_ca_bundle": server["status"]["sshTrust"]["publicBundle"], "ssh_ca_bundle_digest": snapshot["trustBundleDigest"]}
+    variables['provision_live_artifacts'] = snapshot['artifacts']
+    variables['provision_source_boot_id'] = p['sourceBootID']
     write_private(directory / "inventory.json", json.dumps(inventory))
     write_private(directory / "variables.json", json.dumps(variables))
     plays = Path(os.environ.get("ANSIBLE_PLAYS_PATH", "/homelab/plays"))
     result = subprocess.run(["ansible-playbook", "-i", str(directory / "inventory.json"), str(plays / "provision_stage.yml"),
                              "-e", "@" + str(directory / "variables.json")], timeout=7200 if stage == "install" else 600,
-                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                            capture_output=True, text=True)
     if result.returncode:
-        raise OperatorError("ProvisioningBlocked", "Ansible stage failed; output suppressed to protect enrollment material")
+        tasks = re.findall(r'TASK \[([^\]\r\n]+)\]', result.stdout)
+        last = tasks[-1] if tasks else 'initialization'
+        raise OperatorError("ProvisioningBlocked", "Ansible stage failed at " + last + "; details suppressed to protect enrollment material")
 
 
 def reboot(server, known):
-    result = subprocess.run(["ssh", *ssh_args(server, known), "ansible@" + host_address(server), "sudo -n systemctl reboot"],
-                            capture_output=True, text=True, timeout=45)
-    if result.returncode not in (0, 255):
-        raise OperatorError("ProvisioningBlocked", "Reboot command failed")
-    # 255 is uncertain delivery, not success. Session verification decides.
+    run_stage(server, known.parent, known, 'reboot')
+    # An async reboot acknowledgement is not success; fresh-session verification decides.
 
 
 def await_session(api, server, directory, live, timeout=600):
@@ -408,8 +410,14 @@ def reconcile(api, server, variables, directory, revision, preflight=False):
         artifact_preflight(api, server)
         if facts["live"]:
             if facts["liveBuildID"] != p["snapshot"]["isoBuildID"]:
-                raise OperatorError("ProvisioningBlocked", "Existing live session differs from pinned build")
-            checkpoint(api, server, "AwaitingLive", liveBootID=facts["bootID"])
+                run_stage(server, directory, known, 'prime')
+                run_stage(server, directory, known, 'refresh-prepare')
+                current(api, server)
+                checkpoint(api, server, 'AwaitingLive', liveBootID=None)
+                current(api, server)
+                run_stage(server, directory, known, 'refresh-boot')
+            else:
+                checkpoint(api, server, "AwaitingLive", liveBootID=facts["bootID"])
         else:
             if "next_entry=" in facts["grubEnvironment"]:
                 raise OperatorError("ProvisioningBlocked", "Unaccounted pending GRUB entry")
