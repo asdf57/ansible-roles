@@ -1,38 +1,7 @@
-Role Name
-=========
+# GRUB role
 
-A brief description of the role goes here.
+Installs the stable `homelab-netboot` menu entry in the newly provisioned UEFI system. The normal default remains the installed OS; normal startup does not depend on the API or networking.
 
-Requirements
-------------
+The entry chainloads `/boot/ipxe/ipxe.efi`, built with an embedded public API bootstrap script. The operator arms it once with `grub-reboot homelab-netboot` and verifies `next_entry` before rebooting. GRUB consumes that selection; subsequent ordinary boots return to the installed OS.
 
-Any pre-requisites that may not be covered by Ansible itself or the role should be mentioned here. For instance, if the role uses the EC2 module, it may be a good idea to mention in this section that the boto package is required.
-
-Role Variables
---------------
-
-A description of the settable variables for this role should go here, including any variables that are in defaults/main.yml, vars/main.yml, and any variables that can/should be set via parameters to the role. Any variables that are read from other roles and/or the global scope (ie. hostvars, group vars, etc.) should be mentioned here as well.
-
-Dependencies
-------------
-
-A list of other roles hosted on Galaxy should go here, plus any details in regards to parameters that may need to be set for other roles, or variables that are used from other roles.
-
-Example Playbook
-----------------
-
-Including an example of how to use your role (for instance, with variables passed in as parameters) is always nice for users too:
-
-    - hosts: servers
-      roles:
-         - { role: username.rolename, x: 42 }
-
-License
--------
-
-BSD
-
-Author Information
-------------------
-
-An optional section for the role authors to include contact information, or a website (HTML is not allowed).
+The role downloads the iPXE artifact and SHA-256 checksum from the configured HTTPS site, generates and checks GRUB configuration, and clears stale one-shot selections. The provisioning role verifies the resulting UEFI boot entry. Secure Boot and legacy BIOS are outside the v1 supported path. Broken-disk/bootloader recovery is manual.

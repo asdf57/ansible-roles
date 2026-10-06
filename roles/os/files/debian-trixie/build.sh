@@ -118,6 +118,7 @@ function configure_live_environment() {
 
   bash "$HOMELABD_MANAGEMENT_INSTALL_SOURCE" "$PWD/config/includes.chroot" "$SSH_CA_BUNDLE_SOURCE"
   touch config/includes.chroot/var/lib/is_live_env
+  printf '%s\n' "$ISO_VERSION" > config/includes.chroot/etc/homelabd/live-build-id
 
   # package-lists/*.list.chroot are merged into the package set installed
   # inside the live filesystem. python-is-python3 keeps `/usr/bin/python`
@@ -129,6 +130,8 @@ python-is-python3
 systemd-timesyncd
 dosfstools
 parted
+efibootmgr
+ethtool
 debootstrap
 arch-install-scripts
 locales

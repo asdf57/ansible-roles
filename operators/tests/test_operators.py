@@ -39,6 +39,9 @@ class API:
     def get(self, collection, name):
         return copy.deepcopy(self.server)
 
+    def list(self, collection):
+        return [copy.deepcopy(self.server)] if collection == 'servers' else []
+
     def patch_status(self, value, status):
         if self.conflict or value["metadata"]["resourceVersion"] != self.server["metadata"]["resourceVersion"]:
             error = HTTPError("", 409, "Conflict", {}, io.BytesIO())

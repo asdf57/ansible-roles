@@ -194,12 +194,12 @@
     - name: Validate installed-system SSH configuration
       ansible.builtin.command:
         argv: [chroot, /mnt, /usr/sbin/sshd, -t]
-      when: management_target_root == '/mnt' and ansible_distribution == 'Debian'
+      when: management_target_root == '/mnt' and (provision_operating_system.distribution | default(ansible_distribution | lower)) == 'debian'
 
     - name: Validate installed-system SSH configuration on Arch
       ansible.builtin.command:
         argv: [chroot, /mnt, /usr/bin/sshd, -t]
-      when: management_target_root == '/mnt' and ansible_distribution == 'Archlinux'
+      when: management_target_root == '/mnt' and (provision_operating_system.distribution | default(ansible_distribution | lower)) in ['arch', 'archlinux']
 
     - name: Validate running SSH configuration
       ansible.builtin.command: sshd -t

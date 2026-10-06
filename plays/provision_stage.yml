@@ -1,0 +1,40 @@
+---
+- name: Execute one operator-owned provisioning stage
+  hosts: all
+  gather_facts: true
+  become: true
+  tasks:
+    - name: Require an explicit supported stage and pinned attempt
+      ansible.builtin.assert:
+        that:
+          - provision_stage in ['prime', 'arm', 'clear', 'install', 'post']
+          - provision_attempt_id is defined
+          - provision_server_uid is defined
+    - name: Prime the boot NIC
+      ansible.builtin.include_role:
+        name: provision
+        tasks_from: prime_nic
+      when: provision_stage == 'prime'
+    - name: Arm the one-shot netboot entry
+      ansible.builtin.include_role:
+        name: grub
+        tasks_from: reboot_to_ipxe
+      when: provision_stage == 'arm'
+    - name: Clear pending netboot selection
+      ansible.builtin.command:
+        argv: [grub-editenv, /boot/grub/grubenv, unset, next_entry]
+      when: provision_stage == 'clear'
+    - name: Run guarded installation
+      ansible.builtin.include_role:
+        name: provision
+        tasks_from: install
+      when: provision_stage == 'install'
+    - name: Apply installed-system packages
+      ansible.builtin.package:
+        name: "{{ provision_server_spec.packages | default([]) }}"
+        state: present
+      when: provision_stage == 'post' and (provision_server_spec.packages | default([]) | length > 0)
+    - name: Apply configured sysctls after installed boot
+      ansible.builtin.command:
+        argv: [sysctl, --system]
+      when: provision_stage == 'post' and (provision_server_spec.sysctls | default({}) | length > 0)

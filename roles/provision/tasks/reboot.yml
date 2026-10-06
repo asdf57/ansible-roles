@@ -1,30 +1,20 @@
 ---
-- name: Prime the NIC
-  include_tasks: prime_nic.yml
+- name: Require an operator-owned boot transition
+  ansible.builtin.assert:
+    that: provision_attempt_id is defined
+
+- name: Prime the selected NIC
+  ansible.builtin.include_tasks: prime_nic.yml
   when: reboot_to_ipxe | default(false) | bool
 
-- name: Reboot to iPXE
-  ansible.builtin.shell:
-    cmd: "grub-reboot 'Network Boot (iPXE)'"
-  ignore_unreachable: yes
-  ignore_errors: yes
+- name: Arm the stable one-shot GRUB entry
+  ansible.builtin.include_role:
+    name: grub
+    tasks_from: reboot_to_ipxe
   when: reboot_to_ipxe | default(false) | bool
 
-- name: Reboot
-  ansible.builtin.reboot:
-    reboot_timeout: 0
-  failed_when: false
-  ignore_unreachable: yes
-  ignore_errors: yes
-  when: not hard_reset | default(false) | bool
-
-- name: Hard reboot
-  ansible.builtin.shell:
-    cmd: "echo 1 > /proc/sys/kernel/sysrq; echo b > /proc/sysrq-trigger"
-  failed_when: false
-  ignore_unreachable: yes
-  ignore_errors: yes
-  become: true
-  async: 1
+- name: Request a normal reboot without a sysrq fallback
+  ansible.builtin.command:
+    argv: [systemctl, reboot]
+  async: 30
   poll: 0
-  when: hard_reset | default(false) | bool

@@ -1,0 +1,7 @@
+#!ipxe
+dhcp || goto failed
+chain --timeout 30000 https://{{ stigmergy_fqdn }}/ipxe/${netX/mac} || goto failed
+:failed
+echo Homelab netboot failed. Reboot manually to return to the installed OS, or repair the live boot path.
+prompt --key 0x02 --timeout 10000 Press Ctrl-B for an iPXE shell || exit 1
+shell

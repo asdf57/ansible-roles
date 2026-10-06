@@ -1,487 +1,195 @@
 ---
-- name: Set chroot name fact (Arch Linux)
-  set_fact:
-    chroot_name: "arch-chroot"
-  when: ansible_distribution == 'Archlinux'
+- name: Mount the new root
+  ansible.builtin.include_tasks: mount_general_partitions.yml
 
-- name: Set chroot name fact (Debian)
-  set_fact:
-    chroot_name: "chroot"
-  when: ansible_distribution == 'Debian'
+- name: Initialize the Arch package trust
+  ansible.builtin.command:
+    argv: [pacman-key, "{{ item }}"]
+  loop: [--init, --populate]
+  when: provision_operating_system.distribution == 'arch'
 
-- name: Setup pacman keyring
-  block:
-    - name: Setup pacman keyring
-      ansible.builtin.command: pacman-key --init
+- name: Install the Arch base system from desired OS, not live-host facts
+  ansible.builtin.command:
+    argv: [pacstrap, -K, /mnt, base, linux, linux-firmware, python, openssh, sudo, lldpd, networkmanager, grub, efibootmgr, dosfstools, ethtool]
+  when: provision_operating_system.distribution == 'arch'
 
-    - name: Populate pacman keyring
-      ansible.builtin.command: pacman-key --populate
-  when: ansible_distribution == 'Archlinux'
+- name: Install the requested Debian release
+  ansible.builtin.command:
+    argv: [debootstrap, --include=ca-certificates, "{{ provision_operating_system.version }}", /mnt, https://deb.debian.org/debian/]
+  when: provision_operating_system.distribution == 'debian'
 
-- name: Rank Arch mirrors using reflector
-  block:
-    - name: Install the reflector package
-      community.general.pacman:
-        name:
-          - reflector
-        update_cache: yes
+- name: Mount EFI and swap
+  ansible.builtin.include_tasks: mount_non_general_partitions.yml
 
-    - name: Search for the fastest mirrors supporting HTTPS
-      ansible.builtin.shell: reflector --verbose --latest 10 --sort rate | awk -e '! /rsync/ {print}' > /etc/pacman.d/mirrorlist
-  when: ansible_distribution == 'Archlinux'
-
-- name: Mount the general partitions
-  include_tasks: mount_general_partitions.yml
-
-- name: Install the base system
-  block:
-    - name: Install the base system (Arch Linux)
-      ansible.builtin.shell:
-        cmd: "pacstrap -K /mnt base linux linux-firmware"
-      args:
-        creates: /mnt/bin
-      when: ansible_distribution == 'Archlinux'
-
-    - name: Install the base system (Debian)
-      ansible.builtin.shell:
-        cmd: "debootstrap --verbose {{ ansible_distribution_release }} /mnt https://deb.debian.org/debian/"
-      args:
-        creates: /mnt/bin
-      when: ansible_distribution == 'Debian'
-
-- name: Setup chroot mounts for both distros
-  block:
-    - name: Mount /dev
-      ansible.posix.mount:
-        src: /dev
-        path: /mnt/dev
-        state: mounted
-        opts: bind
-        fstype: none
-
-    - name: Mount /proc
-      ansible.posix.mount:
-        src: /proc
-        path: /mnt/proc
-        state: mounted
-        opts: bind
-        fstype: none
-
-    - name: Mount /sys
-      ansible.posix.mount:
-        src: /sys
-        path: /mnt/sys
-        state: mounted
-        opts: bind
-        fstype: none
-    
-    - name: Mount /run
-      ansible.posix.mount:
-        src: /run
-        path: /mnt/run
-        state: mounted
-        opts: bind
-        fstype: none
-  when: ansible_distribution == 'Debian'
-
-# Mount partitions AFTER base system installation to ensure /mnt/etc/fstab exists
-- name: Mount the non-general partitions
-  include_tasks: mount_non_general_partitions.yml
-
-- name: Generate fstab entries
-  ansible.builtin.shell: |
-    genfstab -U /mnt >> /mnt/etc/fstab
-
-- name: Create symlink for timezone
+- name: Create chroot mount directories
   ansible.builtin.file:
-    src: /usr/share/zoneinfo/America/New_York
-    dest: /mnt/etc/localtime
-    state: link
-    force: yes
+    path: "/mnt/{{ item }}"
+    state: directory
+  loop: [dev, proc, sys, run]
 
-- name: Set the hardware clock
-  ansible.builtin.shell:
-    cmd: "{{ chroot_name }} /mnt hwclock --systohc"
+- name: Bind the live kernel filesystems into the new root
+  ansible.posix.mount:
+    src: "/{{ item }}"
+    path: "/mnt/{{ item }}"
+    state: mounted
+    opts: bind
+    fstype: none
+  loop: [dev, proc, sys, run]
 
-- name: Set locale.gen
-  ansible.builtin.lineinfile:
-    dest: /mnt/etc/locale.gen
-    regexp: "^#en_US.UTF-8 UTF-8"
-    line: "en_US.UTF-8 UTF-8"
-    state: present
-    create: true
+- name: Bind UEFI variable access for GRUB installation
+  ansible.posix.mount:
+    src: /sys/firmware/efi/efivars
+    path: /mnt/sys/firmware/efi/efivars
+    state: mounted
+    opts: bind
+    fstype: none
 
-# - name: Generate the locales
-#   ansible.builtin.shell:
-#     cmd: "{{ chroot_name }} /mnt locale-gen"
+- name: Provide DNS inside the chroot
+  ansible.builtin.copy:
+    src: /etc/resolv.conf
+    dest: /mnt/etc/resolv.conf
+    remote_src: true
 
-- name: Create locale.conf
-  ansible.builtin.lineinfile:
-    path: /mnt/etc/locale.conf
-    line: 'LANG=en_US.UTF-8'
-    create: true
+- name: Install Debian management and boot packages
+  ansible.builtin.command:
+    argv: [chroot, /mnt, apt-get, install, -y, linux-image-amd64, python3, openssh-server, sudo, lldpd, network-manager, grub-efi-amd64, efibootmgr, dosfstools, locales, ethtool]
+  environment: {DEBIAN_FRONTEND: noninteractive}
+  when: provision_operating_system.distribution == 'debian'
 
-- name: Install locale-gen on Debian
-  ansible.builtin.shell:
-    cmd: "{{ chroot_name }} /mnt /bin/bash -c 'apt-get update && apt-get install -y locales'"
-  when: ansible_distribution == 'Debian'
-
-- name: Generate locale
-  ansible.builtin.shell:
-    cmd: "{{ chroot_name }} /mnt locale-gen"
-
-- name: Set the hostname
-  ansible.builtin.lineinfile:
-    path: /mnt/etc/hostname
-    line: "{{ inventory_hostname }}"
-    insertafter: EOF
-    create: yes
+- name: Configure desired installed sysctls
+  ansible.builtin.copy:
+    dest: /mnt/etc/sysctl.d/90-homelab.conf
     mode: '0644'
-    owner: root
-    group: root
-    create: true
+    content: |
+      {% for key, value in (provision_server_spec.sysctls | default({})).items() %}
+      {{ key }} = {{ value }}
+      {% endfor %}
 
-- name: Set the hosts file
-  ansible.builtin.blockinfile:
-    path: /mnt/etc/hosts
-    block: |
-      127.0.1.1   localhost
-      ::1         localhost
-      127.0.1.1   {{ inventory_hostname }}.localdomain {{ inventory_hostname }}
+- name: Write the installed hostname
+  ansible.builtin.copy:
+    content: "{{ provision_server_spec.hostName | default(inventory_hostname) }}\n"
+    dest: /mnt/etc/hostname
     mode: '0644'
-    owner: root
-    group: root
-    backup: yes
+
+- name: Write installed network hosts
+  ansible.builtin.copy:
+    content: |
+      127.0.0.1 localhost
+      ::1 localhost
+      127.0.1.1 {{ provision_server_spec.hostName | default(inventory_hostname) }}
+    dest: /mnt/etc/hosts
+    mode: '0644'
+
+- name: Enable the requested locale
+  ansible.builtin.lineinfile:
+    path: /mnt/etc/locale.gen
+    regexp: '^#?en_US.UTF-8 UTF-8'
+    line: en_US.UTF-8 UTF-8
     create: true
 
-- name: Get the root password from Vault
-  community.hashi_vault.vault_kv2_get:
-    url: "https://vault.ryuugu.dev"
-    engine_mount_point: "kv2"
-    path: "servers/{{ inventory_hostname }}/users/root"
-    validate_certs: true
-  register: root_password_vault
-  delegate_to: localhost
-  failed_when: false
+- name: Generate installed locales
+  ansible.builtin.command:
+    argv: [chroot, /mnt, locale-gen]
 
-- name: Create root password
-  when: root_password_vault.data is not defined or root_password_vault.data.data is not defined or root_password_vault.data.data.password is not defined
-  block:
-    - name: Generate a root password
-      ansible.builtin.set_fact:
-        root_password: "{{ lookup('password', '/dev/null', chars=['ascii_letters', 'digits'], length=15) }}"
-      register: root_password_result
+- name: Configure installed locale and timezone
+  ansible.builtin.copy:
+    content: "LANG=en_US.UTF-8\n"
+    dest: /mnt/etc/locale.conf
 
-    - name: Extract the root password
-      ansible.builtin.set_fact:
-        root_password: "{{ root_password_result.ansible_facts.root_password }}"
+- name: Set installed timezone
+  ansible.builtin.command:
+    argv: [chroot, /mnt, ln, -sf, "/usr/share/zoneinfo/{{ provision_operating_system.timezone | default('UTC') }}", /etc/localtime]
 
-    - name: Upload the root password to vault
-      community.hashi_vault.vault_kv2_write:
-        url: "https://vault.ryuugu.dev"
-        engine_mount_point: "kv2"
-        path: "servers/{{ inventory_hostname }}/users/root"
-        data:
-          password: "{{ root_password }}"
-        validate_certs: true
-      retries: 50
-      delay: 5
-      delegate_to: localhost
+- name: Lock root password access
+  ansible.builtin.command:
+    argv: [chroot, /mnt, passwd, -l, root]
 
-- name: Get the root password from Vault
-  community.hashi_vault.vault_kv2_get:
-    url: "https://vault.ryuugu.dev"
-    engine_mount_point: "kv2"
-    path: "servers/{{ inventory_hostname }}/users/root"
-    validate_certs: true
-  register: root_password_vault
-  delegate_to: localhost
-  failed_when: false
-
-- name: Set the root password fact
-  ansible.builtin.set_fact:
-    root_password: "{{ root_password_vault.data.data.password }}"
-
-- name: Set the root password
-  ansible.builtin.shell:
-    cmd: |
-      {{ chroot_name }} /mnt chpasswd
-    stdin: "root:{{ root_password }}"
-  no_log: true
-
-- name: Check if root SSH key already exists in Vault
-  community.hashi_vault.vault_kv2_get:
-    url: "https://vault.ryuugu.dev"
-    engine_mount_point: "kv2"
-    path: "servers/{{ inventory_hostname }}/ssh/root/public"
-    validate_certs: true
-  register: root_ssh_key
-  delegate_to: localhost
-  failed_when: false
-
-- name: Create the root SSH keypair for the server
-  delegate_to: localhost
-  when: root_ssh_key.data is not defined or root_ssh_key.data.data is not defined or root_ssh_key.data.data.key is not defined
-  block:
-    - name: Create id25519 SSH key for server
-      community.crypto.openssh_keypair:
-        path: "/etc/ssh/id_{{ inventory_hostname }}_root"
-        type: "ed25519"
-
-    - name: Upload the public SSH key to vault
-      community.hashi_vault.vault_kv2_write:
-        url: "https://vault.ryuugu.dev"
-        engine_mount_point: "kv2"
-        path: "servers/{{ inventory_hostname }}/users/root/public"
-        data:
-          key: "{{ lookup('file', '/etc/ssh/id_' + inventory_hostname + '_root.pub') }}"
-        validate_certs: true
-      retries: 50
-      delay: 5
-      delegate_to: localhost
-
-    - name: Upload the private SSH key to vault
-      community.hashi_vault.vault_kv2_write:
-        url: "https://vault.ryuugu.dev"
-        engine_mount_point: "kv2"
-        path: "servers/{{ inventory_hostname }}/users/root/private"
-        data:
-          key: "{{ lookup('file', '/etc/ssh/id_' + inventory_hostname + '_root') }}"
-        validate_certs: true
-      retries: 50
-      delay: 5
-      delegate_to: localhost
-
-- name: Fetch the public root ssh key from Vault
-  when: not (management_access_enabled | default(true) | bool)
-  community.hashi_vault.vault_kv2_get:
-    url: "https://vault.ryuugu.dev"
-    engine_mount_point: "kv2"
-    path: "servers/{{ inventory_hostname }}/ssh/root/public"
-    validate_certs: true
-  register: root_ssh_key
-  delegate_to: localhost
-
-- name: Install root public key
-  when: not (management_access_enabled | default(true) | bool)
-  ansible.builtin.authorized_key:
-    user: "root"
-    key: "{{ root_ssh_key.data.data.key }}"
-    path: "/mnt/root/.ssh/authorized_keys"
-    manage_dir: false
-
-- name: Setup users
-  include_tasks: create_user.yml
-  loop: "{{ users | rejectattr('username', 'equalto', 'ansible') | list }}"
-  loop_control:
-    loop_var: item
-  vars:
-    username: "{{ item.username }}"
-    user_groups: "{{ item.groups | default([]) }}"
-
-- name: Install and configure sudo
-  block:
-    - name: Install sudo (Arch)
-      ansible.builtin.shell:
-        cmd: "arch-chroot /mnt pacman -S --noconfirm sudo"
-      when: ansible_distribution == 'Archlinux'
-
-    - name: Install sudo (Debian)
-      ansible.builtin.shell:
-        cmd: "chroot /mnt apt-get install -y sudo"
-      when: ansible_distribution == 'Debian'
-
-    - name: Add wheel group to sudoers
-      ansible.builtin.lineinfile:
-        path: /mnt/etc/sudoers
-        regexp: '^# %wheel\s+ALL=\(ALL\)\s+ALL'
-        line: '%wheel ALL=(ALL) ALL'
-        state: present
-        validate: 'visudo -cf %s'
-      become: true
-      when: ansible_distribution == 'Archlinux'
-
-- name: Install and configure sshd
-  block:
-    - name: Install openssh (Arch)
-      ansible.builtin.shell:
-        cmd: "arch-chroot /mnt pacman -S --noconfirm openssh lldpd"
-      when: ansible_distribution == 'Archlinux'
-
-    - name: Install openssh (Debian)
-      ansible.builtin.shell:
-        cmd: "chroot /mnt apt-get install -y openssh-server lldpd"
-      when: ansible_distribution == 'Debian'
-
-    - name: Enable sshd (Arch)
-      ansible.builtin.shell:
-        cmd: "{{ chroot_name }} /mnt systemctl enable sshd"
-      when: ansible_distribution == 'Archlinux'
-
-    - name: Enable sshd (Debian)
-      ansible.builtin.shell:
-        cmd: "{{ chroot_name }} /mnt systemctl enable ssh"
-      when: ansible_distribution == 'Debian'
-
-    - name: Harden SSH configuration
-      ansible.builtin.lineinfile:
-        path: /mnt/etc/ssh/sshd_config
-        regexp: "{{ item.regexp }}"
-        line: "{{ item.line }}"
-        state: present
-      loop:
-        - { regexp: '^#?PermitRootLogin', line: "PermitRootLogin {{ 'no' if management_access_enabled | default(true) | bool else 'prohibit-password' }}" }
-        - { regexp: '^#?PasswordAuthentication', line: 'PasswordAuthentication no' }
-        - { regexp: '^#?PubkeyAuthentication', line: 'PubkeyAuthentication yes' }
-        - { regexp: '^#?X11Forwarding', line: 'X11Forwarding no' }
-
-- name: Install shared management access in the new OS before reboot
+- name: Install the verified managed identity, account reconciler and daemon
   ansible.builtin.include_role:
     name: management
   vars:
     management_target_root: /mnt
-  when: management_access_enabled | default(true) | bool
 
-- name: Configure the bootloader
-  block:
-    - name: Install bootloader related packages on Arch
-      ansible.builtin.shell:
-        cmd: "arch-chroot /mnt pacman -S --noconfirm grub efibootmgr dosfstools os-prober mtools"
-      become: true
-      when: ansible_facts['os_family'] == 'Archlinux'
+- name: Configure requested ordinary users without generating new credentials
+  ansible.builtin.script:
+    cmd: "{{ role_path }}/files/configure_users.py"
+    executable: python3
+  environment:
+    PROVISION_USERS: "{{ provision_users | to_json }}"
+    PROVISION_GROUPS: "{{ provision_server_spec.groups | default([]) | to_json }}"
+  no_log: true
 
-    - name: Install bootloader related packages on Debian
-      ansible.builtin.shell:
-        cmd: "chroot /mnt apt-get install -y grub-efi-amd64-bin grub-efi grub-pc-bin efibootmgr dosfstools os-prober mtools"
-      become: true
-      when: ansible_facts['os_family'] == 'Debian'
+- name: Enable installed management and network services
+  ansible.builtin.command:
+    argv: [chroot, /mnt, systemctl, enable, "{{ item }}"]
+  loop:
+    - "{{ 'ssh' if provision_operating_system.distribution == 'debian' else 'sshd' }}"
+    - lldpd
+    - NetworkManager
 
-    - name: Run grub install command on Arch
-      ansible.builtin.shell:
-        cmd: "arch-chroot /mnt grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=grub_uefi --recheck"
-      register: grub_install
-      become: true
-      when: ansible_facts['os_family'] == 'Archlinux'
+- name: Generate an installed-only fstab
+  ansible.builtin.shell: |
+    set -eu
+    root_uuid=$(blkid -s UUID -o value {{ (partition_prefix + '3') | quote }})
+    efi_uuid=$(blkid -s UUID -o value {{ (partition_prefix + '1') | quote }})
+    swap_uuid=$(blkid -s UUID -o value {{ (partition_prefix + '2') | quote }})
+    printf 'UUID=%s / ext4 defaults 0 1\nUUID=%s /boot/efi vfat defaults 0 2\nUUID=%s none swap sw 0 0\n' "$root_uuid" "$efi_uuid" "$swap_uuid" > /mnt/etc/fstab
 
-    - name: Run grub install command on Debian
-      ansible.builtin.shell:
-        cmd: "chroot /mnt  /bin/bash -c 'grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=debian --recheck'"
-      register: grub_install
-      become: true
-      when: ansible_facts['os_family'] == 'Debian'
+- name: Install GRUB in the new EFI partition and register the normal firmware path
+  ansible.builtin.command:
+    argv: [chroot, /mnt, grub-install, --target=x86_64-efi, --efi-directory=/boot/efi, --bootloader-id=Homelab, --recheck]
 
-    - name: Create iPXE directory
-      ansible.builtin.file:
-        path: /mnt/boot/ipxe
-        state: directory
-        mode: '0755'
+- name: Install the common one-shot iPXE boot contract
+  ansible.builtin.include_role:
+    name: grub
+  vars:
+    chroot_path: /mnt
 
-    - name: Download iPXE efi binary
-      ansible.builtin.get_url:
-        url: https://boot.ipxe.org/ipxe.efi
-        dest: /mnt/boot/ipxe/ipxe.efi
+- name: Inspect the registered firmware boot path
+  ansible.builtin.command:
+    argv: [efibootmgr, -v]
+  register: installed_efi_entries
+  changed_when: false
 
-    - name: Add PXE boot entry
-      ansible.builtin.blockinfile:
-        path: /mnt/etc/grub.d/40_custom
-        block: |
-          menuentry 'Network Boot (iPXE)' {
-              search --no-floppy --set=root --file /boot/ipxe/ipxe.efi
-              chainloader /boot/ipxe/ipxe.efi
-          }
-        create: yes
-        mode: '0755'
-        owner: root
-        group: root
+- name: Read the new EFI partition identity
+  ansible.builtin.command:
+    argv: [blkid, -s, PARTUUID, -o, value, "{{ partition_prefix }}1"]
+  register: installed_efi_uuid
+  changed_when: false
 
-    - name: Install kernel and initrd on Debian
-      ansible.builtin.shell:
-        cmd: "chroot /mnt apt install -y linux-image-amd64"
-      become: true
-      when: ansible_facts['os_family'] == 'Debian'
+- name: Require firmware default boot to select the new partition's GRUB
+  ansible.builtin.script:
+    cmd: "{{ role_path }}/files/verify_efi.py {{ installed_efi_uuid.stdout | quote }}"
+    executable: python3
+  changed_when: false
 
-    - name: Generate GRUB configuration file
-      ansible.builtin.shell:
-        cmd: "{{ chroot_name }} /mnt grub-mkconfig -o /boot/grub/grub.cfg"
-      become: true
+- name: Read the new root filesystem identity
+  ansible.builtin.command:
+    argv: [blkid, -s, UUID, -o, value, "{{ partition_prefix }}3"]
+  register: installed_root_uuid
+  changed_when: false
 
-- name: Install required packages
-  block:
-    - name: Install packages on Arch
-      ansible.builtin.shell:
-        cmd: "arch-chroot /mnt pacman -S --noconfirm networkmanager python"
-      become: true
-      when: ansible_facts['os_family'] == 'Archlinux'
+- name: Create the protected installation marker directory
+  ansible.builtin.file:
+    path: /mnt/var/lib/homelab
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
 
-    - name: Install packages on Debian
-      ansible.builtin.shell:
-        cmd: "chroot /mnt apt-get install -y network-manager python3"
-      become: true
-      when: ansible_facts['os_family'] == 'Debian'
+- name: Write the installation checkpoint before the final reboot
+  ansible.builtin.copy:
+    dest: /mnt/var/lib/homelab/provisioning.json
+    owner: root
+    group: root
+    mode: '0600'
+    content: "{{ {'serverUID': provision_server_uid, 'attemptID': provision_attempt_id, 'reprovision': provision_request_counter | int, 'planDigest': provision_plan_digest, 'rootUUID': installed_root_uuid.stdout, 'efiPARTUUID': installed_efi_uuid.stdout, 'bootloader': '/EFI/Homelab/grubx64.efi', 'distribution': provision_operating_system.distribution} | to_nice_json }}"
 
-    - name: Enable NetworkManager
-      ansible.builtin.shell:
-        cmd: "{{ chroot_name }} /mnt systemctl enable NetworkManager"
-      become: true
+- name: Unmount chroot bind mounts without ignoring failures
+  ansible.posix.mount:
+    path: "{{ item }}"
+    state: unmounted
+  loop: [/mnt/sys/firmware/efi/efivars, /mnt/run, /mnt/sys, /mnt/proc, /mnt/dev]
 
-- name: Get the SSH key from Vault
-  when: not (management_access_enabled | default(true) | bool)
-  community.hashi_vault.vault_kv2_get:
-    url: "https://vault.ryuugu.dev"
-    engine_mount_point: "kv2"
-    path: "servers/{{ inventory_hostname }}/ssh/public"
-    validate_certs: true
-  register: ssh_key
-  delegate_to: localhost
-  failed_when: false
-
-- name: Setup SSH key for root
-  block:
-    - name: Create /mnt/root/.ssh directory
-      ansible.builtin.file:
-        path: /mnt/root/.ssh
-        state: directory
-        mode: '0700'
-        owner: root
-        group: root
-
-    - name: Add provisioning key to root's authorized_keys
-      ansible.builtin.lineinfile:
-        path: /mnt/home/{{ inventory_hostname }}/.ssh/authorized_keys
-        line: "{{ ssh_key.data.data.key }}"
-        create: yes
-        mode: '0600'
-        owner: root
-        group: root
-  when: not (management_access_enabled | default(true) | bool) and ssh_key.data is defined and ssh_key.data.data is defined and ssh_key.data.data.key is defined
-
-- name: Cleanup chroot mounts before reboot
-  block:
-    - name: Unmount chroot filesystems (Debian)
-      ansible.posix.mount:
-        path: "{{ item }}"
-        state: unmounted
-      loop:
-        - /mnt/run
-        - /mnt/sys
-        - /mnt/proc
-        - /mnt/dev
-      failed_when: false
-      when: ansible_distribution == 'Debian'
-  rescue:
-    - name: Force unmount if needed
-      ansible.builtin.command:
-        cmd: "umount -l {{ item }}"
-      loop:
-        - /mnt/run
-        - /mnt/sys
-        - /mnt/proc
-        - /mnt/dev
-      failed_when: false
-      when: ansible_distribution == 'Debian'
-
-- name: Reboot the system
-  ansible.builtin.reboot:
-    reboot_timeout: 0
-  become: yes
-  failed_when: false
+- name: Flush the completed installation
+  ansible.builtin.command: sync

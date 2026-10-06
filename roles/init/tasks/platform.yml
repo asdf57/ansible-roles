@@ -217,7 +217,10 @@
     - {src: default.conf.j2, dest: nginx/default.conf}
     - {src: config.yml.j2, dest: registry/config/config.yml}
 
-- name: Download iPXE boot binaries
+- name: Build the shared GRUB netboot artifact
+  ansible.builtin.include_tasks: ipxe.yml
+
+- name: Download optional manual-recovery iPXE boot binaries
   ansible.builtin.get_url:
     url: "{{ item.url }}"
     dest: "{{ mounted_data_path }}/nginx/files/{{ item.name }}"

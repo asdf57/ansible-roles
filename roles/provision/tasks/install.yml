@@ -1,0 +1,85 @@
+---
+- name: Require the pinned installation contract
+  ansible.builtin.assert:
+    that:
+      - provision_destructive_authorized | default(false) | bool
+      - provision_target_disk is match('^/dev/disk/by-id/[^/]+$')
+      - provision_operating_system.distribution in ['arch', 'debian']
+      - provision_operating_system.architecture == 'amd64'
+      - provision_operating_system.bootMode == 'uefi'
+      - provision_operating_system.version in ['rolling', 'trixie']
+      - provision_plan_digest is defined
+      - storage.partitions | map(attribute='fs_type') | list == ['efi', 'swap', 'ext4']
+
+- name: Resolve the approved stable disk
+  ansible.builtin.command:
+    argv: [readlink, -e, "{{ provision_target_disk }}"]
+  register: approved_disk
+  changed_when: false
+
+- name: Pin partition device naming for SATA and NVMe
+  ansible.builtin.set_fact:
+    disk_name: "{{ approved_disk.stdout }}"
+    partition_prefix: "{{ approved_disk.stdout }}{{ 'p' if approved_disk.stdout is search('[0-9]$') else '' }}"
+    chroot_name: chroot
+
+- name: Reinspect the approved disk immediately before erasure
+  ansible.builtin.script:
+    cmd: "{{ role_path }}/files/probe.py {{ provision_target_disk | quote }}"
+    executable: python3
+  register: destructive_probe
+  changed_when: false
+
+- name: Require the same unmounted physical disk and live boot session
+  ansible.builtin.assert:
+    that:
+      - (destructive_probe.stdout | from_json).live
+      - (destructive_probe.stdout | from_json).liveBuildID == provision_live_build_id
+      - (destructive_probe.stdout | from_json).bootID == provision_live_boot_id
+      - not (destructive_probe.stdout | from_json).mounted
+      - (destructive_probe.stdout | from_json).disk == provision_disk_identity
+      - provision_request_counter | int > 0 or not (destructive_probe.stdout | from_json).partitioned
+
+- name: Require daemon enrollment before creating a replacement root
+  ansible.builtin.stat:
+    path: /etc/homelabd/environment
+  register: agent_enrollment
+
+- name: Require a protected existing daemon identity
+  ansible.builtin.assert:
+    that:
+      - agent_enrollment.stat.isreg | default(false)
+      - agent_enrollment.stat.uid == 0
+      - agent_enrollment.stat.mode == '0600'
+
+- name: Read the existing daemon enrollment without logging credentials
+  ansible.builtin.slurp:
+    src: /etc/homelabd/environment
+  register: agent_enrollment_content
+  no_log: true
+
+- name: Require a valid daemon token before erasure
+  ansible.builtin.assert:
+    that:
+      - (agent_enrollment_content.content | b64decode) is search('(?m)^API_TOKEN=[a-f0-9]{64}$')
+  no_log: true
+
+- name: Install live installation utilities
+  ansible.builtin.package:
+    name: "{{ ['parted', 'dosfstools', 'e2fsprogs', 'arch-install-scripts', 'efibootmgr'] + (['debootstrap'] if provision_operating_system.distribution == 'debian' else []) }}"
+    state: present
+    update_cache: true
+
+- name: Remove only the approved disk's filesystem signatures
+  ansible.builtin.command:
+    argv: [wipefs, --all, "{{ disk_name }}"]
+
+- name: Replace the approved disk's partition table
+  ansible.builtin.command:
+    argv: [parted, --script, "{{ disk_name }}", mklabel, gpt]
+
+- name: Create the requested partitions and filesystems
+  ansible.builtin.include_tasks: partition.yml
+
+- name: Install the desired operating system and management access
+  ansible.builtin.include_tasks: bootstrap.yml

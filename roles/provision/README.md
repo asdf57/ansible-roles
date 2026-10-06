@@ -1,38 +1,9 @@
-Role Name
-=========
+# Provisioning role
 
-A brief description of the role goes here.
+Executed by `operators/provisioning.py` through `plays/provision_stage.yml`; do not invoke installation directly with ordinary inventory variables.
 
-Requirements
-------------
+The operator pins the Server UID, request counter, immutable live ISO build, desired OS, stable disk identity and installation inputs before reserving maintenance. The install stage rechecks the live boot ID and physical disk immediately before erasure. Existing partitions require an explicit replacement request; counter zero only accepts a blank disk.
 
-Any pre-requisites that may not be covered by Ansible itself or the role should be mentioned here. For instance, if the role uses the EC2 module, it may be a good idea to mention in this section that the boto package is required.
+V1 supports amd64 UEFI with Secure Boot disabled, Arch rolling or Debian trixie, and an EFI/swap/ext4 layout on a nonremovable SATA/NVMe disk selected by `/dev/disk/by-id`. It preserves the management account, SSH identity, CA trust and protected homelabd enrollment. Installation writes an attempt marker and restores GRUB before the operator reboots and verifies the installed OS.
 
-Role Variables
---------------
-
-A description of the settable variables for this role should go here, including any variables that are in defaults/main.yml, vars/main.yml, and any variables that can/should be set via parameters to the role. Any variables that are read from other roles and/or the global scope (ie. hostvars, group vars, etc.) should be mentioned here as well.
-
-Dependencies
-------------
-
-A list of other roles hosted on Galaxy should go here, plus any details in regards to parameters that may need to be set for other roles, or variables that are used from other roles.
-
-Example Playbook
-----------------
-
-Including an example of how to use your role (for instance, with variables passed in as parameters) is always nice for users too:
-
-    - hosts: servers
-      roles:
-         - { role: username.rolename, x: 42 }
-
-License
--------
-
-BSD
-
-Author Information
-------------------
-
-An optional section for the role authors to include contact information, or a website (HTML is not allowed).
+An interrupted Installing checkpoint requires manual investigation and a new authorized request; it never automatically repeats erasure. See `stigmergy/docs/server-provisioning-rollout.md` in the workspace for rollout and recovery steps.

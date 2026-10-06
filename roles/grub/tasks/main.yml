@@ -1,42 +1,70 @@
 ---
-- name: Setup iPXE for GRUB
-  block:
-    - name: Create iPXE directory
-      ansible.builtin.file:
-        path: "{{ chroot_path }}/boot/ipxe"
-        state: directory
-        mode: '0755'
+- name: Require a reviewed netboot artifact and supported installed layout
+  ansible.builtin.assert:
+    that:
+      - chroot_path == '/mnt'
+      - provision_operating_system.architecture == 'amd64'
+      - provision_operating_system.bootMode == 'uefi'
+      - grub_ipxe_url is match('^https://')
+      - grub_ipxe_checksum is match('^sha256:')
 
-    - name: Download iPXE efi binary
-      ansible.builtin.get_url:
-        url: https://{{ nginx_url }}/ipxe.efi
-        dest: "{{ chroot_path }}/boot/ipxe/ipxe.efi"
+- name: Create the installed iPXE directory
+  ansible.builtin.file:
+    path: /mnt/boot/ipxe
+    state: directory
+    mode: '0755'
 
-    - name: Download the iPXE script
-      ansible.builtin.get_url:
-        url: https://{{ nginx_url }}/boot.ipxe
-        dest: "{{ chroot_path }}/boot/ipxe/boot.ipxe"
+- name: Install the common embedded-script iPXE artifact
+  ansible.builtin.get_url:
+    url: "{{ grub_ipxe_url }}"
+    checksum: "{{ grub_ipxe_checksum }}"
+    dest: /mnt/boot/ipxe/ipxe.efi
+    mode: '0644'
+    validate_certs: true
 
-    - name: Add PXE boot entry
-      ansible.builtin.blockinfile:
-        path: "{{ chroot_path }}/etc/grub.d/06_ipxe"
-        block: |
-          #!/bin/sh
-          exec tail -n +3 $0
-          menuentry 'Network Boot (iPXE)' --id=ipxeboot {
-              echo 'Loading iPXE...'
-              chainloader /boot/ipxe/ipxe.efi dhcp && chain /boot/ipxe/boot.ipxe
-          }
-        create: yes
-        mode: '0755'
-        owner: root
-        group: root
+- name: Install the stable one-shot netboot menu entry after normal OS entries
+  ansible.builtin.copy:
+    dest: /mnt/etc/grub.d/41_homelab_netboot
+    mode: '0755'
+    content: |
+      #!/bin/sh
+      exec tail -n +3 "$0"
+      menuentry 'Homelab netboot' --id homelab-netboot {
+          search --no-floppy --file --set=root /boot/ipxe/ipxe.efi
+          chainloader /boot/ipxe/ipxe.efi
+      }
 
-    - name: Update GRUB configuration
-      ansible.builtin.command:
-        cmd: chroot {{ chroot_path }} grub-mkconfig -o /boot/grub/grub.cfg
-      args:
-        chdir: "{{ chroot_path }}"
-      register: grub_update
-      changed_when: grub_update.stdout != ''
-      failed_when: grub_update.rc != 0
+- name: Keep the installed OS as default and honor GRUB next_entry
+  ansible.builtin.lineinfile:
+    path: /mnt/etc/default/grub
+    regexp: "^{{ item.key }}="
+    line: "{{ item.key }}={{ item.value }}"
+    create: true
+  loop:
+    - {key: GRUB_DEFAULT, value: '0'}
+    - {key: GRUB_SAVEDEFAULT, value: 'false'}
+    - {key: GRUB_TIMEOUT, value: '5'}
+
+- name: Install validated desired kernel arguments
+  ansible.builtin.lineinfile:
+    path: /mnt/etc/default/grub
+    regexp: '^GRUB_CMDLINE_LINUX='
+    line: 'GRUB_CMDLINE_LINUX="{{ provision_operating_system.kernelArguments | default([]) | join(" ") }}"'
+
+- name: Create the GRUB environment block
+  ansible.builtin.command:
+    argv: [chroot, /mnt, grub-editenv, /boot/grub/grubenv, create]
+    creates: /mnt/boot/grub/grubenv
+
+- name: Clear pending netboot selection in the new installation
+  ansible.builtin.command:
+    argv: [chroot, /mnt, grub-editenv, /boot/grub/grubenv, unset, next_entry]
+
+- name: Generate the installed GRUB menu
+  ansible.builtin.command:
+    argv: [chroot, /mnt, grub-mkconfig, -o, /boot/grub/grub.cfg]
+
+- name: Validate the generated GRUB syntax
+  ansible.builtin.command:
+    argv: [chroot, /mnt, grub-script-check, /boot/grub/grub.cfg]
+  changed_when: false

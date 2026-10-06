@@ -47,6 +47,9 @@ class API:
     def get(self, collection, name):
         return request_json(self.url + "/" + collection + "/" + quote(name, safe=""), self.token)
 
+    def list(self, collection):
+        return request_json(self.url + "/" + collection, self.token)["items"]
+
     def patch_status(self, server, status):
         return request_json(self.url + "/servers/" + quote(server["metadata"]["name"], safe="") + "/status",
                             self.token, "PATCH", {"metadata": {"uid": server["metadata"]["uid"]}, "status": status},

@@ -1,29 +1,14 @@
 ---
-- name: Update pacman database
-  community.general.pacman:
-    update_cache: yes
-  when: ansible_distribution == 'Archlinux'
+- name: Arm netboot for the next GRUB boot only
+  ansible.builtin.command:
+    argv: [grub-reboot, homelab-netboot]
 
-- name: Install required packages
-  ansible.builtin.package:
-    name: "{{ item }}"
-    state: present
-  loop: "{{ required_packages }}"
+- name: Read back the one-shot selection
+  ansible.builtin.command:
+    argv: [grub-editenv, /boot/grub/grubenv, list]
+  register: armed_grub
+  changed_when: false
 
-- name: Enable Wake-on-LAN on all interfaces
-  shell: |
-    for iface in $(ls /sys/class/net/); do
-      ethtool -s "$iface" wol g 2>/dev/null
-    done
-  ignore_errors: yes
-
-- name: Reboot to iPXE
-  ansible.builtin.shell:
-    cmd: "grub-reboot 'Network Boot (iPXE)' && reboot"
-  ignore_unreachable: yes
-  ignore_errors: yes
-
-- name: Wait for the server to come back after reboot
-  ansible.builtin.wait_for_connection:
-    timeout: 600
-  ignore_unreachable: yes
+- name: Require a successful one-shot selection before rebooting
+  ansible.builtin.assert:
+    that: "'next_entry=homelab-netboot' in armed_grub.stdout_lines"

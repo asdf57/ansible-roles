@@ -17,6 +17,7 @@ def current(api, snapshot):
     observed_host = value.get("status", {}).get("hostSSH", {})
     snapshot_host = snapshot.get("status", {}).get("hostSSH", {})
     if (value["metadata"]["uid"] != snapshot["metadata"]["uid"] or
+            value.get("status", {}).get("provisioning", {}).get("maintenance") or
             value["metadata"]["generation"] != snapshot["metadata"]["generation"] or
             value["metadata"].get("deletionTimestamp") or
             any(observed_host.get(field) != snapshot_host.get(field) for field in
@@ -111,6 +112,10 @@ def run_play(server, host, directory, known, play, variables=None):
 
 
 def reconcile(api, server, host, directory):
+    provisioning = server.get("status", {}).get("provisioning", {})
+    if provisioning.get("maintenance") or provisioning.get("phase") in ("PreparingBoot", "AwaitingLive", "Installing", "AwaitingInstalled", "Verifying"):
+        print(server["metadata"]["name"] + ": provisioning owns the SSH transition")
+        return
     trust = server.get("status", {}).get("hostSSH", {})
     if not trust.get("keyReady") or not trust.get("keyPairRef"):
         print(server["metadata"]["name"] + ": managed key pending")

@@ -1,0 +1,26 @@
+---
+- name: Create the shared iPXE build context
+  ansible.builtin.file:
+    path: "{{ mounted_data_path }}/ipxe-build"
+    state: directory
+    mode: '0755'
+
+- name: Stage the pinned iPXE build recipe
+  ansible.builtin.copy:
+    src: ipxe/Dockerfile
+    dest: "{{ mounted_data_path }}/ipxe-build/Dockerfile"
+    mode: '0644'
+
+- name: Render the public API bootstrap script
+  ansible.builtin.template:
+    src: ipxe-bootstrap.ipxe.j2
+    dest: "{{ mounted_data_path }}/ipxe-build/bootstrap.ipxe"
+    mode: '0644'
+
+- name: Build the common embedded-script UEFI iPXE image
+  ansible.builtin.command:
+    argv: [docker, build, -t, homelab-ipxe-builder, "{{ mounted_data_path }}/ipxe-build"]
+
+- name: Publish iPXE and its digest through existing boot infrastructure
+  ansible.builtin.command:
+    argv: [docker, run, --rm, --volume, "{{ mounted_data_path }}/nginx/files:/output", homelab-ipxe-builder]

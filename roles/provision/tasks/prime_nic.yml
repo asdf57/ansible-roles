@@ -1,21 +1,51 @@
 ---
-- name: Install required packages
+- name: Require the verified management NIC name and MAC
+  ansible.builtin.assert:
+    that:
+      - provision_boot_interface is match('^[a-zA-Z0-9_.-]+$')
+      - provision_boot_mac is match('^[a-f0-9]{2}(:[a-f0-9]{2}){5}$')
+
+- name: Read the selected interface identity
+  ansible.builtin.slurp:
+    src: "/sys/class/net/{{ provision_boot_interface }}/address"
+  register: boot_interface_mac
+
+- name: Refuse to prime another NIC
+  ansible.builtin.assert:
+    that: (boot_interface_mac.content | b64decode | trim) == provision_boot_mac
+
+- name: Install the NIC control utility
   ansible.builtin.package:
-    name: "ethtool"
+    name: ethtool
     state: present
-    update_cache: true
 
-- name: Enable Wake-on-LAN on all interfaces
-  shell: |
-    for iface in $(ls /sys/class/net/ | grep -E '^(eth|ens|eno|enp)'); do
-      echo "Priming interface $iface for iPXE..."
+- name: Enable magic-packet wake on the boot NIC
+  ansible.builtin.command:
+    argv: [ethtool, -s, "{{ provision_boot_interface }}", wol, g]
 
-      # 1. Enable Wake-on-LAN
-      # Forces the card to stay in D0 (fully powered) state during reboot
-      ethtool -s "$iface" wol g 2>/dev/null
+- name: Disable EEE for the affected boot NIC
+  ansible.builtin.command:
+    argv: [ethtool, --set-eee, "{{ provision_boot_interface }}", eee, 'off']
+  when: provision_disable_eee | default(false) | bool
 
-      # 2. Disable Energy Efficient Ethernet (EEE)
-      # EEE often causes link negotiation issues in the brief iPXE window
-      ethtool --set-eee "$iface" eee off 2>/dev/null
-    done
-  ignore_errors: yes
+- name: Verify wake settings
+  ansible.builtin.command:
+    argv: [ethtool, "{{ provision_boot_interface }}"]
+  register: boot_nic_settings
+  changed_when: false
+
+- name: Require magic-packet wake readback
+  ansible.builtin.assert:
+    that: "'Wake-on: g' in boot_nic_settings.stdout"
+
+- name: Verify EEE settings on affected NIC
+  ansible.builtin.command:
+    argv: [ethtool, --show-eee, "{{ provision_boot_interface }}"]
+  register: boot_nic_eee
+  changed_when: false
+  when: provision_disable_eee | default(false) | bool
+
+- name: Require disabled EEE readback
+  ansible.builtin.assert:
+    that: "'EEE status: disabled' in boot_nic_eee.stdout"
+  when: provision_disable_eee | default(false) | bool

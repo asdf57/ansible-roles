@@ -13,6 +13,9 @@ def prepare(api, inventory):
         server = api.get("servers", name)
         if server["metadata"].get("deletionTimestamp"):
             raise RuntimeError("Server is terminating")
+        provisioning = server.get("status", {}).get("provisioning", {})
+        if provisioning.get("maintenance") or provisioning.get("phase") in ("PreparingBoot", "AwaitingLive", "Installing", "AwaitingInstalled", "Verifying"):
+            raise RuntimeError("Server " + name + " is reserved by provisioning")
         host = server.get("status", {}).get("hostSSH", {})
         desired = host.get("keyPairRef")
         if not host.get("keyReady") or host.get("phase") != "Ready" or not desired or host.get("installedKeyPairRef") != desired:

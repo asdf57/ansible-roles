@@ -3,13 +3,13 @@
   debug:
     var: storage
 
-- name: Set disk name
-  set_fact:
-    disk_name: "/dev/{{ storage.disk_name }}"
+- name: Require the operator-approved physical disk
+  ansible.builtin.assert:
+    that: disk_name is defined and partition_prefix is defined
 
 - name: Grab info about the disk
   community.general.parted:
-    device: "/dev/{{ storage.disk_name }}"
+    device: "{{ disk_name }}"
     unit: "MiB"
     state: "info"
   register: storage_info
