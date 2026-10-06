@@ -18,6 +18,7 @@
   ansible.builtin.package:
     name: ethtool
     state: present
+    update_cache: true
 
 - name: Enable magic-packet wake on the boot NIC
   ansible.builtin.command:

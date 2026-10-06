@@ -47,6 +47,7 @@
   ansible.builtin.package:
     name: kexec-tools
     state: present
+    update_cache: true
 
 - name: Create a protected RAM-backed live bootstrap directory
   ansible.builtin.file:
