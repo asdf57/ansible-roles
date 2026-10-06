@@ -7,7 +7,7 @@
     - name: Require an explicit supported stage and pinned attempt
       ansible.builtin.assert:
         that:
-          - provision_stage in ['prime', 'arm', 'clear', 'install', 'post', 'refresh-prepare', 'refresh-boot', 'reboot']
+          - provision_stage in ['prime', 'arm', 'clear', 'install', 'post', 'refresh-prepare', 'refresh-boot', 'refresh-clear', 'reboot']
           - provision_attempt_id is defined
           - provision_server_uid is defined
     - name: Prime the boot NIC
@@ -39,7 +39,21 @@
         argv: [cat, /sys/kernel/kexec_loaded]
       register: prepared_kexec
       changed_when: false
-      when: provision_stage == 'refresh-boot'
+      when: provision_stage in ['refresh-boot', 'refresh-clear']
+    - name: Unload the owned pending live bootstrap kernel during preparation cleanup
+      ansible.builtin.command:
+        argv: [kexec, --unload]
+      when: provision_stage == 'refresh-clear' and prepared_kexec.stdout == '1'
+    - name: Verify no kexec selection remains after cleanup
+      ansible.builtin.command:
+        argv: [cat, /sys/kernel/kexec_loaded]
+      register: cleared_kexec
+      changed_when: false
+      when: provision_stage == 'refresh-clear'
+    - name: Refuse to release an uncleared bootstrap selection
+      ansible.builtin.assert:
+        that: cleared_kexec.stdout == '0'
+      when: provision_stage == 'refresh-clear'
     - name: Refuse an unprepared live bootstrap
       ansible.builtin.assert:
         that: prepared_kexec.stdout == '1'

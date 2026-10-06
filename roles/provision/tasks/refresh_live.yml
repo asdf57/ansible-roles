@@ -1,8 +1,8 @@
 ---
 - name: Inspect the current live session before loading a replacement kernel
-  ansible.builtin.script:
-    cmd: "{{ role_path }}/files/probe.py {{ provision_target_disk | quote }}"
-    executable: python3
+  ansible.builtin.command:
+    argv: [python3, '-', "{{ provision_target_disk }}"]
+    stdin: "{{ lookup('file', role_path + '/files/probe.py') }}"
   register: bootstrap_probe
   changed_when: false
 

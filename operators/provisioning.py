@@ -414,9 +414,10 @@ def reconcile(api, server, variables, directory, revision, preflight=False):
         if facts["live"]:
             if facts["liveBuildID"] != p["snapshot"]["isoBuildID"]:
                 run_stage(server, directory, known, 'prime')
+                checkpoint(api, server, 'PreparingBoot', netbootArmed=True)
                 run_stage(server, directory, known, 'refresh-prepare')
                 current(api, server)
-                checkpoint(api, server, 'AwaitingLive', liveBootID=None)
+                checkpoint(api, server, 'AwaitingLive', liveBootID=None, netbootArmed=True)
                 current(api, server)
                 run_stage(server, directory, known, 'refresh-boot')
             else:
@@ -493,8 +494,10 @@ def handle_failure(api, server, directory):
             latest = current(api, server, allow_paused=True)
             known = known_file(latest, directory)
             facts = inspect(latest, known)
-            if facts["live"] or facts["bootID"] != p.get("sourceBootID"):
+            if facts["bootID"] != p.get("sourceBootID"):
                 keep = True
+            elif facts['live']:
+                run_stage(latest, directory, known, 'refresh-clear')
             else:
                 run_stage(latest, directory, known, "clear")
                 if "next_entry=" in inspect(latest, known)["grubEnvironment"]:
