@@ -16,7 +16,7 @@ from urllib.error import HTTPError
 from urllib.request import Request, build_opener
 
 from common import (API, NoRedirect, OperatorError, address, alias, capture_inventory, fingerprint,
-                    inventory_hosts, public_key, ssh_args, ssh_probe, write_private)
+                    resolved_inventory_hosts, public_key, ssh_args, ssh_probe, write_private)
 from ssh_host_keys import host_private_key
 
 ACTIVE = {"PreparingBoot", "AwaitingLive", "Installing", "AwaitingInstalled", "Verifying"}
@@ -516,7 +516,7 @@ def main():
     revision = subprocess.check_output(["git", "-c", "safe.directory=" + checkout,
                                         "-C", checkout, "rev-parse", "HEAD"], text=True).strip()
     failed = False
-    for name, variables in inventory_hosts(inventory).items():
+    for name, variables in resolved_inventory_hosts(inventory).items():
         server = api.get("servers", name)
         if not eligible(server) and not (options.preflight and server.get('spec', {}).get('provisioning', {}).get('targetDisk')):
             continue

@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import tempfile
 from urllib.error import HTTPError
 from urllib.parse import quote, urlparse
 from urllib.request import Request, build_opener, HTTPRedirectHandler
@@ -125,6 +126,19 @@ def inventory_hosts(inventory):
                 raise RuntimeError("Conflicting inventory addresses")
             result.setdefault(name, {}).update(variables)
     return result
+
+
+def resolved_inventory_hosts(inventory):
+    """Let Ansible resolve group inheritance and host-variable precedence."""
+    with tempfile.TemporaryDirectory(prefix='operator-inventory-') as directory:
+        path = Path(directory) / 'inventory.json'
+        write_private(path, json.dumps(inventory))
+        output = subprocess.check_output(['ansible-inventory', '-i', str(path), '--list'],
+                                         text=True, timeout=30)
+    resolved = json.loads(output)['_meta']['hostvars']
+    # Ignore synthetic/unrelated hosts introduced by local runner configuration.
+    names = inventory_hosts(inventory)
+    return {name: resolved[name] for name in names}
 
 
 def capture_inventory(api, group_name):

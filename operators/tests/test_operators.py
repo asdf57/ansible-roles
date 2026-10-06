@@ -63,6 +63,16 @@ class API:
 
 
 class OperatorTests(unittest.TestCase):
+    def test_operator_uses_ansible_resolved_group_and_host_variables(self):
+        inventory = {'all': {'vars': {'storage': {'partitions': ['efi', 'swap', 'ext4']}},
+                             'hosts': {'node': {'ansible_host': '127.0.0.1'}}}}
+        resolved = {'_meta': {'hostvars': {'node': {'ansible_host': '127.0.0.1',
+                     'storage': {'partitions': ['efi', 'swap', 'ext4']}}}}}
+        with patch.object(common.subprocess, 'check_output', return_value=json.dumps(resolved)) as run:
+            result = common.resolved_inventory_hosts(inventory)
+        self.assertEqual(result['node']['storage']['partitions'], ['efi', 'swap', 'ext4'])
+        self.assertEqual(run.call_args.args[0][0], 'ansible-inventory')
+
     def test_private_resolution_checks_owned_metadata_and_revokes_token(self):
         api = API(); value = api.get("servers", "node")
         owned = {"metadata": {"uid": "key-uid", "generation": 1, "annotations": {"homelab.io/server-uid": "server-uid"}},
