@@ -118,6 +118,7 @@ function configure_live_environment() {
 
   bash "$HOMELABD_MANAGEMENT_INSTALL_SOURCE" "$PWD/config/includes.chroot" "$SSH_CA_BUNDLE_SOURCE"
   touch config/includes.chroot/var/lib/is_live_env
+  install -d -m 0700 config/includes.chroot/etc/homelabd
   printf '%s\n' "$ISO_VERSION" > config/includes.chroot/etc/homelabd/live-build-id
 
   # package-lists/*.list.chroot are merged into the package set installed

@@ -198,6 +198,7 @@ EOF
   # This marker is consumed elsewhere in your stack to tell a live image
   # apart from an installed system.
   touch "${root_fs}/var/lib/is_live_env"
+  install -d -m 0700 "${root_fs}/etc/homelabd"
   printf '%s\n' "$ISO_VERSION" > "${root_fs}/etc/homelabd/live-build-id"
 
   "$(dirname "$0")/../install-homelabd.sh" \

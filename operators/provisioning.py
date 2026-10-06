@@ -502,7 +502,11 @@ def main():
     group, inventory = capture_inventory(api, os.environ["INVENTORY_CAPTURE_GROUP"])
     if group["spec"]["selector"].get("matchKinds") != [{"apiVersion": "homelab.io/v1alpha1", "kind": "Server"}]:
         raise OperatorError("ProvisioningBlocked", "Provisioning requires a Server-only capture group")
-    revision = subprocess.check_output(["git", "-C", str(Path(__file__).resolve().parents[1]), "rev-parse", "HEAD"], text=True).strip()
+    checkout = str(Path(__file__).resolve().parents[1])
+    # Concourse's explicit Git input is root-owned; trust only this checkout for
+    # this read, never a global wildcard or every repository on the runner.
+    revision = subprocess.check_output(["git", "-c", "safe.directory=" + checkout,
+                                        "-C", checkout, "rev-parse", "HEAD"], text=True).strip()
     failed = False
     for name, variables in inventory_hosts(inventory).items():
         server = api.get("servers", name)
