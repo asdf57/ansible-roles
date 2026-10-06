@@ -113,10 +113,6 @@ def inspect(server, known):
                              "sudo -n python3 - " + shlex.quote(server["spec"]["provisioning"]["targetDisk"])],
                             input=script, capture_output=True, text=True, timeout=90)
     if result.returncode:
-        # Keep sensitive diagnostics private in the failed task container for an
-        # administrator, never emit them into public Concourse build output.
-        diagnostic = Path('/tmp/provision-operator-diagnostics') / (p['attemptID'] + '-' + stage + '.log')
-        write_private(diagnostic, result.stdout + '\n' + result.stderr)
         raise OperatorError("ProvisioningBlocked", "Read-only SSH provisioning probe failed")
     return json.loads(result.stdout)
 
@@ -276,6 +272,9 @@ def run_stage(server, directory, known, stage, facts=None):
                             capture_output=True, text=True)
     if result.returncode:
         tasks = re.findall(r'TASK \[([^\]\r\n]+)\]', result.stdout)
+        # Private diagnostics remain in the failed task container, not build logs.
+        diagnostic = Path('/tmp/provision-operator-diagnostics') / (p['attemptID'] + '-' + stage + '.log')
+        write_private(diagnostic, result.stdout + '\n' + result.stderr)
         last = tasks[-1] if tasks else 'initialization'
         raise OperatorError("ProvisioningBlocked", "Ansible stage failed at " + last + "; details suppressed to protect enrollment material")
 
