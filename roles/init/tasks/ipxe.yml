@@ -23,4 +23,4 @@
 
 - name: Publish iPXE and its digest through existing boot infrastructure
   ansible.builtin.command:
-    argv: [docker, run, --rm, --volume, "{{ mounted_data_path }}/nginx/files:/output", homelab-ipxe-builder]
+    argv: [docker, run, --rm, --volume, "{{ host_data_path }}/nginx/files:/output", homelab-ipxe-builder]
