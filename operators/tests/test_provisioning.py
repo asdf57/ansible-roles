@@ -208,6 +208,23 @@ class ProvisioningTests(unittest.TestCase):
             run.assert_not_called()
         self.assertEqual(api.writes, [])
 
+    def test_blocked_maintenance_is_not_reported_as_success_or_replayed(self):
+        api = RunAPI('Blocked')
+        with tempfile.TemporaryDirectory() as tmp, patch.object(p, 'run_stage') as run:
+            with self.assertRaises(p.OperatorError):
+                p.reconcile(api, api.view(), {}, Path(tmp), 'revision')
+            run.assert_not_called()
+        self.assertEqual(api.writes, [])
+
+    def test_failure_checkpoint_retains_safe_task_reason(self):
+        api = RunAPI('Installing')
+        with tempfile.TemporaryDirectory() as tmp:
+            p.handle_failure(api, api.view(), Path(tmp),
+                             'Ansible stage failed at installation contract')
+        self.assertEqual(api.run['status']['message'],
+                         'Ansible stage failed at installation contract')
+        self.assertTrue(api.run['status']['maintenance'])
+
     def test_metadata_edits_allowed_but_os_run_or_binding_changes_block(self):
         api = RunAPI()
         before = api.view()

@@ -533,6 +533,10 @@ def verify_installed(server, facts):
 def reconcile(api, server, variables, directory, revision, preflight=False):
     p = server.get("status", {}).get("provisioning", {})
     if p.get('phase') in ('Succeeded', 'Blocked'):
+        if p.get('phase') == 'Blocked' and p.get('maintenance'):
+            raise OperatorError(
+                'ProvisioningBlocked',
+                'Blocked run retains maintenance; inspect its failed build before recovery')
         if not preflight:
             release_run(api, server)
         return
@@ -691,7 +695,7 @@ def reconcile(api, server, variables, directory, revision, preflight=False):
         release_run(api, server)
 
 
-def handle_failure(api, server, directory):
+def handle_failure(api, server, directory, failure_message=None):
     p = server.get("status", {}).get("provisioning", {})
     if p.get("phase") == 'Pending':
         result = api.patch_status(
@@ -726,7 +730,9 @@ def handle_failure(api, server, directory):
     checkpoint(
         api, server, "Blocked", maintenance=keep, netbootArmed=bool(keep and p.get("netbootArmed")),
         message=
-        "Attempt blocked; inspect boot selection/disk before explicitly requesting another attempt")
+        (failure_message or
+         "Attempt blocked; inspect boot selection/disk before explicitly requesting another attempt"
+         ))
     release_run(api, server)
 
 
@@ -767,7 +773,7 @@ def main():
                 ) else 'Provisioning preflight/attempt blocked; inspect dependencies and checkpoints'
                 print(name + ': ' + message, file=sys.stderr)
                 if not options.preflight:
-                    handle_failure(api, server, Path(tmp))
+                    handle_failure(api, server, Path(tmp), message)
                 if server.get('status', {}).get(
                         'provisioning', {}).get('phase') in ACTIVE or server.get('status', {}).get(
                             'provisioning', {}).get('maintenance'):

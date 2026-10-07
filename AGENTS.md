@@ -15,6 +15,9 @@
 - Test with `python3 -m unittest discover -s operators/tests` and syntax-check
   changed plays with the project's Ansible runner image. Syntax checks and the
   GRUB VM fixture are not full installation acceptance tests.
+- Run `python3 operators/tests/provision_contract_ansible.py` in the Ansible
+  runner to exercise actual installation contract assertions with local fake
+  probe facts. It runs no node connections, disk commands or privileged tasks.
 
 ## Provisioning procedure
 
@@ -120,6 +123,19 @@ Private logs (0700 directory, 0600 file) are retained inside task containers:
 
 - `/tmp/provision-operator-diagnostics/<attemptID>-<stage>.log`
 - `/tmp/ssh-host-operator-diagnostics/<serverUID>-<play>.log`
+
+Use a CLI matching the server. A temporary matching binary can be downloaded
+without replacing the system installation:
+
+```sh
+curl --fail --silent --show-error 'https://ci.ryuugu.dev/api/v1/cli?arch=amd64&platform=linux' -o /tmp/homelab-fly
+chmod 0755 /tmp/homelab-fly
+/tmp/homelab-fly -t homelab builds --json
+```
+
+The shared API client's status writes route by resource kind. Test the real
+client URL as well as fake-store workflows: a fake store alone cannot detect
+ProvisioningRun checkpoints accidentally sent to the Server collection.
 
 For a failed task, use `fly ... hijack -b <buildID> -s reconcile-provisioning --
 <read-only-diagnostic-command>`. Inspect only the relevant private log; never

@@ -3,6 +3,9 @@
   ansible.builtin.assert:
     that:
       - provision_destructive_authorized | default(false) | bool
+      - provision_run_uid is defined
+      - provision_run_uid | length > 0
+      - provision_attempt_id == provision_run_uid
       - provision_target_disk is match('^/dev/disk/by-id/[^/]+$')
       - provision_operating_system.distribution in ['arch', 'debian']
       - provision_operating_system.architecture == 'amd64'
@@ -38,7 +41,6 @@
       - (destructive_probe.stdout | from_json).bootID == provision_live_boot_id
       - not (destructive_probe.stdout | from_json).mounted
       - (destructive_probe.stdout | from_json).disk == provision_disk_identity
-      - provision_request_counter | int > 0 or not (destructive_probe.stdout | from_json).partitioned
 
 - name: Require daemon enrollment before creating a replacement root
   ansible.builtin.stat:
