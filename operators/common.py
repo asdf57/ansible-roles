@@ -59,9 +59,10 @@ class API:
         return request_json(self.url + "/" + collection, self.token)["items"]
 
     def patch_status(self, server, status):
+        collection = {'Server': 'servers', 'ProvisioningRun': 'provisioning-runs'}[server['kind']]
         return request_json(
-            self.url + "/servers/" + quote(server["metadata"]["name"], safe="") + "/status",
-            self.token, "PATCH", {
+            self.url + "/" + collection + "/" + quote(server["metadata"]["name"], safe="") +
+            "/status", self.token, "PATCH", {
                 "metadata": {
                     "uid": server["metadata"]["uid"]
                 },

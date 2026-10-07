@@ -91,6 +91,26 @@ class API:
 
 class OperatorTests(unittest.TestCase):
 
+    def test_status_client_routes_by_resource_kind(self):
+        with patch.dict(os.environ, STIGMERGY_API_URL='https://api.example',
+                        STIGMERGY_API_TOKEN='test-token'):
+            api = common.API()
+        for kind, collection in [('Server', 'servers'), ('ProvisioningRun', 'provisioning-runs')]:
+            resource = {
+                'kind': kind,
+                'metadata': {
+                    'name': 'node',
+                    'uid': 'uid',
+                    'resourceVersion': '7'
+                }
+            }
+            with patch('common.request_json', return_value={}) as request:
+                api.patch_status(resource, {'phase': 'Pending'})
+            args = request.call_args.args
+            self.assertEqual(args[0], f'https://api.example/api/v1alpha1/{collection}/node/status')
+            self.assertEqual(args[3]['metadata'], {'uid': 'uid'})
+            self.assertEqual(args[4]['If-Match'], '"7"')
+
     def test_operator_uses_ansible_resolved_group_and_host_variables(self):
         inventory = {
             'all': {
