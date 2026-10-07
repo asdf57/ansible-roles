@@ -4,7 +4,8 @@
 
 - Install `requirements-dev.txt` in a virtual environment. Format with
   `yapf -i -r operators`; check with `yapf --diff -r operators` and
-  `pylint --persistent=n operators/*.py`. Keep lint warnings visible; do not
+  `PYTHONPATH=operators:operators/tests pylint --persistent=n operators`.
+  Keep lint warnings visible; do not
   suppress safety findings to manufacture a clean score.
 - `operators/provisioning.py` owns the bounded provisioning state machine.
   `operators/ssh_host_keys.py` owns managed SSH identity/trust reconciliation.
@@ -76,6 +77,11 @@
 
 ## Failure and repair
 
+- After repartitioning, `grub-install` may retain a same-named Homelab entry
+  with the old EFI PARTUUID. Reconcile the exact active loader/partition with
+  `reconcile_efi.yml`, not the display name alone. For an existing partial root,
+  use guarded configuration-only repair, verify the staged marker, then resume
+  installed boot verification with the original pinned operator revision.
 - Never automatically replay an interrupted `Installing` attempt or clear its
   maintenance reservation just to make a build green. Inspect disk/checkpoint.
 - `repair` is an explicit configuration-only stage for an existing partial
