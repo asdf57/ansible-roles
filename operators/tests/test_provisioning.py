@@ -49,6 +49,25 @@ def claimed(phase='PreparingBoot'):
 
 
 class ProvisioningTests(unittest.TestCase):
+    def test_live_enrollment_pins_both_keys_until_reload_cleanup_finishes(self):
+        api = API(); api.server = claimed('AwaitingLive')
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            known = directory / 'known_hosts'
+            bootstrap = 'server-server-uid ssh-ed25519 bootstrap-fixture\n'
+            known.write_text(bootstrap)
+            desired = api.server['status']['hostSSH']['publicKey']
+            def play(value, host, root, trust_file, name, variables):
+                entries = trust_file.read_text().splitlines()
+                self.assertIn(bootstrap.strip(), entries)
+                self.assertIn('server-server-uid ' + p.public_key(desired), entries)
+            with patch.object(p, 'host_private_key', return_value='private-fixture'), \
+                    patch.object(p.subprocess, 'check_output', return_value=desired), \
+                    patch.object(ssh_host_keys, 'run_play', side_effect=play), \
+                    patch.object(p, 'ssh_probe'):
+                result = p.enroll_live(api, api.get('servers', 'node'), facts(), known, directory)
+            self.assertEqual(result.read_text(), 'server-server-uid ' + p.public_key(desired) + '\n')
+
     def test_eligibility_never_replays_failed_or_successful_requests(self):
         value = host()
         self.assertTrue(p.eligible(value))

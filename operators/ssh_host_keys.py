@@ -1,6 +1,7 @@
 """One bounded SSH host identity reconciliation pass. No daemon or API scheduler."""
 import json
 import os
+import re
 from pathlib import Path
 import shlex
 import subprocess
@@ -106,9 +107,15 @@ def run_play(server, host, directory, known, play, variables=None):
     result = subprocess.run(["ansible-playbook", "-i", str(directory / "inventory.json"),
                              str(Path(os.environ.get("ANSIBLE_PLAYS_PATH", "/homelab/plays")) / play),
                              "-e", "@" + str(directory / "variables.json")],
-                            timeout=300, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                            timeout=300, capture_output=True, text=True)
     if result.returncode:
-        raise RuntimeError("Ansible reconciliation failed (secret-bearing output suppressed)")
+        tasks = re.findall(r'TASK \[([^\]\r\n]+)\]', result.stdout)
+        uid = server['metadata']['uid']
+        write_private(Path('/tmp/ssh-host-operator-diagnostics') / (uid + '-' + play + '.log'),
+                      result.stdout + '\n' + result.stderr)
+        last = tasks[-1] if tasks else 'initialization'
+        raise OperatorError('SSHReconciliationFailed', 'Ansible reconciliation failed at ' + last +
+                            ' (secret-bearing output kept in private diagnostics)')
 
 
 def reconcile(api, server, host, directory):

@@ -338,6 +338,12 @@ def enroll_live(api, server, facts, known, directory):
     if public_key(derived) != public_key(server["status"]["hostSSH"]["publicKey"]):
         raise OperatorError("ProvisioningBlocked", "Managed host private/public identity mismatch")
     current(api, server)
+    # The play reloads sshd before its cleanup tasks. A reconnect must accept
+    # either the recorded live-bootstrap key or the verified managed key during
+    # this one handoff; it must never fall back to unpinned first contact.
+    managed_entry = alias(server) + " " + public_key(derived) + "\n"
+    if managed_entry not in known.read_text().splitlines(keepends=True):
+        write_private(known, known.read_text() + managed_entry)
     run_play(server, host_address(server), directory, known, "ssh_host_keys.yml",
              {"managed_host_private_key_file": str(directory / "host_key"), "managed_host_public_key": public_key(derived)})
     known = known_file(server, directory)
