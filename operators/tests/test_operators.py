@@ -22,15 +22,40 @@ def key(byte):
 
 
 def server():
-    return {"metadata": {"name": "node", "uid": "server-uid", "generation": 1, "resourceVersion": "1"},
-            "status": {"hostSSH": {"keyReady": True, "keyPairRef": {"name": "owned", "uid": "key-uid"},
-                                  "publicKey": key(1), "fingerprint": common.fingerprint(key(1))},
-                       "desiredSSHTrustBundleDigest": "digest",
-                       "sshTrust": {"publicBundle": "bundle"},
-                       "networking": {"management": {"address": {"address": "127.0.0.1"}}}}}
+    return {
+        "metadata": {
+            "name": "node",
+            "uid": "server-uid",
+            "generation": 1,
+            "resourceVersion": "1"
+        },
+        "status": {
+            "hostSSH": {
+                "keyReady": True,
+                "keyPairRef": {
+                    "name": "owned",
+                    "uid": "key-uid"
+                },
+                "publicKey": key(1),
+                "fingerprint": common.fingerprint(key(1))
+            },
+            "desiredSSHTrustBundleDigest": "digest",
+            "sshTrust": {
+                "publicBundle": "bundle"
+            },
+            "networking": {
+                "management": {
+                    "address": {
+                        "address": "127.0.0.1"
+                    }
+                }
+            }
+        }
+    }
 
 
 class API:
+
     def __init__(self):
         self.server = server()
         self.writes = []
@@ -43,7 +68,8 @@ class API:
         return [copy.deepcopy(self.server)] if collection == 'servers' else []
 
     def patch_status(self, value, status):
-        if self.conflict or value["metadata"]["resourceVersion"] != self.server["metadata"]["resourceVersion"]:
+        if self.conflict or value["metadata"]["resourceVersion"] != self.server["metadata"][
+                "resourceVersion"]:
             error = HTTPError("", 409, "Conflict", {}, io.BytesIO())
             error.close()
             raise error
@@ -58,77 +84,158 @@ class API:
                     target.pop(name, None)
                 else:
                     target[name] = value
-        self.server["metadata"]["resourceVersion"] = str(int(self.server["metadata"]["resourceVersion"]) + 1)
+        self.server["metadata"]["resourceVersion"] = str(
+            int(self.server["metadata"]["resourceVersion"]) + 1)
         return copy.deepcopy(self.server)
 
 
 class OperatorTests(unittest.TestCase):
+
     def test_operator_uses_ansible_resolved_group_and_host_variables(self):
-        inventory = {'all': {'vars': {'storage': {'partitions': ['efi', 'swap', 'ext4']}},
-                             'hosts': {'node': {'ansible_host': '127.0.0.1'}}}}
-        resolved = {'_meta': {'hostvars': {'node': {'ansible_host': '127.0.0.1',
-                     'storage': {'partitions': ['efi', 'swap', 'ext4']}}}}}
-        with patch.object(common.subprocess, 'check_output', return_value=json.dumps(resolved)) as run:
+        inventory = {
+            'all': {
+                'vars': {
+                    'storage': {
+                        'partitions': ['efi', 'swap', 'ext4']
+                    }
+                },
+                'hosts': {
+                    'node': {
+                        'ansible_host': '127.0.0.1'
+                    }
+                }
+            }
+        }
+        resolved = {
+            '_meta': {
+                'hostvars': {
+                    'node': {
+                        'ansible_host': '127.0.0.1',
+                        'storage': {
+                            'partitions': ['efi', 'swap', 'ext4']
+                        }
+                    }
+                }
+            }
+        }
+        with patch.object(common.subprocess, 'check_output',
+                          return_value=json.dumps(resolved)) as run:
             result = common.resolved_inventory_hosts(inventory)
         self.assertEqual(result['node']['storage']['partitions'], ['efi', 'swap', 'ext4'])
         self.assertEqual(run.call_args.args[0][0], 'ansible-inventory')
 
     def test_private_resolution_checks_owned_metadata_and_revokes_token(self):
-        api = API(); value = api.get("servers", "node")
-        owned = {"metadata": {"uid": "key-uid", "generation": 1, "annotations": {"homelab.io/server-uid": "server-uid"}},
-                 "spec": {"path": "ssh/hosts/server-uid", "secretStoreRef": {"name": "openbao"}},
-                 "status": {"phase": "Ready", "observedGeneration": 1, "publicKey": key(1)}}
-        environment = {"BAO_ADDR": "https://bao.example", "HOST_KEY_BAO_ROLE_ID": "role", "HOST_KEY_BAO_SECRET_ID": "secret"}
-        responses = [{"auth": {"client_token": "short-lived"}},
-                     {"data": {"data": {"sshKeyPairUID": "key-uid", "publicKey": key(1), "privateKey": "fixture"}}}, {}]
-        with patch.dict(os.environ, environment), patch.object(api, "get", return_value=owned), patch.object(operator, "request_json", side_effect=responses) as request:
+        api = API()
+        value = api.get("servers", "node")
+        owned = {
+            "metadata": {
+                "uid": "key-uid",
+                "generation": 1,
+                "annotations": {
+                    "homelab.io/server-uid": "server-uid"
+                }
+            },
+            "spec": {
+                "path": "ssh/hosts/server-uid",
+                "secretStoreRef": {
+                    "name": "openbao"
+                }
+            },
+            "status": {
+                "phase": "Ready",
+                "observedGeneration": 1,
+                "publicKey": key(1)
+            }
+        }
+        environment = {
+            "BAO_ADDR": "https://bao.example",
+            "HOST_KEY_BAO_ROLE_ID": "role",
+            "HOST_KEY_BAO_SECRET_ID": "secret"
+        }
+        responses = [{
+            "auth": {
+                "client_token": "short-lived"
+            }
+        }, {
+            "data": {
+                "data": {
+                    "sshKeyPairUID": "key-uid",
+                    "publicKey": key(1),
+                    "privateKey": "fixture"
+                }
+            }
+        }, {}]
+        with patch.dict(os.environ,
+                        environment), patch.object(api, "get", return_value=owned), patch.object(
+                            operator, "request_json", side_effect=responses) as request:
             self.assertEqual(operator.host_private_key(api, value), "fixture")
             self.assertEqual(request.call_count, 3)
             self.assertTrue(request.call_args_list[1].args[0].endswith("/ssh/hosts/server-uid"))
             self.assertTrue(request.call_args_list[2].args[0].endswith("/auth/token/revoke-self"))
-        for mutate in (lambda k: k["metadata"]["annotations"].update({"homelab.io/server-uid": "other"}),
-                       lambda k: k["metadata"].update(uid="replacement"),
-                       lambda k: k["spec"].update(path="ssh/authorities/ca")):
-            invalid = copy.deepcopy(owned); mutate(invalid)
-            with patch.object(api, "get", return_value=invalid), patch.object(operator, "request_json") as request:
+        for mutate in (
+                lambda k: k["metadata"]["annotations"].update({"homelab.io/server-uid": "other"}),
+                lambda k: k["metadata"].update(uid="replacement"),
+                lambda k: k["spec"].update(path="ssh/authorities/ca")):
+            invalid = copy.deepcopy(owned)
+            mutate(invalid)
+            with patch.object(api, "get",
+                              return_value=invalid), patch.object(operator,
+                                                                  "request_json") as request:
                 with self.assertRaises(RuntimeError):
                     operator.host_private_key(api, value)
                 request.assert_not_called()
 
     def test_ed25519_validation(self):
         self.assertEqual(common.public_key(key(1) + " comment"), key(1))
-        for bad in ("ssh-rsa AAAA", "ssh-ed25519 AAAA", "ssh-ed25519 not-base64", key(1).replace("ssh-ed25519", "bad")):
+        for bad in ("ssh-rsa AAAA", "ssh-ed25519 AAAA", "ssh-ed25519 not-base64",
+                    key(1).replace("ssh-ed25519", "bad")):
             with self.assertRaises(Exception):
                 common.public_key(bad)
 
     def test_first_pin_is_written_before_secrets(self):
         api = API()
         calls = []
+
         def probe(value, host, known, checking="yes"):
             calls.append(checking)
             if checking == "accept-new":
                 common.write_private(known, common.alias(value) + " " + key(2) + "\n")
+
         def private(*args):
             self.assertEqual(api.server["status"]["hostSSH"]["bootstrapPublicKey"], key(2))
             raise RuntimeError("stop before installation")
-        with tempfile.TemporaryDirectory() as tmp, patch.object(operator, "ssh_probe", side_effect=probe), patch.object(operator, "host_private_key", side_effect=private):
+
+        with tempfile.TemporaryDirectory() as tmp, patch.object(operator, "ssh_probe",
+                                                                side_effect=probe), patch.object(
+                                                                    operator, "host_private_key",
+                                                                    side_effect=private):
             with self.assertRaises(RuntimeError):
                 operator.reconcile(api, server(), "127.0.0.1", Path(tmp))
         self.assertEqual(calls, ["accept-new", "yes"])
         self.assertEqual(api.server["status"]["hostSSH"]["phase"], "BootstrapPinned")
 
     def test_conflicting_pin_write_never_fetches_secrets(self):
-        api = API(); api.conflict = True
+        api = API()
+        api.conflict = True
+
         def probe(value, host, known, checking):
             common.write_private(known, common.alias(value) + " " + key(2) + "\n")
-        with tempfile.TemporaryDirectory() as tmp, patch.object(operator, "ssh_probe", side_effect=probe), patch.object(operator, "host_private_key") as private:
+
+        with tempfile.TemporaryDirectory() as tmp, patch.object(operator, "ssh_probe",
+                                                                side_effect=probe), patch.object(
+                                                                    operator,
+                                                                    "host_private_key") as private:
             with self.assertRaises(HTTPError):
                 operator.reconcile(api, server(), "127.0.0.1", Path(tmp))
             private.assert_not_called()
 
     def test_retry_uses_durable_pin_without_tofu(self):
-        api = API(); api.server["status"]["hostSSH"]["bootstrapPublicKey"] = key(2)
-        with tempfile.TemporaryDirectory() as tmp, patch.object(operator, "ssh_probe", side_effect=RuntimeError("changed key")) as probe, patch.object(operator, "host_private_key") as private:
+        api = API()
+        api.server["status"]["hostSSH"]["bootstrapPublicKey"] = key(2)
+        with tempfile.TemporaryDirectory() as tmp, patch.object(
+                operator, "ssh_probe",
+                side_effect=RuntimeError("changed key")) as probe, patch.object(
+                    operator, "host_private_key") as private:
             with self.assertRaises(RuntimeError):
                 operator.reconcile(api, api.get("servers", "node"), "127.0.0.1", Path(tmp))
             self.assertEqual(probe.call_args.args[2].read_text().count("ssh-ed25519"), 2)
@@ -136,9 +243,14 @@ class OperatorTests(unittest.TestCase):
             private.assert_not_called()
 
     def test_established_host_never_accepts_bootstrap_key(self):
-        api = API(); trust = api.server["status"]["hostSSH"]
-        trust.update(installedKeyPairRef=trust["keyPairRef"], installedFingerprint=trust["fingerprint"], bootstrapPublicKey=key(2))
-        with tempfile.TemporaryDirectory() as tmp, patch.object(operator, "ssh_probe", side_effect=RuntimeError("changed key")) as probe, patch.object(operator, "host_private_key") as private:
+        api = API()
+        trust = api.server["status"]["hostSSH"]
+        trust.update(installedKeyPairRef=trust["keyPairRef"],
+                     installedFingerprint=trust["fingerprint"], bootstrapPublicKey=key(2))
+        with tempfile.TemporaryDirectory() as tmp, patch.object(
+                operator, "ssh_probe",
+                side_effect=RuntimeError("changed key")) as probe, patch.object(
+                    operator, "host_private_key") as private:
             with self.assertRaises(RuntimeError):
                 operator.reconcile(api, api.get("servers", "node"), "127.0.0.1", Path(tmp))
             self.assertNotIn(key(2), probe.call_args.args[2].read_text())
@@ -149,10 +261,15 @@ class OperatorTests(unittest.TestCase):
                        lambda s: s["metadata"].update(generation=2),
                        lambda s: s["status"]["hostSSH"]["keyPairRef"].update(uid="replacement"),
                        lambda s: s["status"]["hostSSH"].update(bootstrapPublicKey=key(2)),
-                       lambda s: s["status"]["hostSSH"].update(installedKeyPairRef={"name": "owned", "uid": "key-uid"}),
-                       lambda s: s["status"].update(desiredSSHTrustBundleDigest="new"),
-                       lambda s: s["status"]["networking"]["management"]["address"].update(address="127.0.0.2")):
-            api = API(); snapshot = api.get("servers", "node"); mutate(api.server)
+                       lambda s: s["status"]["hostSSH"].update(installedKeyPairRef={
+                           "name": "owned",
+                           "uid": "key-uid"
+                       }), lambda s: s["status"].update(desiredSSHTrustBundleDigest="new"),
+                       lambda s: s["status"]["networking"]["management"]["address"].update(
+                           address="127.0.0.2")):
+            api = API()
+            snapshot = api.get("servers", "node")
+            mutate(api.server)
             with self.assertRaises(RuntimeError):
                 operator.observation(api, snapshot, {"phase": "Ready"})
             self.assertEqual(api.writes, [])
@@ -163,10 +280,12 @@ class OperatorTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             runner_trust.prepare(api, inventory)
         host = api.server["status"]["hostSSH"]
-        host.update(installedKeyPairRef=host["keyPairRef"], installedFingerprint=host["fingerprint"], phase="Ready")
+        host.update(installedKeyPairRef=host["keyPairRef"],
+                    installedFingerprint=host["fingerprint"], phase="Ready")
         trust = runner_trust.prepare(api, inventory)
         self.assertEqual(trust, "server-server-uid " + key(1) + "\n")
-        self.assertEqual(inventory["all"]["hosts"]["node"]["ansible_ssh_common_args"], "-o HostKeyAlias=server-server-uid")
+        self.assertEqual(inventory["all"]["hosts"]["node"]["ansible_ssh_common_args"],
+                         "-o HostKeyAlias=server-server-uid")
 
     def test_no_credentials_on_plain_http_or_redirect(self):
         with self.assertRaises(RuntimeError):

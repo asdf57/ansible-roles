@@ -2,6 +2,10 @@
 
 ## Code ownership and verification
 
+- Install `requirements-dev.txt` in a virtual environment. Format with
+  `yapf -i -r operators`; check with `yapf --diff -r operators` and
+  `pylint --persistent=n operators/*.py`. Keep lint warnings visible; do not
+  suppress safety findings to manufacture a clean score.
 - `operators/provisioning.py` owns the bounded provisioning state machine.
   `operators/ssh_host_keys.py` owns managed SSH identity/trust reconciliation.
   `operators/common.py` contains shared API, SSH and live Ansible output helpers.

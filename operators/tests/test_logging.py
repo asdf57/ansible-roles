@@ -11,6 +11,7 @@ from common import run_ansible
 
 
 class LoggingTests(unittest.TestCase):
+
     def test_standard_output_is_streamed_and_private_diagnostic_is_retained(self):
         with tempfile.TemporaryDirectory() as tmp:
             diagnostic = Path(tmp) / 'private' / 'stage.log'

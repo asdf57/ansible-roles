@@ -14,19 +14,23 @@ def prepare(api, inventory):
         if server["metadata"].get("deletionTimestamp"):
             raise RuntimeError("Server is terminating")
         provisioning = server.get("status", {}).get("provisioning", {})
-        if provisioning.get("maintenance") or provisioning.get("phase") in ("PreparingBoot", "AwaitingLive", "Installing", "AwaitingInstalled", "Verifying"):
+        if provisioning.get("maintenance") or provisioning.get("phase") in (
+                "PreparingBoot", "AwaitingLive", "Installing", "AwaitingInstalled", "Verifying"):
             raise RuntimeError("Server " + name + " is reserved by provisioning")
         host = server.get("status", {}).get("hostSSH", {})
         desired = host.get("keyPairRef")
-        if not host.get("keyReady") or host.get("phase") != "Ready" or not desired or host.get("installedKeyPairRef") != desired:
+        if not host.get("keyReady") or host.get("phase") != "Ready" or not desired or host.get(
+                "installedKeyPairRef") != desired:
             raise RuntimeError("Server " + name + " has not verified its managed SSH identity")
         key = public_key(host["publicKey"])
-        if fingerprint(key) != host.get("fingerprint") or host.get("installedFingerprint") != host.get("fingerprint"):
+        if fingerprint(key) != host.get("fingerprint") or host.get(
+                "installedFingerprint") != host.get("fingerprint"):
             raise RuntimeError("Server host-key fingerprint mismatch")
         entries.append(alias(server) + " " + key + "\n")
         for group in inventory.values():
             if name in group.get("hosts", {}):
-                group["hosts"][name]["ansible_ssh_common_args"] = "-o HostKeyAlias=" + shlex.quote(alias(server))
+                group["hosts"][name]["ansible_ssh_common_args"] = "-o HostKeyAlias=" + shlex.quote(
+                    alias(server))
     return "".join(entries)
 
 

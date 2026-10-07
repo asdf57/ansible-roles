@@ -4,7 +4,8 @@ import tempfile
 import unittest
 
 spec = importlib.util.spec_from_file_location(
-    'resolve_boot_nic', Path(__file__).resolve().parents[2] / 'roles/provision/files/resolve_boot_nic.py')
+    'resolve_boot_nic',
+    Path(__file__).resolve().parents[2] / 'roles/provision/files/resolve_boot_nic.py')
 resolver = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(resolver)
 
@@ -22,7 +23,10 @@ class BootNICTests(unittest.TestCase):
             return resolver.resolve_interface(mac or self.mac, root)
 
     def test_installed_name_replaces_live_eth0(self):
-        self.assertEqual(self.resolve({'enp1s0': self.mac, 'enp2s0': '00:11:22:33:44:55'}), 'enp1s0')
+        self.assertEqual(self.resolve({
+            'enp1s0': self.mac,
+            'enp2s0': '00:11:22:33:44:55'
+        }), 'enp1s0')
 
     def test_live_name_and_case_normalization(self):
         self.assertEqual(self.resolve({'eth0': self.mac.upper()}, self.mac.upper()), 'eth0')

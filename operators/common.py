@@ -16,11 +16,13 @@ from urllib.request import Request, build_opener, HTTPRedirectHandler
 
 
 class NoRedirect(HTTPRedirectHandler):
+
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         raise RuntimeError("Credential-bearing requests must not redirect")
 
 
 class OperatorError(RuntimeError):
+
     def __init__(self, reason, message):
         super().__init__(message)
         self.reason = reason
@@ -28,19 +30,22 @@ class OperatorError(RuntimeError):
 
 def request_json(url, token, method="GET", body=None, headers=None, token_header="Authorization"):
     parsed = urlparse(url)
-    if parsed.scheme != "https" and not (parsed.scheme == "http" and parsed.hostname in ("localhost", "127.0.0.1")):
+    if parsed.scheme != "https" and not (parsed.scheme == "http"
+                                         and parsed.hostname in ("localhost", "127.0.0.1")):
         raise RuntimeError("Credentials require HTTPS (loopback HTTP is development-only)")
     values = {"Accept": "application/json", "Content-Type": "application/json"}
     if token:
         values[token_header] = ("Bearer " if token_header == "Authorization" else "") + token
     values.update(headers or {})
     data = json.dumps(body).encode() if body is not None else None
-    with build_opener(NoRedirect()).open(Request(url, data=data, headers=values, method=method), timeout=30) as response:
+    with build_opener(NoRedirect()).open(Request(url, data=data, headers=values, method=method),
+                                         timeout=30) as response:
         data = response.read()
         return json.loads(data) if data else {}
 
 
 class API:
+
     def __init__(self):
         self.url = os.environ["STIGMERGY_API_URL"].rstrip("/") + "/api/v1alpha1"
         self.token = os.environ["STIGMERGY_API_TOKEN"].strip()
@@ -54,10 +59,17 @@ class API:
         return request_json(self.url + "/" + collection, self.token)["items"]
 
     def patch_status(self, server, status):
-        return request_json(self.url + "/servers/" + quote(server["metadata"]["name"], safe="") + "/status",
-                            self.token, "PATCH", {"metadata": {"uid": server["metadata"]["uid"]}, "status": status},
-                            {"If-Match": '"' + server["metadata"]["resourceVersion"] + '"',
-                             "Content-Type": "application/merge-patch+json"})
+        return request_json(
+            self.url + "/servers/" + quote(server["metadata"]["name"], safe="") + "/status",
+            self.token, "PATCH", {
+                "metadata": {
+                    "uid": server["metadata"]["uid"]
+                },
+                "status": status
+            }, {
+                "If-Match": '"' + server["metadata"]["resourceVersion"] + '"',
+                "Content-Type": "application/merge-patch+json"
+            })
 
 
 def write_private(path, content):
@@ -77,14 +89,16 @@ def run_ansible(command, diagnostic, timeout):
     environment = dict(os.environ)
     environment.update(ANSIBLE_STDOUT_CALLBACK='default', ANSIBLE_NOCOLOR='1',
                        ANSIBLE_DISPLAY_ARGS_TO_STDOUT='false', ANSIBLE_VERBOSITY='0')
-    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                               text=True, bufsize=1, env=environment, start_new_session=True)
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                               bufsize=1, env=environment, start_new_session=True)
+
     def stream():
         with diagnostic.open('a') as log:
             for line in process.stdout:
                 log.write(line)
                 log.flush()
                 print(line, end='', flush=True)
+
     output = threading.Thread(target=stream, daemon=True)
     output.start()
     try:
@@ -106,7 +120,9 @@ def public_key(value):
     raw = base64.b64decode(fields[1], validate=True)
     # Validate both the wire algorithm and the 32-byte key, not just its label.
     algorithm = b"ssh-ed25519"
-    if raw[:4] != len(algorithm).to_bytes(4, "big") or raw[4:15] != algorithm or raw[15:19] != (32).to_bytes(4, "big") or len(raw) != 51:
+    if raw[:4] != len(algorithm).to_bytes(
+            4, "big") or raw[4:15] != algorithm or raw[15:19] != (32).to_bytes(
+                4, "big") or len(raw) != 51:
         raise RuntimeError("Invalid Ed25519 host key encoding")
     return " ".join(fields[:2])
 
@@ -129,24 +145,32 @@ def address(value):
 
 
 def ssh_args(server, known_hosts, checking="yes"):
-    return ["-o", "BatchMode=yes", "-o", "ConnectTimeout=15", "-o", "ConnectionAttempts=1",
-            "-o", "IdentitiesOnly=yes", "-o", "IdentityAgent=none", "-o", "ForwardAgent=no",
-            "-o", "UpdateHostKeys=no", "-o", "HashKnownHosts=no", "-o", "HostKeyAlgorithms=ssh-ed25519",
-            "-o", "GlobalKnownHostsFile=/dev/null", "-o", "StrictHostKeyChecking=" + checking,
-            "-o", "UserKnownHostsFile=" + str(known_hosts), "-o", "HostKeyAlias=" + alias(server),
-            "-o", "CertificateFile=" + os.environ["ANSIBLE_CERTIFICATE_FILE"],
-            "-i", os.environ["ANSIBLE_PRIVATE_KEY_FILE"]]
+    return [
+        "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", "-o", "ConnectionAttempts=1", "-o",
+        "IdentitiesOnly=yes", "-o", "IdentityAgent=none", "-o", "ForwardAgent=no", "-o",
+        "UpdateHostKeys=no", "-o", "HashKnownHosts=no", "-o", "HostKeyAlgorithms=ssh-ed25519", "-o",
+        "GlobalKnownHostsFile=/dev/null", "-o", "StrictHostKeyChecking=" + checking, "-o",
+        "UserKnownHostsFile=" + str(known_hosts), "-o", "HostKeyAlias=" + alias(server), "-o",
+        "CertificateFile=" + os.environ["ANSIBLE_CERTIFICATE_FILE"], "-i",
+        os.environ["ANSIBLE_PRIVATE_KEY_FILE"]
+    ]
 
 
 def ssh_probe(server, host, known_hosts, checking="yes"):
-    result = subprocess.run(["ssh", *ssh_args(server, known_hosts, checking), "ansible@" + address(host), "true"],
-                            capture_output=True, text=True, timeout=45)
+    result = subprocess.run(
+        ["ssh", *ssh_args(server, known_hosts, checking), "ansible@" + address(host), "true"],
+        capture_output=True, text=True, timeout=45)
     if result.returncode:
         if "Host key verification failed" in result.stderr or "REMOTE HOST IDENTIFICATION HAS CHANGED" in result.stderr:
-            raise OperatorError("HostIdentityMismatch", "SSH host identity changed; explicit recovery or reenrollment is required")
+            raise OperatorError(
+                "HostIdentityMismatch",
+                "SSH host identity changed; explicit recovery or reenrollment is required")
         if "Permission denied" in result.stderr:
-            raise OperatorError("ManagementAuthenticationFailed", "SSH management certificate authentication failed")
-        raise OperatorError("SSHConnectionFailed", "SSH identity/authentication verification failed or the target is unreachable")
+            raise OperatorError("ManagementAuthenticationFailed",
+                                "SSH management certificate authentication failed")
+        raise OperatorError(
+            "SSHConnectionFailed",
+            "SSH identity/authentication verification failed or the target is unreachable")
 
 
 def inventory_hosts(inventory):
@@ -164,8 +188,8 @@ def resolved_inventory_hosts(inventory):
     with tempfile.TemporaryDirectory(prefix='operator-inventory-') as directory:
         path = Path(directory) / 'inventory.json'
         write_private(path, json.dumps(inventory))
-        output = subprocess.check_output(['ansible-inventory', '-i', str(path), '--list'],
-                                         text=True, timeout=30)
+        output = subprocess.check_output(
+            ['ansible-inventory', '-i', str(path), '--list'], text=True, timeout=30)
     resolved = json.loads(output)['_meta']['hostvars']
     # Ignore synthetic/unrelated hosts introduced by local runner configuration.
     names = inventory_hosts(inventory)

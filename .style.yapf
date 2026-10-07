@@ -1,0 +1,5 @@
+[style]
+based_on_style = pep8
+column_limit = 100
+split_before_named_assigns = false
+each_dict_entry_on_separate_line = true

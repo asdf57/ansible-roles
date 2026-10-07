@@ -29,45 +29,59 @@ def main():
     command("adduser", "-D", "-s", "/bin/sh", "ansible")
     command("passwd", "-d", "ansible")
     with tempfile.TemporaryDirectory(prefix="host-transition-") as tmp:
-        directory = Path(tmp); directory.chmod(0o755)
+        directory = Path(tmp)
+        directory.chmod(0o755)
         for name in ("ca", "runner", "temporary", "managed", "unexpected"):
             command("ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(directory / name))
-        command("ssh-keygen", "-q", "-s", str(directory / "ca"), "-I", "operator-test",
-                "-n", "ansible", "-V", "-1m:+10m", str(directory / "runner.pub"))
+        command("ssh-keygen", "-q", "-s", str(directory / "ca"), "-I", "operator-test", "-n",
+                "ansible", "-V", "-1m:+10m", str(directory / "runner.pub"))
         common.write_private(directory / "principals", "ansible\n")
         (directory / "principals").chmod(0o644)
         common.write_private(directory / "active", (directory / "temporary").read_text())
-        common.write_private(directory / "sshd_config", "\n".join([
-            "Port 22", "ListenAddress 127.0.0.1", "HostKey " + str(directory / "active"),
-            "PidFile " + str(directory / "sshd.pid"), "PasswordAuthentication no",
-            "KbdInteractiveAuthentication no", "AuthorizedKeysFile none", "PubkeyAuthentication yes",
-            "AuthenticationMethods publickey", "TrustedUserCAKeys " + str(directory / "ca.pub"),
-            "AllowUsers ansible", "LogLevel ERROR", ""]))
+        common.write_private(
+            directory / "sshd_config", "\n".join([
+                "Port 22", "ListenAddress 127.0.0.1", "HostKey " + str(directory / "active"),
+                "PidFile " + str(directory / "sshd.pid"), "PasswordAuthentication no",
+                "KbdInteractiveAuthentication no", "AuthorizedKeysFile none",
+                "PubkeyAuthentication yes", "AuthenticationMethods publickey",
+                "TrustedUserCAKeys " + str(directory / "ca.pub"), "AllowUsers ansible",
+                "LogLevel ERROR", ""
+            ]))
         os.environ["ANSIBLE_PRIVATE_KEY_FILE"] = str(directory / "runner")
         os.environ["ANSIBLE_CERTIFICATE_FILE"] = str(directory / "runner-cert.pub")
-        daemon = subprocess.Popen(["/usr/sbin/sshd", "-D", "-e", "-f", str(directory / "sshd_config")], stderr=subprocess.PIPE)
+        daemon = subprocess.Popen(
+            ["/usr/sbin/sshd", "-D", "-e", "-f",
+             str(directory / "sshd_config")], stderr=subprocess.PIPE)
         try:
             time.sleep(0.2)
             if daemon.poll() is not None:
                 raise RuntimeError("Test sshd failed: " + daemon.stderr.read().decode())
             api = API()
             managed = common.public_key((directory / "managed.pub").read_text())
-            api.server["status"]["hostSSH"].update(publicKey=managed, fingerprint=common.fingerprint(managed))
+            api.server["status"]["hostSSH"].update(publicKey=managed,
+                                                   fingerprint=common.fingerprint(managed))
             # Only fixture credentials are involved; preserve diagnostics for
             # failed handshakes without making the production operator verbose.
             real_probe = operator.ssh_probe
+
             def diagnostic_probe(value, host, known, checking="yes"):
                 try:
                     return real_probe(value, host, known, checking)
                 except RuntimeError:
-                    result = subprocess.run(["ssh", "-vv", *common.ssh_args(value, known, checking),
-                                             "ansible@" + host, "true"], capture_output=True, text=True)
+                    result = subprocess.run([
+                        "ssh", "-vv", *common.ssh_args(value, known, checking), "ansible@" + host,
+                        "true"
+                    ], capture_output=True, text=True)
                     print(result.stderr[-6000:], file=sys.stderr)
                     raise
+
             installs = []
+
             def private(api_arg, value):
-                assert value["status"]["hostSSH"].get("bootstrapPublicKey") or value["status"]["hostSSH"].get("installedKeyPairRef")
+                assert value["status"]["hostSSH"].get(
+                    "bootstrapPublicKey") or value["status"]["hostSSH"].get("installedKeyPairRef")
                 return (directory / "managed").read_text()
+
             def install(value, host, task_dir, known, play, variables=None):
                 if play == "ssh_host_keys.yml":
                     # The real role is syntax checked separately. This simulates
@@ -77,7 +91,10 @@ def main():
                     daemon.send_signal(signal.SIGHUP)
                     time.sleep(0.2)
                     installs.append(play)
-            with patch.object(operator, "ssh_probe", side_effect=diagnostic_probe), patch.object(operator, "host_private_key", side_effect=private), patch.object(operator, "run_play", side_effect=install):
+
+            with patch.object(operator, "ssh_probe", side_effect=diagnostic_probe), patch.object(
+                    operator, "host_private_key",
+                    side_effect=private), patch.object(operator, "run_play", side_effect=install):
                 with tempfile.TemporaryDirectory() as task:
                     operator.reconcile(api, api.get("servers", "node"), "127.0.0.1", Path(task))
                 trust = api.server["status"]["hostSSH"]
@@ -90,8 +107,12 @@ def main():
                 assert len(installs) == 2
                 # A subsequent new temporary key must fail before private delivery.
                 common.write_private(directory / "active", (directory / "unexpected").read_text())
-                daemon.send_signal(signal.SIGHUP); time.sleep(0.2)
-                with tempfile.TemporaryDirectory() as task, patch.object(operator, "ssh_probe", side_effect=real_probe), patch.object(operator, "host_private_key") as private_read:
+                daemon.send_signal(signal.SIGHUP)
+                time.sleep(0.2)
+                with tempfile.TemporaryDirectory() as task, patch.object(
+                        operator, "ssh_probe",
+                        side_effect=real_probe), patch.object(operator,
+                                                              "host_private_key") as private_read:
                     try:
                         operator.reconcile(api, api.get("servers", "node"), "127.0.0.1", Path(task))
                     except RuntimeError:
@@ -99,7 +120,9 @@ def main():
                     else:
                         raise AssertionError("Unexpected host key was accepted")
                     private_read.assert_not_called()
-            print("PASS: real certificate login, durable TOFU pin, managed-key transition, strict retry and changed-key rejection")
+            print(
+                "PASS: real certificate login, durable TOFU pin, managed-key transition, strict retry and changed-key rejection"
+            )
         finally:
             daemon.terminate()
             daemon.wait(timeout=5)
