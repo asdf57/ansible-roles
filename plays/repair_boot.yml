@@ -1,0 +1,10 @@
+---
+- name: Repair verified installed boot assets without provisioning or reboot
+  hosts: all
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Refresh installed boot assets
+      ansible.builtin.include_role:
+        name: grub
+        tasks_from: refresh_installed

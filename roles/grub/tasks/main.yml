@@ -43,6 +43,7 @@
   loop:
     - {key: GRUB_DEFAULT, value: '0'}
     - {key: GRUB_SAVEDEFAULT, value: 'false'}
+    - {key: GRUB_TIMEOUT_STYLE, value: menu}
     - {key: GRUB_TIMEOUT, value: '5'}
 
 - name: Install validated desired kernel arguments

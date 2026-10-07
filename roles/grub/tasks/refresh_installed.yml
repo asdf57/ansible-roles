@@ -1,0 +1,62 @@
+---
+- name: Reinspect the installed system before boot asset repair
+  ansible.builtin.command:
+    argv: [python3, '-', "{{ provision_target_disk }}"]
+    stdin: "{{ lookup('file', role_path + '/../provision/files/probe.py') }}"
+  register: boot_repair_probe
+  changed_when: false
+
+- name: Require the approved installed root and exact boot session
+  ansible.builtin.assert:
+    that:
+      - not (boot_repair_probe.stdout | from_json).live
+      - (boot_repair_probe.stdout | from_json).bootID == boot_repair_boot_id
+      - (boot_repair_probe.stdout | from_json).disk == provision_disk_identity
+      - (boot_repair_probe.stdout | from_json).rootOnTarget
+      - (boot_repair_probe.stdout | from_json).rootType == 'ext4'
+      - (boot_repair_probe.stdout | from_json).rootUUID == boot_repair_root_uuid
+      - (boot_repair_probe.stdout | from_json).marker.serverUID == provision_server_uid
+      - (boot_repair_probe.stdout | from_json).grubReady
+
+- name: Refresh the verified HTTPS bootloader without reinstalling the OS
+  ansible.builtin.get_url:
+    url: "{{ grub_ipxe_url }}"
+    checksum: "{{ grub_ipxe_checksum }}"
+    dest: /boot/ipxe/ipxe.efi
+    mode: '0644'
+    validate_certs: true
+    backup: true
+
+- name: Set a visible bounded installed GRUB menu
+  ansible.builtin.lineinfile:
+    path: /etc/default/grub
+    regexp: "^{{ item.key }}="
+    line: "{{ item.key }}={{ item.value }}"
+  loop:
+    - {key: GRUB_DEFAULT, value: '0'}
+    - {key: GRUB_SAVEDEFAULT, value: 'false'}
+    - {key: GRUB_TIMEOUT_STYLE, value: menu}
+    - {key: GRUB_TIMEOUT, value: '5'}
+
+- name: Clear the failed one-shot selection
+  ansible.builtin.command:
+    argv: [grub-editenv, /boot/grub/grubenv, unset, next_entry]
+
+- name: Regenerate the installed boot menu
+  ansible.builtin.command:
+    argv: [grub-mkconfig, -o, /boot/grub/grub.cfg]
+
+- name: Validate the repaired GRUB syntax
+  ansible.builtin.command:
+    argv: [grub-script-check, /boot/grub/grub.cfg]
+  changed_when: false
+
+- name: Verify the cleared one-shot selection
+  ansible.builtin.command:
+    argv: [grub-editenv, /boot/grub/grubenv, list]
+  register: repaired_grub_environment
+  changed_when: false
+
+- name: Require cleared boot selection before releasing maintenance
+  ansible.builtin.assert:
+    that: "not (repaired_grub_environment.stdout is search('(?m)^next_entry=.+$'))"

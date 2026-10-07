@@ -1,0 +1,10 @@
+---
+- name: Build and publish the shared verified HTTPS bootloader only
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Build the common iPXE artifact
+      ansible.builtin.include_role:
+        name: init
+        tasks_from: ipxe

@@ -1,0 +1,10 @@
+#!ipxe
+dhcp || goto failed
+imgfetch https://stigmergy.ryuugu.dev/readyz || goto failed
+imgfetch https://copyparty.ryuugu.dev/ || goto failed
+echo IPXE_HTTPS_RESULT=passed
+shell
+:failed
+echo IPXE_HTTPS_RESULT=failed
+certstat
+shell

@@ -36,6 +36,15 @@
 
 ## Boot and SSH lessons
 
+- iPXE "Permission denied" can be TLS validation, not HTTP auth. Check the
+  exact error code and served chain. Embed/trust the packaged roots for both
+  ZeroSSL (USERTrust ECC/RSA) and Let's Encrypt (ISRG X1); never bypass TLS.
+- `plays/build_ipxe.yml` rebuilds only the public boot artifact. For installed
+  boot-only repair use `plays/repair_boot.yml` with exact disk/boot/root/Server
+  identity inputs and a scoped inventory; it never reboots or provisions.
+- Run `bash operators/tests/ipxe_https_vm.sh` after the builder image exists.
+  QEMU user networking must not overlap the actual HTTPS server subnet (the
+  site uses 10.0.2.x); this fixture uses 172.30.90.0/24 and serial-only iPXE.
 - Live and installed NIC names can differ (`eth0` versus `enp1s0`). Priming
   resolves the attempt's pinned MAC on the node, requires a unique match, and
   rechecks its MAC before ethtool writes; never use a cached API interface name.

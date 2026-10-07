@@ -1,0 +1,2 @@
+#define CONSOLE_SERIAL
+#undef CONSOLE_EFI

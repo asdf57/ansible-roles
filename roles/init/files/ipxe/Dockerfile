@@ -7,9 +7,11 @@ RUN git init /build && git -C /build remote add origin https://github.com/ipxe/i
     git -C /build fetch --depth=1 origin "$IPXE_REVISION" && git -C /build checkout --detach FETCH_HEAD && \
     test "$(git -C /build rev-parse HEAD)" = "$IPXE_REVISION"
 COPY bootstrap.ipxe /build/bootstrap.ipxe
+# Both current ZeroSSL chains and Let's Encrypt, from Debian's CA package.
+ARG IPXE_TRUST_CERTIFICATES=/etc/ssl/certs/ISRG_Root_X1.pem,/etc/ssl/certs/USERTrust_ECC_Certification_Authority.pem,/etc/ssl/certs/USERTrust_RSA_Certification_Authority.pem
 RUN mkdir -p /build/src/config/local && \
     printf '#define DOWNLOAD_PROTO_HTTPS\n' > /build/src/config/local/general.h && \
     make -C /build/src -j2 bin-x86_64-efi/ipxe.efi EMBED=/build/bootstrap.ipxe \
-    TRUST=/etc/ssl/certs/ISRG_Root_X1.pem CERT=/etc/ssl/certs/ISRG_Root_X1.pem
+    TRUST="$IPXE_TRUST_CERTIFICATES" CERT="$IPXE_TRUST_CERTIFICATES"
 WORKDIR /output
 CMD ["/bin/sh", "-ec", "install -m 0644 /build/src/bin-x86_64-efi/ipxe.efi homelab-ipxe.efi; sha256sum homelab-ipxe.efi > homelab-ipxe.efi.sha256"]
