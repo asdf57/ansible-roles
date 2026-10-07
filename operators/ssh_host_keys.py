@@ -10,7 +10,7 @@ import tempfile
 from urllib.error import HTTPError
 
 from common import (API, OperatorError, alias, address, capture_inventory, fingerprint, inventory_hosts,
-                    public_key, request_json, ssh_args, ssh_probe, write_private)
+                    public_key, request_json, ssh_args, ssh_probe, write_private, run_ansible)
 
 
 def current(api, snapshot):
@@ -104,15 +104,13 @@ def run_play(server, host, directory, known, play, variables=None):
         "ansible_ssh_common_args": "", "ansible_ssh_extra_args": ""}}}}
     write_private(directory / "inventory.json", json.dumps(inventory))
     write_private(directory / "variables.json", json.dumps(variables or {}))
-    result = subprocess.run(["ansible-playbook", "-i", str(directory / "inventory.json"),
+    diagnostic = Path('/tmp/ssh-host-operator-diagnostics') / (server['metadata']['uid'] + '-' + play + '.log')
+    result = run_ansible(["ansible-playbook", "-i", str(directory / "inventory.json"),
                              str(Path(os.environ.get("ANSIBLE_PLAYS_PATH", "/homelab/plays")) / play),
                              "-e", "@" + str(directory / "variables.json")],
-                            timeout=300, capture_output=True, text=True)
+                         diagnostic, timeout=300)
     if result.returncode:
         tasks = re.findall(r'TASK \[([^\]\r\n]+)\]', result.stdout)
-        uid = server['metadata']['uid']
-        write_private(Path('/tmp/ssh-host-operator-diagnostics') / (uid + '-' + play + '.log'),
-                      result.stdout + '\n' + result.stderr)
         last = tasks[-1] if tasks else 'initialization'
         raise OperatorError('SSHReconciliationFailed', 'Ansible reconciliation failed at ' + last +
                             ' (secret-bearing output kept in private diagnostics)')

@@ -6,8 +6,10 @@ import json
 import os
 from pathlib import Path
 import re
+import signal
 import subprocess
 import tempfile
+import threading
 from urllib.error import HTTPError
 from urllib.parse import quote, urlparse
 from urllib.request import Request, build_opener, HTTPRedirectHandler
@@ -66,6 +68,35 @@ def write_private(path, content):
     with os.fdopen(fd, "w") as stream:
         stream.write(content)
     path.chmod(0o600)
+
+
+def run_ansible(command, diagnostic, timeout):
+    """Stream Ansible's standard, no_log-aware output and keep a private copy."""
+    diagnostic = Path(diagnostic)
+    write_private(diagnostic, '')
+    environment = dict(os.environ)
+    environment.update(ANSIBLE_STDOUT_CALLBACK='default', ANSIBLE_NOCOLOR='1',
+                       ANSIBLE_DISPLAY_ARGS_TO_STDOUT='false', ANSIBLE_VERBOSITY='0')
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                               text=True, bufsize=1, env=environment, start_new_session=True)
+    def stream():
+        with diagnostic.open('a') as log:
+            for line in process.stdout:
+                log.write(line)
+                log.flush()
+                print(line, end='', flush=True)
+    output = threading.Thread(target=stream, daemon=True)
+    output.start()
+    try:
+        result = process.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        os.killpg(process.pid, signal.SIGKILL)
+        process.wait()
+        raise
+    finally:
+        output.join(timeout=10)
+        process.stdout.close()
+    return subprocess.CompletedProcess(command, result, stdout=diagnostic.read_text(), stderr='')
 
 
 def public_key(value):

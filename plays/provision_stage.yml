@@ -7,7 +7,7 @@
     - name: Require an explicit supported stage and pinned attempt
       ansible.builtin.assert:
         that:
-          - provision_stage in ['prime', 'arm', 'clear', 'install', 'post', 'refresh-prepare', 'refresh-boot', 'refresh-clear', 'reboot']
+          - provision_stage in ['prime', 'arm', 'clear', 'install', 'repair', 'post', 'refresh-prepare', 'refresh-boot', 'refresh-clear', 'reboot']
           - provision_attempt_id is defined
           - provision_server_uid is defined
     - name: Prime the boot NIC
@@ -34,6 +34,11 @@
         name: provision
         tasks_from: refresh_live
       when: provision_stage == 'refresh-prepare'
+    - name: Repair configuration of an explicitly verified partial installation without erasure
+      ansible.builtin.include_role:
+        name: provision
+        tasks_from: repair_installation
+      when: provision_stage == 'repair'
     - name: Require the prepared kexec image before live bootstrap
       ansible.builtin.command:
         argv: [cat, /sys/kernel/kexec_loaded]

@@ -16,7 +16,7 @@ from urllib.error import HTTPError
 from urllib.request import Request, build_opener
 
 from common import (API, NoRedirect, OperatorError, address, alias, capture_inventory, fingerprint,
-                    resolved_inventory_hosts, public_key, ssh_args, ssh_probe, write_private)
+                    resolved_inventory_hosts, public_key, ssh_args, ssh_probe, write_private, run_ansible)
 from ssh_host_keys import host_private_key
 
 ACTIVE = {"PreparingBoot", "AwaitingLive", "Installing", "AwaitingInstalled", "Verifying"}
@@ -90,6 +90,7 @@ def checkpoint(api, server, phase, **fields):
             result = api.patch_status(latest, {"provisioning": {"phase": phase, "currentStage": phase, **fields}})
             server.clear()
             server.update(result)
+            print(server['metadata']['name'] + ': checkpoint ' + phase, flush=True)
             return server
         except HTTPError as exc:
             if exc.code != 409:
@@ -267,16 +268,17 @@ def run_stage(server, directory, known, stage, facts=None):
     write_private(directory / "inventory.json", json.dumps(inventory))
     write_private(directory / "variables.json", json.dumps(variables))
     plays = Path(os.environ.get("ANSIBLE_PLAYS_PATH", "/homelab/plays"))
-    result = subprocess.run(["ansible-playbook", "-i", str(directory / "inventory.json"), str(plays / "provision_stage.yml"),
-                             "-e", "@" + str(directory / "variables.json")], timeout=7200 if stage == "install" else 600,
-                            capture_output=True, text=True)
+    print(server['metadata']['name'] + ': starting Ansible stage ' + stage, flush=True)
+    diagnostic = Path('/tmp/provision-operator-diagnostics') / (p['attemptID'] + '-' + stage + '.log')
+    result = run_ansible(["ansible-playbook", "-i", str(directory / "inventory.json"), str(plays / "provision_stage.yml"),
+                          "-e", "@" + str(directory / "variables.json")], diagnostic,
+                         timeout=7200 if stage in ("install", "repair") else 600)
     if result.returncode:
         tasks = re.findall(r'TASK \[([^\]\r\n]+)\]', result.stdout)
         # Private diagnostics remain in the failed task container, not build logs.
-        diagnostic = Path('/tmp/provision-operator-diagnostics') / (p['attemptID'] + '-' + stage + '.log')
-        write_private(diagnostic, result.stdout + '\n' + result.stderr)
         last = tasks[-1] if tasks else 'initialization'
-        raise OperatorError("ProvisioningBlocked", "Ansible stage failed at " + last + "; details suppressed to protect enrollment material")
+        raise OperatorError("ProvisioningBlocked", "Ansible stage failed at " + last + "; see playbook output (credential tasks remain redacted)")
+    print(server['metadata']['name'] + ': completed Ansible stage ' + stage, flush=True)
 
 
 def reboot(server, known):

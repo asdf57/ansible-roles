@@ -1,0 +1,64 @@
+---
+- name: Require explicit non-destructive configuration repair
+  ansible.builtin.assert:
+    that:
+      - provision_stage == 'repair'
+      - not provision_destructive_authorized | bool
+      - provision_target_disk is match('^/dev/disk/by-id/[^/]+$')
+
+- name: Verify the original live session and physical disk before configuration repair
+  ansible.builtin.command:
+    argv: [python3, '-', "{{ provision_target_disk }}"]
+    stdin: "{{ lookup('file', role_path + '/files/probe.py') }}"
+  register: repair_probe
+  changed_when: false
+
+- name: Require the pinned live build, boot session and approved disk
+  ansible.builtin.assert:
+    that:
+      - (repair_probe.stdout | from_json).live
+      - (repair_probe.stdout | from_json).liveBuildID == provision_live_build_id
+      - (repair_probe.stdout | from_json).bootID == provision_live_boot_id
+      - (repair_probe.stdout | from_json).disk == provision_disk_identity
+      - not (repair_probe.stdout | from_json).rootOnTarget
+
+- name: Resolve the approved stable disk for mounted-root verification
+  ansible.builtin.command:
+    argv: [readlink, -e, "{{ provision_target_disk }}"]
+  register: repair_disk
+  changed_when: false
+
+- name: Pin existing partition device names without changing them
+  ansible.builtin.set_fact:
+    partition_prefix: "{{ repair_disk.stdout }}{{ 'p' if repair_disk.stdout is search('[0-9]$') else '' }}"
+
+- name: Inspect the existing installation mount sources
+  ansible.builtin.command:
+    argv: [findmnt, -n, -o, SOURCE, --mountpoint, "{{ item }}"]
+  loop: [/mnt, /mnt/boot/efi]
+  register: repair_mounts
+  changed_when: false
+
+- name: Refuse configuration repair of any other disk or layout
+  ansible.builtin.assert:
+    that:
+      - repair_mounts.results[0].stdout == partition_prefix + '3'
+      - repair_mounts.results[1].stdout == partition_prefix + '1'
+
+- name: Verify the existing chroot bind mounts
+  ansible.builtin.command:
+    argv: [mountpoint, "{{ item }}"]
+  loop: [/mnt/dev, /mnt/proc, /mnt/sys, /mnt/run, /mnt/sys/firmware/efi/efivars]
+  changed_when: false
+
+- name: Verify the partial root has its installed package manager
+  ansible.builtin.stat:
+    path: "{{ '/mnt/usr/bin/pacman' if provision_operating_system.distribution == 'arch' else '/mnt/usr/bin/apt-get' }}"
+  register: repair_package_manager
+
+- name: Refuse repair before a base system exists
+  ansible.builtin.assert:
+    that: repair_package_manager.stat.isreg | default(false)
+
+- name: Complete configuration only; never partition, format or bootstrap again
+  ansible.builtin.include_tasks: configure_installed.yml
