@@ -102,9 +102,12 @@
   changed_when: false
 
 - name: Require firmware default boot to select the new partition's GRUB
-  ansible.builtin.script:
-    cmd: "{{ role_path }}/files/verify_efi.py {{ installed_efi_uuid.stdout | quote }}"
-    executable: python3
+  ansible.builtin.include_tasks: reconcile_efi.yml
+
+- name: Verify the reconciled firmware default boot path
+  ansible.builtin.command:
+    argv: [python3, '-', "{{ installed_efi_uuid.stdout }}"]
+    stdin: "{{ lookup('file', role_path + '/files/verify_efi.py') }}"
   changed_when: false
 
 - name: Read the new root filesystem identity

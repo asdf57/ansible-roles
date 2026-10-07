@@ -1,0 +1,28 @@
+---
+- name: Plan the exact installed EFI entry
+  ansible.builtin.command:
+    argv: [python3, '-', --plan, "{{ installed_efi_uuid.stdout }}"]
+    stdin: "{{ lookup('file', role_path + '/files/verify_efi.py') }}"
+  register: efi_entry_plan
+  changed_when: false
+
+- name: Register GRUB on the new approved EFI partition if absent
+  ansible.builtin.command:
+    argv: [efibootmgr, --create, --disk, "{{ provision_target_disk }}", --part, '1', --label, Homelab, --loader, '\EFI\Homelab\grubx64.efi']
+  when: (efi_entry_plan.stdout | from_json).needsCreate
+
+- name: Reinspect the registered entry before selecting it
+  ansible.builtin.command:
+    argv: [python3, '-', --plan, "{{ installed_efi_uuid.stdout }}"]
+    stdin: "{{ lookup('file', role_path + '/files/verify_efi.py') }}"
+  register: registered_efi_plan
+  changed_when: false
+
+- name: Refuse selecting an unverified EFI entry
+  ansible.builtin.assert:
+    that: not (registered_efi_plan.stdout | from_json).needsCreate
+
+- name: Select the new installed GRUB while preserving other firmware entries
+  ansible.builtin.command:
+    argv: [efibootmgr, --bootorder, "{{ (registered_efi_plan.stdout | from_json).bootOrder }}"]
+  when: (registered_efi_plan.stdout | from_json).needsOrder
