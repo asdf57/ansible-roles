@@ -1,18 +1,19 @@
 ---
-- name: Require the verified management NIC name and MAC
+- name: Require the pinned management NIC MAC
   ansible.builtin.assert:
     that:
-      - provision_boot_interface is match('^[a-zA-Z0-9_.-]+$')
       - provision_boot_mac is match('^[a-f0-9]{2}(:[a-f0-9]{2}){5}$')
 
-- name: Read the selected interface identity
-  ansible.builtin.slurp:
-    src: "/sys/class/net/{{ provision_boot_interface }}/address"
-  register: boot_interface_mac
+- name: Resolve the current boot NIC name by pinned MAC
+  ansible.builtin.command:
+    argv: [python3, '-', "{{ provision_boot_mac }}"]
+    stdin: "{{ lookup('file', role_path + '/files/resolve_boot_nic.py') }}"
+  register: boot_interface_resolution
+  changed_when: false
 
-- name: Refuse to prime another NIC
-  ansible.builtin.assert:
-    that: (boot_interface_mac.content | b64decode | trim) == provision_boot_mac
+- name: Use the verified current interface name
+  ansible.builtin.set_fact:
+    provision_resolved_boot_interface: "{{ boot_interface_resolution.stdout | trim }}"
 
 - name: Install the NIC control utility
   ansible.builtin.package:
@@ -20,18 +21,27 @@
     state: present
     update_cache: true
 
+- name: Read the selected interface identity
+  ansible.builtin.slurp:
+    src: "/sys/class/net/{{ provision_resolved_boot_interface }}/address"
+  register: boot_interface_mac
+
+- name: Refuse to prime another NIC
+  ansible.builtin.assert:
+    that: (boot_interface_mac.content | b64decode | trim) == provision_boot_mac
+
 - name: Enable magic-packet wake on the boot NIC
   ansible.builtin.command:
-    argv: [ethtool, -s, "{{ provision_boot_interface }}", wol, g]
+    argv: [ethtool, -s, "{{ provision_resolved_boot_interface }}", wol, g]
 
 - name: Disable EEE for the affected boot NIC
   ansible.builtin.command:
-    argv: [ethtool, --set-eee, "{{ provision_boot_interface }}", eee, 'off']
+    argv: [ethtool, --set-eee, "{{ provision_resolved_boot_interface }}", eee, 'off']
   when: provision_disable_eee | default(false) | bool
 
 - name: Verify wake settings
   ansible.builtin.command:
-    argv: [ethtool, "{{ provision_boot_interface }}"]
+    argv: [ethtool, "{{ provision_resolved_boot_interface }}"]
   register: boot_nic_settings
   changed_when: false
 
@@ -41,7 +51,7 @@
 
 - name: Verify EEE settings on affected NIC
   ansible.builtin.command:
-    argv: [ethtool, --show-eee, "{{ provision_boot_interface }}"]
+    argv: [ethtool, --show-eee, "{{ provision_resolved_boot_interface }}"]
   register: boot_nic_eee
   changed_when: false
   when: provision_disable_eee | default(false) | bool

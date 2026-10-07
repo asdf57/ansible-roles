@@ -252,14 +252,13 @@ def run_stage(server, directory, known, stage, facts=None):
     inventory = {"all": {"hosts": {server["metadata"]["name"]: {"ansible_host": host_address(server),
                  "ansible_user": "ansible", "ansible_become": True, "ansible_ssh_args": shlex.join(ssh_args(server, known)),
                  "ansible_ssh_common_args": "", "ansible_ssh_extra_args": ""}}}}
-    nic = server["status"]["networking"]["management"]["interface"]
     variables = {"provision_stage": stage, "provision_attempt_id": p["attemptID"],
                  "provision_server_uid": server["metadata"]["uid"], "provision_target_disk": snapshot["targetDisk"],
                  "provision_request_counter": p["requestedReprovision"], "provision_plan_digest": snapshot["planDigest"],
                  "provision_operating_system": snapshot["inputs"]["serverSpec"]["operatingSystem"],
                  "provision_server_spec": snapshot["inputs"]["serverSpec"], "storage": snapshot["inputs"]["storage"],
                  "provision_users": snapshot["inputs"]["users"], "provision_disable_eee": snapshot["inputs"]["disableEEE"],
-                 "provision_boot_interface": nic["name"], "provision_boot_mac": snapshot['bootMAC'],
+                 "provision_boot_mac": snapshot['bootMAC'],
                  "provision_disk_identity": snapshot["diskIdentity"], "provision_live_build_id": snapshot["isoBuildID"],
                  "provision_live_boot_id": p.get("liveBootID", ""), "provision_destructive_authorized": stage == "install",
                  "ssh_ca_bundle": server["status"]["sshTrust"]["publicBundle"], "ssh_ca_bundle_digest": snapshot["trustBundleDigest"]}

@@ -36,6 +36,9 @@
 
 ## Boot and SSH lessons
 
+- Live and installed NIC names can differ (`eth0` versus `enp1s0`). Priming
+  resolves the attempt's pinned MAC on the node, requires a unique match, and
+  rechecks its MAC before ethtool writes; never use a cached API interface name.
 - Installed OS boots locally by default. Reprovision uses the one-shot
   `grub-reboot homelab-netboot` entry; do not make network/API availability a
   dependency of every normal boot.
