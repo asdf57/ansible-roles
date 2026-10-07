@@ -40,20 +40,24 @@ class FakePath(PurePosixPath):
     def glob(self, pattern):
         return [FakePath(name) for name in self.files if fnmatch.fnmatch(name, str(self / pattern))]
 
+    def iterdir(self):
+        return iter([FakePath('/dev/disk/by-id/disk')])
+
 
 class ProbeTests(unittest.TestCase):
 
-    def inspect(self, disk):
+    def inspect(self, disk, selector=None):
 
         def command(*args):
             if args[0] == 'lsblk':
-                self.assertIn('--tree', args, 'PATH-only JSON must explicitly request children')
+                if '--nodeps' not in args:
+                    self.assertIn('--tree', args, 'PATH-only JSON must explicitly request children')
                 return json.dumps({'blockdevices': [disk]})
             return 'overlay' if 'FSTYPE' in args else ''
         with patch.object(probe, 'Path', FakePath), patch.object(probe, 'command', side_effect=command), \
                 patch.object(probe.os.path, 'realpath', return_value='/dev/sda'), \
                 patch.object(probe.subprocess, 'run', return_value=SimpleNamespace(returncode=1)):
-            return probe.probe('/dev/disk/by-id/disk')
+            return probe.probe(selector or '/dev/disk/by-id/disk')
 
     def disk(self):
         return {
@@ -104,6 +108,24 @@ class ProbeTests(unittest.TestCase):
             disk[field] = value
             with self.assertRaises(RuntimeError):
                 self.inspect(disk)
+
+    def test_serial_only_selection_resolves_stable_alias_and_normalizes_null_wwn(self):
+        disk = self.disk()
+        disk['wwn'] = None
+        expected = probe.disk_identity(disk)
+        result = self.inspect(disk, json.dumps(expected))
+        self.assertEqual(result['targetDisk'], '/dev/disk/by-id/disk')
+        self.assertEqual(result['disk'], expected)
+        self.assertEqual(result['disk']['wwn'], '')
+
+    def test_changed_or_ambiguous_identity_is_rejected_before_alias_resolution(self):
+        disk = self.disk()
+        expected = probe.disk_identity(disk)
+        changed = dict(disk, serial='replacement')
+        for devices in ([changed], [disk, disk]):
+            with patch.object(probe, 'command', return_value=json.dumps({'blockdevices': devices})):
+                with self.assertRaises(RuntimeError):
+                    probe.probe(json.dumps(expected))
 
 
 if __name__ == '__main__':

@@ -36,19 +36,47 @@ def digest(value):
 
 
 def eligible(server):
-    spec, status = server.get("spec", {}), server.get("status", {})
-    p, desired = status.get("provisioning", {}), spec.get("provisioning", {})
-    if server["metadata"].get("deletionTimestamp"):
-        return False
-    if p.get("phase") in ACTIVE:
-        return True  # Resume/clean up an existing reservation even after pause.
-    if not desired.get("enabled") or spec.get("reconciliation", {}).get("paused"):
-        return False
-    requested = desired.get("reprovision", 0)
-    if p.get("maintenance") or (p.get("attemptID")
-                                and requested <= p.get("requestedReprovision", 0)):
-        return False
-    return not p.get("provisioned") or requested > p.get("observedReprovision", 0)
+    return bool(server.get("status", {}).get("provisioning", {}).get("activeRunRef"))
+
+
+def bind_run(api, server):
+    """Local execution view. Stored Server status contains only a reservation."""
+    ref = server['status']['provisioning']['activeRunRef']
+    run = api.get('provisioning-runs', ref['name'])
+    expected = {'name': server['metadata']['name'], 'uid': server['metadata']['uid']}
+    if (run['metadata']['uid'] != ref['uid'] or run['metadata'].get('deletionTimestamp')
+            or run['spec']['serverRef'] != expected
+            or run['spec']['machineRef'] != server['status'].get('machineRef')):
+        raise OperatorError('ProvisioningBlocked', 'Run or machine binding changed')
+    value = copy.deepcopy(server)
+    value['_run'] = run
+    value['status']['provisioning'] = copy.deepcopy(run['status'])
+    return value
+
+
+def release_run(api, server):
+    """Recover a lost completion/release boundary without rerunning installation."""
+    run = api.get('provisioning-runs', server['_run']['metadata']['name'])
+    if (run['metadata']['uid'] != server['_run']['metadata']['uid']
+            or run['status'].get('maintenance') or run['status'].get('netbootArmed')
+            or run['status']['phase'] not in ('Succeeded', 'Blocked')):
+        return
+    for _ in range(5):
+        latest = api.get('servers', server['metadata']['name'])
+        ref = {'name': run['metadata']['name'], 'uid': run['metadata']['uid']}
+        if (latest['metadata']['uid'] != server['metadata']['uid']
+                or latest['status'].get('provisioning', {}).get('activeRunRef') != ref):
+            raise OperatorError('ProvisioningBlocked', 'Run lost its Server reservation')
+        fields = {'activeRunRef': None, 'maintenance': False}
+        if run['status']['phase'] == 'Succeeded':
+            fields.update(provisioned=True, lastSuccessfulRunRef=ref)
+        try:
+            api.patch_status(latest, {'provisioning': fields})
+            return
+        except HTTPError as exc:
+            if exc.code != 409:
+                raise
+    raise OperatorError('ProvisioningBlocked', 'Concurrent reservation release')
 
 
 def identity(server):
@@ -60,20 +88,16 @@ def identity(server):
         raise OperatorError(
             "ProvisioningBlocked",
             "Managed host identity and binding must be verified before provisioning")
-    target = spec.get("provisioning", {}).get("targetDisk", "")
-    if not re.fullmatch(r"/dev/disk/by-id/[^/]+", target):
-        raise OperatorError("ProvisioningBlocked", "An explicit stable target disk is required")
     os_spec = spec.get("operatingSystem", {})
     if (os_spec.get("architecture") != "amd64" or os_spec.get("bootMode") != "uefi"
             or (os_spec.get("distribution"), os_spec.get("version")) not in (("arch", "rolling"),
                                                                              ("debian", "trixie"))):
         raise OperatorError("ProvisioningBlocked",
                             "Supported targets are Arch rolling and Debian trixie on amd64 UEFI")
-    return target
 
 
 def current(api, snapshot, allow_paused=False):
-    value = api.get("servers", snapshot["metadata"]["name"])
+    value = bind_run(api, api.get("servers", snapshot["metadata"]["name"]))
     p = snapshot["status"]["provisioning"]
     actual = value.get("status", {}).get("provisioning", {})
     if (value["metadata"]["uid"] != snapshot["metadata"]["uid"]
@@ -82,8 +106,8 @@ def current(api, snapshot, allow_paused=False):
             or actual.get("phase") != p.get("phase")
             or any(value["spec"].get(field) != p["snapshot"]["inputs"]["serverSpec"].get(field)
                    for field in SPEC_INPUTS)
-            or value["spec"]["provisioning"].get("reprovision", 0) != p["requestedReprovision"]
-            or value["spec"]["provisioning"].get("targetDisk") != p["snapshot"]["targetDisk"]
+            or value['_run']['metadata']['uid'] != snapshot['_run']['metadata']['uid']
+            or value['_run']['spec'] != snapshot['_run']['spec']
             or value["status"].get("machineRef") != p["snapshot"]["machineRef"]
             or value["status"].get("networking", {}).get("management", {}).get("interface", {}).get(
                 "mac", '').lower() != p["snapshot"]["bootMAC"]
@@ -100,14 +124,15 @@ def checkpoint(api, server, phase, **fields):
     for _ in range(5):
         latest = current(api, server, allow_paused=True)
         try:
-            result = api.patch_status(
-                latest, {"provisioning": {
-                    "phase": phase,
-                    "currentStage": phase,
-                    **fields
-                }})
+            result = api.patch_status(latest['_run'], {
+                "phase": phase,
+                "currentStage": phase,
+                **fields
+            })
+            latest['_run'] = result
+            latest['status']['provisioning'] = copy.deepcopy(result['status'])
             server.clear()
-            server.update(result)
+            server.update(latest)
             print(server['metadata']['name'] + ': checkpoint ' + phase, flush=True)
             return server
         except HTTPError as exc:
@@ -131,24 +156,19 @@ def host_address(server):
 def inspect(server, known):
     script = (Path(__file__).resolve().parents[1] / "roles/provision/files/probe.py").read_text()
     result = subprocess.run([
-        "ssh", *ssh_args(server, known), "ansible@" + host_address(server),
-        "sudo -n python3 - " + shlex.quote(server["spec"]["provisioning"]["targetDisk"])
+        "ssh", *ssh_args(server, known), "ansible@" + host_address(server), "sudo -n python3 - " +
+        shlex.quote(json.dumps(server['status']['provisioning']['selectedDisk']))
     ], input=script, capture_output=True, text=True, timeout=90)
     if result.returncode:
         raise OperatorError("ProvisioningBlocked", "Read-only SSH provisioning probe failed")
     return json.loads(result.stdout)
 
 
-def validate_disk(facts, counter, live_required=False):
+def validate_disk(facts, live_required=False):
     if not facts["uefi"] or facts["secureBoot"] is not False:
         raise OperatorError(
             "ProvisioningBlocked",
             "Unsigned v1 GRUB/iPXE path requires UEFI with Secure Boot off; do not change firmware automatically"
-        )
-    if counter == 0 and (facts["partitioned"] or facts.get("marker")):
-        raise OperatorError(
-            "ProvisioningBlocked",
-            "Initial installation refuses an existing disk/installation; authorize replacement explicitly"
         )
     if live_required and (not facts["live"] or facts["mounted"]):
         raise OperatorError(
@@ -161,7 +181,10 @@ def validate_disk(facts, counter, live_required=False):
 
 
 def plan(api, server, variables, facts, revision):
-    target = identity(server)
+    identity(server)
+    target = facts['targetDisk']
+    if facts['disk'] != server['status']['provisioning']['selectedDisk']:
+        raise OperatorError('ProvisioningBlocked', 'Selected disk identity changed since request')
     desired, status = server["spec"], server["status"]
     image = api.get("isos", desired["boot"]["isoRef"]["name"])
     image_status = image.get("status", {})
@@ -362,7 +385,7 @@ def run_stage(server, directory, known, stage, facts=None):
         "provision_attempt_id": p["attemptID"],
         "provision_server_uid": server["metadata"]["uid"],
         "provision_target_disk": snapshot["targetDisk"],
-        "provision_request_counter": p["requestedReprovision"],
+        "provision_run_uid": server['_run']['metadata']['uid'],
         "provision_plan_digest": snapshot["planDigest"],
         "provision_operating_system": snapshot["inputs"]["serverSpec"]["operatingSystem"],
         "provision_server_spec": snapshot["inputs"]["serverSpec"],
@@ -453,8 +476,7 @@ def enroll_live(api, server, facts, known, directory):
     # scoped to this attempt and carries the documented v1 impersonation risk.
     from ssh_host_keys import run_play
     snapshot = server["status"]["provisioning"]["snapshot"]
-    validate_disk(facts, server["status"]["provisioning"]["requestedReprovision"],
-                  live_required=True)
+    validate_disk(facts, live_required=True)
     if facts["disk"] != snapshot["diskIdentity"]:
         raise OperatorError("ProvisioningBlocked",
                             "Live disk identity differs from the approved plan")
@@ -486,12 +508,13 @@ def enroll_live(api, server, facts, known, directory):
 
 def verify_installed(server, facts):
     p, marker = server["status"]["provisioning"], facts.get("marker") or {}
-    if facts["live"] or facts["rootType"] != "ext4" or facts["bootID"] == p.get("liveBootID"):
+    if (facts["live"] or facts["rootType"] != "ext4" or facts["bootID"] == p.get("liveBootID")
+            or facts['disk'] != p['snapshot']['diskIdentity']):
         raise OperatorError("ProvisioningBlocked", "Not a fresh installed boot")
     expected = {
         "serverUID": server["metadata"]["uid"],
         "attemptID": p["attemptID"],
-        "reprovision": p["requestedReprovision"],
+        "runUID": server['_run']['metadata']['uid'],
         "planDigest": p["snapshot"]["planDigest"]
     }
     if any(marker.get(k) != v for k, v in expected.items()) or not facts["rootUUID"] or marker.get(
@@ -509,6 +532,10 @@ def verify_installed(server, facts):
 
 def reconcile(api, server, variables, directory, revision, preflight=False):
     p = server.get("status", {}).get("provisioning", {})
+    if p.get('phase') in ('Succeeded', 'Blocked'):
+        if not preflight:
+            release_run(api, server)
+        return
     if preflight and p.get("phase") in ACTIVE:
         print(server["metadata"]["name"] +
               ": active attempt; preflight does not resume or mutate it")
@@ -520,11 +547,14 @@ def reconcile(api, server, variables, directory, revision, preflight=False):
             maintenance=True)
         return
     if not p.get("attemptID") or p.get("phase") not in ACTIVE:
+        if (not server['spec'].get('provisioning', {}).get('enabled')
+                or server['spec'].get('reconciliation', {}).get('paused')):
+            print(server['metadata']['name'] + ': pending run paused', flush=True)
+            return
         identity(server)
         known = known_file(server, directory)
         facts = inspect(server, known)
-        requested = server["spec"]["provisioning"].get("reprovision", 0)
-        validate_disk(facts, requested, live_required=facts["live"])
+        validate_disk(facts, live_required=facts["live"])
         if not facts["live"] and not facts["grubReady"]:
             raise OperatorError(
                 "ProvisioningBlocked",
@@ -533,40 +563,34 @@ def reconcile(api, server, variables, directory, revision, preflight=False):
         if preflight:
             print(server["metadata"]["name"] + ": preflight passed (no claim, mutation or reboot)")
             return
-        if any(other['metadata']['uid'] != server['metadata']['uid'] and (
-                other.get('status', {}).get('provisioning', {}).get('maintenance')
-                or other.get('status', {}).get('provisioning', {}).get('phase') in ACTIVE)
-               for other in api.list('servers')):
-            raise OperatorError(
-                "ProvisioningBlocked",
-                'Another Server retains lifecycle maintenance; inspect it before a new attempt')
-        import uuid
-        # One CAS binds ownership to this exact Server lifetime/desired version.
+        for other in api.list('servers'):
+            if other['metadata']['uid'] == server['metadata']['uid'] or not eligible(other):
+                continue
+            other_run = bind_run(api, other)['status']['provisioning']
+            if other_run.get('phase') != 'Pending' and other_run.get('maintenance'):
+                raise OperatorError('ProvisioningBlocked',
+                                    'Another run retains lifecycle maintenance; inspect it first')
+        # Creation already reserved this Server atomically; claim the immutable run.
         result = api.patch_status(
-            server, {
-                "provisioning": {
-                    "provisioned": bool(p.get("provisioned")),
-                    "observedReprovision": p.get("observedReprovision", 0),
-                    "requestedReprovision": requested,
-                    "phase": "PreparingBoot",
-                    "currentStage": "PreparingBoot",
-                    "maintenance": True,
-                    "attemptID": str(uuid.uuid4()),
-                    "snapshot": snapshot,
-                    "startedAt": now(),
-                    "completedAt": None,
-                    "backendRunID": os.environ.get("BUILD_ID", "manual"),
-                    "observedServerGeneration": server["metadata"]["generation"],
-                    "sourceBootID": facts["bootID"],
-                    "liveBootID": None,
-                    "bootstrapPublicKey": None,
-                    "netbootArmed": False,
-                    "bootTarget": "live",
-                    "message": "Attempt claimed"
-                }
+            server['_run'], {
+                "phase": "PreparingBoot",
+                "currentStage": "PreparingBoot",
+                "maintenance": True,
+                "attemptID": server['_run']['metadata']['uid'],
+                "snapshot": snapshot,
+                "startedAt": now(),
+                "completedAt": None,
+                "backendRunID": os.environ.get("BUILD_ID", "manual"),
+                "observedServerGeneration": server["metadata"]["generation"],
+                "sourceBootID": facts["bootID"],
+                "liveBootID": None,
+                "bootstrapPublicKey": None,
+                "netbootArmed": False,
+                "bootTarget": "live",
+                "message": "Attempt claimed"
             })
-        server.clear()
-        server.update(result)
+        server['_run'] = result
+        server['status']['provisioning'] = copy.deepcopy(result['status'])
     elif preflight:
         print(server["metadata"]["name"] +
               ": active attempt; preflight does not resume or mutate it")
@@ -635,7 +659,7 @@ def reconcile(api, server, variables, directory, revision, preflight=False):
             expected = {
                 "serverUID": server["metadata"]["uid"],
                 "attemptID": p["attemptID"],
-                "reprovision": p["requestedReprovision"],
+                "runUID": server['_run']['metadata']['uid'],
                 "planDigest": p["snapshot"]["planDigest"]
             }
             if (before['bootID'] != p.get('liveBootID') or not before['stagedBootReady'] or any(
@@ -652,7 +676,7 @@ def reconcile(api, server, variables, directory, revision, preflight=False):
         verify_installed(server, facts)
         current(api, server)
         run_stage(server, directory, known, "post")
-        # Only attested installed state and healthy services may advance the counter.
+        # Only attested installed state and healthy services may complete a run.
         result = subprocess.run([
             "ssh", *ssh_args(server, known), "ansible@" + host_address(server),
             "sudo -n systemctl is-active homelabd ansible-account.timer lldpd NetworkManager " +
@@ -662,14 +686,21 @@ def reconcile(api, server, variables, directory, revision, preflight=False):
             raise OperatorError("ProvisioningBlocked",
                                 "Installed management services are not healthy")
         verify_installed(server, inspect(server, known))
-        checkpoint(api, server, "Succeeded", provisioned=True,
-                   observedReprovision=server["status"]["provisioning"]["requestedReprovision"],
-                   maintenance=False, completedAt=now(),
+        checkpoint(api, server, "Succeeded", maintenance=False, completedAt=now(),
                    message="Fresh installed boot, marker and management services verified")
+        release_run(api, server)
 
 
 def handle_failure(api, server, directory):
     p = server.get("status", {}).get("provisioning", {})
+    if p.get("phase") == 'Pending':
+        result = api.patch_status(
+            server['_run'], {
+                'message':
+                'Preflight pending: inspect dependencies, disk identity and management connectivity'
+            })
+        server['_run'] = result
+        return
     if p.get("phase") not in ACTIVE:
         return
     if p["phase"] in ("AwaitingInstalled", "Verifying"):
@@ -696,6 +727,7 @@ def handle_failure(api, server, directory):
         api, server, "Blocked", maintenance=keep, netbootArmed=bool(keep and p.get("netbootArmed")),
         message=
         "Attempt blocked; inspect boot selection/disk before explicitly requesting another attempt")
+    release_run(api, server)
 
 
 def main():
@@ -719,9 +751,9 @@ def main():
     failed = False
     for name, variables in resolved_inventory_hosts(inventory).items():
         server = api.get("servers", name)
-        if not eligible(server) and not (options.preflight and server.get('spec', {}).get(
-                'provisioning', {}).get('targetDisk')):
+        if not eligible(server):
             continue
+        server = bind_run(api, server)
         if host_address(server) != address(variables["ansible_host"]):
             raise OperatorError("ProvisioningBlocked", "Capture-group management address is stale")
         with tempfile.TemporaryDirectory(prefix="provision-operator-") as tmp:

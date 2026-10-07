@@ -24,20 +24,22 @@
    without claiming, rebooting or installing.
 2. Resolve inventory through Ansible (`resolved_inventory_hosts`), not by
    flattening raw hostvars: storage and other inputs live in inherited group vars.
-3. Existing disks require an explicit monotonically increasing
-   `spec.provisioning.reprovision` request. Counter 0 accepts only a blank disk.
-   An ordinary ISO/CA/spec edit must not authorize replacement.
+3. Every install requires an immutable ProvisioningRun with the reviewed Server
+   generation, UID-qualified Server/Machine refs and one discovered disk ID.
+   Creation authorizes replacement, including existing data. Enabling a Server
+   or changing OS/ISO/CA never authorizes installation.
 4. The shared `reconcile-ssh-host-keys-ssh-managed/provision` job polls the
    `ssh-managed` capture group. Triggering the job only polls desired state;
-   it does not increment counters. The SSH and provisioning jobs share the
+   it does not create runs. The SSH and provisioning jobs share the
    `server-lifecycle` serial group.
 5. Installation must verify the pinned live build, boot ID, stable disk identity,
    unmounted target, protected agent enrollment and managed SSH identity before
    erasure. A completed build or an SSH port opening is not this verification.
 6. Success requires a changed installed boot, ext4 root on the approved disk,
    matching protected marker, restored GRUB, strict managed SSH and healthy
-   management services. Only then advance `observedReprovision` and release
-   maintenance.
+   management services. Only then complete the run and release maintenance.
+   Run status owns checkpoints/snapshot; Server holds activeRunRef, lastRunRef,
+   lastSuccessfulRunRef and the maintenance gate.
 
 ## Boot and SSH lessons
 

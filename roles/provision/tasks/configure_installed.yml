@@ -130,7 +130,7 @@
     owner: root
     group: root
     mode: '0600'
-    content: "{{ {'serverUID': provision_server_uid, 'attemptID': provision_attempt_id, 'reprovision': provision_request_counter | int, 'planDigest': provision_plan_digest, 'rootUUID': installed_root_uuid.stdout, 'efiPARTUUID': installed_efi_uuid.stdout, 'bootloader': '/EFI/Homelab/grubx64.efi', 'distribution': provision_operating_system.distribution} | to_nice_json }}"
+    content: "{{ {'serverUID': provision_server_uid, 'attemptID': provision_attempt_id, 'runUID': provision_run_uid, 'planDigest': provision_plan_digest, 'rootUUID': installed_root_uuid.stdout, 'efiPARTUUID': installed_efi_uuid.stdout, 'bootloader': '/EFI/Homelab/grubx64.efi', 'distribution': provision_operating_system.distribution} | to_nice_json }}"
 
 - name: Unmount chroot bind mounts without ignoring failures
   ansible.posix.mount:
