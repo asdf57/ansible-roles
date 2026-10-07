@@ -75,4 +75,4 @@
       - --load
       - /run/homelab-live-bootstrap/kernel
       - --initrd=/run/homelab-live-bootstrap/initrd
-      - "--command-line=archisobasedir=arch archiso_http_srv={{ bootstrap_rootfs.url | regex_replace('arch/x86_64/airootfs.sfs$', '') }} ip=dhcp"
+      - "--command-line=archisobasedir=arch archiso_http_srv={{ bootstrap_rootfs.url | regex_replace('arch/x86_64/airootfs.sfs$', '') }} ip=dhcp net.ifnames=0 BOOTIF=01-{{ provision_boot_mac | replace(':', '-') }}"
