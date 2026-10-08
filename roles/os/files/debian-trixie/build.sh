@@ -147,6 +147,12 @@ EOF
     "$HOMELABD_SSHD_CONFIG_SOURCE" \
     "$HOMELAB_API_ENDPOINT"
 
+  # Overlay installation precedes package installation. Apply the same reviewed
+  # Debian client/socket access setup after live-build has installed lldpd.
+  install -d config/hooks/normal
+  install -m 0755 "$(dirname "$HOMELABD_SERVICE_SOURCE")/../agent/configure-debian-lldp.sh" \
+    config/hooks/normal/0900-homelabd-lldp.hook.chroot
+
   # As with Arch, we prefer a small drop-in file over replacing the full
   # sshd_config shipped by the base system.
   write_file config/includes.chroot/etc/ssh/sshd_config.d/99-live.conf <<'EOF'
