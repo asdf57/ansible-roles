@@ -1,0 +1,72 @@
+---
+- name: Restore DHCP DNS only in an explicitly verified Debian live session
+  hosts: all
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Verify the pinned live session and disk before changing live DNS
+      ansible.builtin.command:
+        argv: [python3, '-', "{{ provision_target_disk }}"]
+        stdin: "{{ lookup('file', playbook_dir + '/../roles/provision/files/probe.py') }}"
+      register: dns_probe
+      changed_when: false
+
+    - name: Refuse repair on another boot or disk or a partial installation
+      ansible.builtin.assert:
+        that:
+          - (dns_probe.stdout | from_json).live
+          - (dns_probe.stdout | from_json).os.ID == 'debian'
+          - (dns_probe.stdout | from_json).bootID == provision_live_boot_id
+          - (dns_probe.stdout | from_json).liveBuildID == provision_live_build_id
+          - (dns_probe.stdout | from_json).disk == provision_disk_identity
+          - not (dns_probe.stdout | from_json).mounted
+          - not (dns_probe.stdout | from_json).stagedMarker
+
+    - name: Read valid DNS addresses from the default interface's initramfs DHCP lease
+      ansible.builtin.command:
+        argv: [python3, '-']
+        stdin: |
+          import ipaddress
+          from pathlib import Path
+          import re
+          import subprocess
+          routes = subprocess.check_output(['ip', '-4', 'route', 'show', 'default'], text=True)
+          interfaces = set(re.findall(r'\bdev ([A-Za-z0-9_.-]+)', routes))
+          assert len(interfaces) == 1, 'Default interface must be unambiguous'
+          lease = Path('/run/net-' + interfaces.pop() + '.conf').read_text()
+          assert "PROTO='dhcp'" in lease
+          servers = []
+          for value in re.findall(r"^IPV4DNS[0-9]+='([^']*)'$", lease, re.MULTILINE):
+              parsed = ipaddress.ip_address(value)
+              if not parsed.is_unspecified and not parsed.is_multicast and str(parsed) not in servers:
+                  servers.append(str(parsed))
+          assert servers, 'No valid DHCP DNS address; do not invent a resolver'
+          print('# DNS restored from the verified live DHCP lease')
+          for server in servers:
+              print('nameserver ' + server)
+      register: live_dhcp_dns
+      changed_when: false
+
+    - name: Restore live resolver configuration atomically
+      ansible.builtin.copy:
+        dest: /etc/resolv.conf
+        content: "{{ live_dhcp_dns.stdout }}\n"
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Verify repository resolution before package changes
+      ansible.builtin.command:
+        argv: [getent, ahostsv4, deb.debian.org]
+      changed_when: false
+
+    - name: Install only live cleanup and Ansible package prerequisites
+      ansible.builtin.command:
+        argv: [apt-get, update]
+      changed_when: false
+
+    - name: Make guarded GRUB cleanup available in the live environment
+      ansible.builtin.command:
+        argv: [apt-get, install, -y, grub-common, python3-apt]
+      environment:
+        DEBIAN_FRONTEND: noninteractive

@@ -67,6 +67,12 @@
 - Arch HTTP-live boot requires `ip=dhcp net.ifnames=0 BOOTIF=01-<boot-MAC>`.
   In iPXE use `BOOTIF=01-${netX/mac}`; in kexec use the verified MAC with hyphens.
   Without BOOTIF, ip-config can report `SIOCGIFFLAGS: No such device`.
+- Debian live-boot must not receive `ip=dhcp`: its static-IP parser turns this
+  into `nameserver dhcp`. HTTPS fetch already requests DHCP. Keep BOOTIF, omit
+  the static override. For an already-booted affected Debian live session,
+  `plays/repair_debian_live_dns.yml` verifies the pinned boot/build/disk, restores
+  validated DNS from the default interface's `/run/net-*.conf` DHCP lease and
+  installs live cleanup prerequisites. It does not erase, mount or reboot.
 - The live rootfs is downloaded into RAM. The current image failed in a 2 GiB
   VM and reached login/OpenSSH with 4 GiB. Verify real hardware capacity.
 - Use command modules/Python stdin for JSON probes. Ansible's script/PTY path
