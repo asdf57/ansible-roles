@@ -90,6 +90,14 @@ Do not bypass it with a broad-inventory playbook call. Tests never reboot nodes.
   to TOFU. Explicit manual live recovery must be scoped and inspected first.
 - Ensure `/etc/homelabd` exists before writing enrollment or live-build files.
   Preserve the agent token and managed SSH key into the installed root.
+- Debian's packaged lldpcli is in /usr/sbin and defaults to setuid _lldpd:adm.
+  Use the shared homelabd agent setup for PATH, _lldpd membership and the
+  non-setuid package override; never grant adm to fix discovery. An active
+  daemon is insufficient: post provisioning queries neighbors as homelabd.
+- To inspect a completed ISO inside a build task, use xorriso -osirrox on
+  -indev <iso> -extract /live/filesystem.squashfs <temporary-file>, then
+  unsquashfs -cat for the agent unit/group or -ll for lldpcli permissions.
+  Never extract or print the embedded /etc/homelabd/environment token.
 - Empty Ansible `copy.content` is rejected. Configuration templates that may
   contain no entries need a harmless header or an explicit empty-state action.
 
