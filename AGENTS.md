@@ -82,6 +82,13 @@
 
 ## Failure and repair
 
+- For a proven failure before erasure with an intact prior installation, use
+  `plays/verify_failed_provision_cleanup.yml` with a Beelink-only inventory and
+  the exact run UID, Server UID, live boot/build IDs, disk identity and by-id path.
+  It verifies the old root/marker, clears only its GRUB next_entry, flushes and
+  unmounts. It never reinstalls or reboots. Only after success report the run as
+  Blocked with maintenance=false, then release through `release_run`/Server status.
+  A false netbootArmed flag or changed boot ID alone does not prove GRUB cleanup.
 - After repartitioning, `grub-install` may retain a same-named Homelab entry
   with the old EFI PARTUUID. Reconcile the exact active loader/partition with
   `reconcile_efi.yml`, not the display name alone. For an existing partial root,

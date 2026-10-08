@@ -1,0 +1,129 @@
+---
+- name: Clean up only boot selection after a verified failed-before-erasure run
+  hosts: all
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Require the reviewed run and stable disk contract
+      ansible.builtin.assert:
+        that:
+          - provision_run_uid | length > 0
+          - provision_server_uid | length > 0
+          - provision_target_disk is match('^/dev/disk/by-id/[^/]+$')
+          - provision_live_boot_id | length > 0
+          - provision_live_build_id | length > 0
+
+    - name: Inspect the original live session and selected physical disk
+      ansible.builtin.command:
+        argv: [python3, '-', "{{ provision_target_disk }}"]
+        stdin: "{{ lookup('file', playbook_dir + '/../roles/provision/files/probe.py') }}"
+      register: cleanup_probe
+      changed_when: false
+
+    - name: Refuse cleanup of a changed session, mounted disk or partial installation
+      ansible.builtin.assert:
+        that:
+          - (cleanup_probe.stdout | from_json).live
+          - (cleanup_probe.stdout | from_json).bootID == provision_live_boot_id
+          - (cleanup_probe.stdout | from_json).liveBuildID == provision_live_build_id
+          - (cleanup_probe.stdout | from_json).disk == provision_disk_identity
+          - not (cleanup_probe.stdout | from_json).mounted
+          - not (cleanup_probe.stdout | from_json).stagedMarker
+          - not (cleanup_probe.stdout | from_json).firmwareBootNext
+          - (cleanup_probe.stdout | from_json).competingBootServices | length == 0
+
+    - name: Verify no pending live kernel selection remains
+      ansible.builtin.command:
+        argv: [cat, /sys/kernel/kexec_loaded]
+      register: cleanup_kexec
+      changed_when: false
+
+    - name: Refuse an armed kernel selection
+      ansible.builtin.assert:
+        that: cleanup_kexec.stdout == '0'
+
+    - name: Create a temporary RAM-backed inspection mountpoint
+      ansible.builtin.tempfile:
+        state: directory
+        path: /run
+        prefix: homelab-cleanup-check-
+      register: cleanup_mount
+
+    - name: Inspect the previous installation without filesystem journal replay
+      block:
+        - name: Mount only the selected disk's existing ext4 root read-only
+          ansible.builtin.command:
+            argv: [mount, -t, ext4, -o, 'ro,noload', "{{ (cleanup_probe.stdout | from_json).device }}{{ 'p' if (cleanup_probe.stdout | from_json).device is search('[0-9]$') else '' }}3", "{{ cleanup_mount.path }}"]
+          register: cleanup_mounted
+
+        - name: Verify the prior installed marker and boot contract
+          ansible.builtin.command:
+            argv: [python3, '-', "{{ cleanup_mount.path }}", "{{ provision_server_uid }}", "{{ provision_run_uid }}", "{{ (cleanup_probe.stdout | from_json).device }}"]
+            stdin: |
+              import json
+              from pathlib import Path
+              import subprocess
+              import sys
+              root, server_uid, run_uid, disk = sys.argv[1:]
+              root = Path(root)
+              marker = json.loads((root / 'var/lib/homelab/provisioning.json').read_text())
+              assert marker['serverUID'] == server_uid
+              assert marker.get('attemptID') != run_uid and marker.get('runUID') != run_uid
+              partition = disk + ('p' if disk[-1].isdigit() else '') + '3'
+              root_uuid = subprocess.check_output(['blkid', '-s', 'UUID', '-o', 'value', partition], text=True).strip()
+              assert marker['rootUUID'] == root_uuid
+              assert (root / 'boot/ipxe/ipxe.efi').is_file()
+              assert 'homelab-netboot' in (root / 'boot/grub/grub.cfg').read_text()
+              print('Prior installation marker/root and GRUB contract verified')
+          changed_when: false
+
+        - name: Remount the verified prior root to clear only its boot selection
+          ansible.builtin.command:
+            argv: [mount, -o, 'remount,rw', "{{ cleanup_mount.path }}"]
+
+        - name: Clear the previous one-shot GRUB selection without reinstalling
+          ansible.builtin.command:
+            argv: [grub-editenv, "{{ cleanup_mount.path }}/boot/grub/grubenv", unset, next_entry]
+
+        - name: Read back the cleared GRUB selection
+          ansible.builtin.command:
+            argv: [grub-editenv, "{{ cleanup_mount.path }}/boot/grub/grubenv", list]
+          register: cleanup_grub
+          changed_when: false
+
+        - name: Refuse cleanup while GRUB retains a one-shot selection
+          ansible.builtin.assert:
+            that: cleanup_grub.stdout is not search('(?m)^next_entry=')
+
+        - name: Flush the verified boot-selection change
+          ansible.builtin.command:
+            argv: [sync, -f, "{{ cleanup_mount.path }}/boot/grub/grubenv"]
+      always:
+        - name: Unmount the inspection root
+          ansible.builtin.command:
+            argv: [umount, "{{ cleanup_mount.path }}"]
+          when: cleanup_mounted is defined and cleanup_mounted.rc | default(1) == 0
+        - name: Require the temporary inspection root is no longer mounted
+          ansible.builtin.command:
+            argv: [mountpoint, -q, "{{ cleanup_mount.path }}"]
+          register: remaining_cleanup_mount
+          changed_when: false
+          failed_when: remaining_cleanup_mount.rc != 32
+        - name: Remove the verified unmounted temporary directory
+          ansible.builtin.file:
+            path: "{{ cleanup_mount.path }}"
+            state: absent
+
+    - name: Recheck the selected disk is unmounted after inspection
+      ansible.builtin.command:
+        argv: [python3, '-', "{{ provision_target_disk }}"]
+        stdin: "{{ lookup('file', playbook_dir + '/../roles/provision/files/probe.py') }}"
+      register: cleaned_probe
+      changed_when: false
+
+    - name: Require unchanged boot and disk identity after cleanup verification
+      ansible.builtin.assert:
+        that:
+          - not (cleaned_probe.stdout | from_json).mounted
+          - (cleaned_probe.stdout | from_json).bootID == provision_live_boot_id
+          - (cleaned_probe.stdout | from_json).disk == provision_disk_identity
