@@ -1,0 +1,15 @@
+---
+- name: Require a UID-bound single-Server reboot selected by the command runner
+  ansible.builtin.assert:
+    that:
+      - system_operation_server_uid | length > 0
+      - system_operation_machine_uid | length > 0
+      - ansible_play_hosts_all | length == 1
+      - inventory_hostname == system_operation_server_name
+
+- name: Reboot and verify a changed boot ID with a fresh SSH connection
+  ansible.builtin.reboot:
+    reboot_timeout: 300
+    connect_timeout: 10
+    post_reboot_delay: 5
+    test_command: /usr/bin/python3 -c 'import os; assert os.path.isfile("/proc/sys/kernel/random/boot_id")'

@@ -21,6 +21,13 @@
 
 ## Provisioning procedure
 
+System operations use ordinary Commands: run
+`python3 "$ANSIBLE_ROLES_PATH/../operators/system_operations.py" reboot --server
+<name> --uid <server-uid> --machine-uid <bound-machine-uid>` in the initialized
+runner. The helper requires current capture membership, strict managed SSH and
+no provisioning ownership, builds a one-host inventory and calls plays/reboot.yml.
+Do not bypass it with a broad-inventory playbook call. Tests never reboot nodes.
+
 1. Read the Server, Machine binding, capture group, ISO and CA state. Verify the
    desired disk is explicitly approved; other Servers must not be accidentally
    enabled. Use `--preflight` with the ordinary operator credentials to inspect

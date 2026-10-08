@@ -1,7 +1,10 @@
-- name: Reboot
+---
+- name: Reboot one explicitly selected managed Server
   hosts: all
+  gather_facts: false
+  become: true
   tasks:
-    - name: Perform the reboot
-      include_role:
-        name: provision
+    - name: Run the reviewed system operation
+      ansible.builtin.include_role:
+        name: system_operations
         tasks_from: reboot
