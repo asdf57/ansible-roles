@@ -228,6 +228,7 @@ function build_image() {
     --bootloaders "$bootloader" \
     --mode debian \
     --distribution "$DISTRIBUTION" \
+    --mirror-bootstrap https://deb.debian.org/debian \
     --architecture amd64 \
     --binary-images "$type" \
     --archive-areas "main contrib non-free non-free-firmware"
