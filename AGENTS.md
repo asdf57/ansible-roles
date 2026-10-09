@@ -55,10 +55,12 @@ heartbeat after the Command succeeds; an active service alone is insufficient.
    generation, UID-qualified Server/Machine refs and one discovered disk ID.
    Creation authorizes replacement, including existing data. Enabling a Server
    or changing OS/ISO/CA never authorizes installation.
-4. The shared `reconcile-ssh-host-keys-ssh-managed/provision` job polls the
+4. The `provision-ssh-managed/provision` job polls the
    `ssh-managed` capture group. Triggering the job only polls desired state;
-   it does not create runs. The SSH and provisioning jobs share the
-   `server-lifecycle` serial group.
+   it does not create runs. SSH runs in its own pipeline. Short mutations acquire
+   `Server.status.operation` by UID/If-Match CAS; ProvisioningRun reservation
+   excludes them. A stranded Held claim requires inspecting/stopping remote work
+   before matching-ID release; it must never automatically expire.
 5. Installation must verify the pinned live build, boot ID, stable disk identity,
    unmounted target, protected agent enrollment and managed SSH identity before
    erasure. A completed build or an SSH port opening is not this verification.
@@ -161,9 +163,9 @@ Replace example values with the actual pipeline/resource/job/commit.
 
 ```sh
 fly -t homelab builds --json
-fly -t homelab watch -j reconcile-ssh-host-keys-ssh-managed/provision
+fly -t homelab watch -j provision-ssh-managed/provision
 fly -t homelab pin-resource -r reconcile-ssh-host-keys-ssh-managed/operator-code -v ref:<full-commit>
-fly -t homelab trigger-job -j reconcile-ssh-host-keys-ssh-managed/provision
+fly -t homelab trigger-job -j provision-ssh-managed/provision
 fly -t homelab unpin-resource -r reconcile-ssh-host-keys-ssh-managed/operator-code
 fly -t homelab check-resource -r reconcile-ssh-host-keys-ssh-managed/operator-code
 ```

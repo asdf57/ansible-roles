@@ -245,8 +245,7 @@ class OperatorTests(unittest.TestCase):
                                                                 side_effect=probe), patch.object(
                                                                     operator,
                                                                     "host_private_key") as private:
-            with self.assertRaises(HTTPError):
-                operator.reconcile(api, server(), "127.0.0.1", Path(tmp))
+            operator.reconcile(api, server(), "127.0.0.1", Path(tmp))
             private.assert_not_called()
 
     def test_retry_uses_durable_pin_without_tofu(self):

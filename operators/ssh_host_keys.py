@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 from urllib.error import HTTPError
+from server_operation import reservation
 
 from common import (API, OperatorError, alias, address, capture_inventory, fingerprint,
                     inventory_hosts, public_key, request_json, ssh_args, ssh_probe, write_private,
@@ -18,7 +19,8 @@ def current(api, snapshot):
     value = api.get("servers", snapshot["metadata"]["name"])
     observed_host = value.get("status", {}).get("hostSSH", {})
     snapshot_host = snapshot.get("status", {}).get("hostSSH", {})
-    if (value["metadata"]["uid"] != snapshot["metadata"]["uid"]
+    if (value["metadata"]["uid"] != snapshot["metadata"]["uid"] or value.get(
+            'status', {}).get('operation') != snapshot.get('status', {}).get('operation')
             or value.get("status", {}).get("provisioning", {}).get("maintenance")
             or value["metadata"]["generation"] != snapshot["metadata"]["generation"]
             or value["metadata"].get("deletionTimestamp") or any(
@@ -149,6 +151,16 @@ def run_play(server, host, directory, known, play, variables=None):
 
 
 def reconcile(api, server, host, directory):
+    try:
+        with reservation(api, server):
+            reconcile_owned(api, server, host, directory)
+    except OperatorError as exc:
+        if exc.reason != 'OperationBusy':
+            raise
+        print(server['metadata']['name'] + ': mutation ownership busy; retry next pass')
+
+
+def reconcile_owned(api, server, host, directory):
     provisioning = server.get("status", {}).get("provisioning", {})
     if provisioning.get("maintenance") or provisioning.get("phase") in (
             "PreparingBoot", "AwaitingLive", "Installing", "AwaitingInstalled", "Verifying"):

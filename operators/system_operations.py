@@ -7,9 +7,10 @@ import shlex
 import sys
 import tempfile
 
-from common import (API, address, capture_inventory, resolved_inventory_hosts, run_ansible,
-                    ssh_args, write_private)
+from common import (API, OperatorError, address, capture_inventory, resolved_inventory_hosts,
+                    run_ansible, ssh_args, write_private)
 from runner_trust import prepare
+from server_operation import reservation
 
 
 def selected_server(api, name, uid, machine_uid):
@@ -22,6 +23,8 @@ def selected_server(api, name, uid, machine_uid):
         raise RuntimeError('Server or Machine identity changed; create a newly reviewed Command')
     if reservation.get('maintenance') or reservation.get('activeRunRef') is not None:
         raise RuntimeError('Provisioning owns the Server; system operation refused')
+    if status.get('operation', {}).get('phase') == 'Held':
+        raise RuntimeError('Another operation owns the Server')
     if server.get('spec', {}).get('reconciliation', {}).get('paused'):
         raise RuntimeError('Server reconciliation is paused')
     address(status['networking']['management']['address']['address'])
@@ -80,19 +83,24 @@ def main():
         play = Path(__file__).resolve().parent.parent / 'plays' / (play_name + '.yml')
         variables = {'homelabd_binary_url': args.binary_url, 'homelabd_binary_sha256': args.sha256}
         write_private(directory / 'variables.json', json.dumps(variables))
-        result = run_ansible([
-            'ansible-playbook', '-i',
-            str(directory / 'inventory.json'),
-            str(play), '-e', '@' + str(directory / 'variables.json')
-        ], directory / (play_name + '.log'), 660)
-        if result.returncode:
-            raise RuntimeError('System operation failed; inspect Command logs')
+        snapshot = selected_server(API(), args.server, args.uid, args.machine_uid)
+        if inventory['all']['hosts'][args.server]['ansible_host'] != address(
+                snapshot['status']['networking']['management']['address']['address']):
+            raise RuntimeError('Management address changed before the operation claim')
+        with reservation(API(), snapshot):
+            result = run_ansible([
+                'ansible-playbook', '-i',
+                str(directory / 'inventory.json'),
+                str(play), '-e', '@' + str(directory / 'variables.json')
+            ], directory / (play_name + '.log'), 660)
+            if result.returncode:
+                raise RuntimeError('System operation failed; inspect Command logs')
     print(args.operation + ' complete', flush=True)
 
 
 if __name__ == '__main__':
     try:
         main()
-    except (RuntimeError, KeyError) as error:
+    except (RuntimeError, KeyError, OperatorError) as error:
         print('System operation refused/failed: ' + str(error), file=sys.stderr)
         sys.exit(1)
