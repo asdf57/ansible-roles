@@ -1,0 +1,60 @@
+---
+- name: Update homelabd on one enrolled managed Server without changing enrollment
+  hosts: all
+  gather_facts: true
+  become: true
+  tasks:
+    - name: Require a scoped target and checksum-pinned agent
+      ansible.builtin.assert:
+        that:
+          - ansible_play_hosts_all | length == 1
+          - inventory_hostname == system_operation_server_name
+          - system_operation_server_uid | length > 0
+          - system_operation_machine_uid | length > 0
+          - ansible_facts.architecture == 'x86_64'
+          - homelabd_binary_url is match('^https://')
+          - homelabd_binary_sha256 is match('^[a-f0-9]{64}$')
+    - name: Inspect protected enrollment without exposing it
+      ansible.builtin.stat:
+        path: /etc/homelabd/environment
+        checksum_algorithm: sha256
+      register: enrollment_before
+      no_log: true
+    - name: Require an already enrolled agent
+      ansible.builtin.assert:
+        that:
+          - enrollment_before.stat.isreg | default(false)
+          - enrollment_before.stat.uid == 0
+          - enrollment_before.stat.mode == '0600'
+      no_log: true
+    - name: Download and atomically install the verified agent binary
+      ansible.builtin.get_url:
+        url: "{{ homelabd_binary_url }}"
+        checksum: "sha256:{{ homelabd_binary_sha256 }}"
+        dest: /usr/local/bin/homelabd
+        owner: root
+        group: root
+        mode: '0755'
+        validate_certs: true
+      register: agent_binary
+    - name: Restart only the agent when its binary changes
+      ansible.builtin.systemd_service:
+        name: homelabd
+        state: "{{ 'restarted' if agent_binary.changed else 'started' }}"
+    - name: Verify enrollment was preserved
+      ansible.builtin.stat:
+        path: /etc/homelabd/environment
+        checksum_algorithm: sha256
+      register: enrollment_after
+      no_log: true
+    - name: Require unchanged enrollment
+      ansible.builtin.assert:
+        that:
+          - enrollment_before.stat.checksum == enrollment_after.stat.checksum
+          - enrollment_after.stat.uid == 0
+          - enrollment_after.stat.mode == '0600'
+      no_log: true
+    - name: Verify agent service health
+      ansible.builtin.command:
+        argv: [systemctl, is-active, homelabd]
+      changed_when: false

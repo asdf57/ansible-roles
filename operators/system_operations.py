@@ -58,25 +58,36 @@ def prepare_target(api, group, name, uid, machine_uid, directory):
 def main():
     """Execute a reviewed operation with container-supplied credentials and inventory."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('operation', choices=['reboot'])
+    parser.add_argument('operation', choices=['reboot', 'install-homelabd'])
     parser.add_argument('--server', required=True)
     parser.add_argument('--uid', required=True)
     parser.add_argument('--machine-uid', required=True)
+    parser.add_argument('--binary-url')
+    parser.add_argument('--sha256')
     args = parser.parse_args()
+    if args.operation == 'install-homelabd':
+        if not args.binary_url or not args.binary_url.startswith('https://'):
+            parser.error('Agent installation requires an immutable HTTPS binary URL')
+        if not args.sha256 or len(args.sha256) != 64 or any(char not in '0123456789abcdef'
+                                                            for char in args.sha256):
+            parser.error('Agent installation requires a SHA-256 checksum')
     with tempfile.TemporaryDirectory(prefix='system-operation-') as temporary:
         directory = Path(temporary)
         inventory = prepare_target(API(), os.environ['INVENTORY_CAPTURE_GROUP'], args.server,
                                    args.uid, args.machine_uid, directory)
         write_private(directory / 'inventory.json', json.dumps(inventory))
-        play = Path(__file__).resolve().parent.parent / 'plays' / 'reboot.yml'
-        result = run_ansible(
-            ['ansible-playbook', '-i',
-             str(directory / 'inventory.json'),
-             str(play)], directory / 'reboot.log', 660)
+        play_name = 'reboot' if args.operation == 'reboot' else 'install_homelabd'
+        play = Path(__file__).resolve().parent.parent / 'plays' / (play_name + '.yml')
+        variables = {'homelabd_binary_url': args.binary_url, 'homelabd_binary_sha256': args.sha256}
+        write_private(directory / 'variables.json', json.dumps(variables))
+        result = run_ansible([
+            'ansible-playbook', '-i',
+            str(directory / 'inventory.json'),
+            str(play), '-e', '@' + str(directory / 'variables.json')
+        ], directory / (play_name + '.log'), 660)
         if result.returncode:
-            raise RuntimeError(
-                'Reboot or changed-boot SSH verification failed; inspect Command logs')
-    print('Reboot complete: changed boot identity and fresh strict SSH verified', flush=True)
+            raise RuntimeError('System operation failed; inspect Command logs')
+    print(args.operation + ' complete', flush=True)
 
 
 if __name__ == '__main__':

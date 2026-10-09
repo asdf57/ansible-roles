@@ -38,6 +38,13 @@ runner. The helper requires current capture membership, strict managed SSH and
 no provisioning ownership, builds a one-host inventory and calls plays/reboot.yml.
 Do not bypass it with a broad-inventory playbook call. Tests never reboot nodes.
 
+For an enrolled-node agent update, use the same helper with `install-homelabd`,
+the three target identity flags and `--binary-url <immutable-https-url> --sha256
+<digest>`. `plays/install_homelabd.yml` updates only the verified binary and
+restarts homelabd if changed, preserving enrollment/configuration and host keys.
+This does not enroll a new node or reprovision. Verify a fresh Machine/Server
+heartbeat after the Command succeeds; an active service alone is insufficient.
+
 1. Read the Server, Machine binding, capture group, ISO and CA state. Verify the
    desired disk is explicitly approved; other Servers must not be accidentally
    enabled. Use `--preflight` with the ordinary operator credentials to inspect

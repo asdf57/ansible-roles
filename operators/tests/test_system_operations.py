@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from unittest.mock import patch
+import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import system_operations
@@ -26,6 +27,24 @@ def fixture():
 
 class SystemOperationTests(unittest.TestCase):
     """Exercise selection and trust without executing a playbook."""
+
+    def test_agent_update_preserves_enrollment_and_does_not_reboot(self):
+        """Only the checksum-pinned binary and agent service are changed."""
+        play = yaml.safe_load(
+            (Path(__file__).resolve().parents[2] / 'plays/install_homelabd.yml').read_text())[0]
+        tasks = play['tasks']
+        download = next(task['ansible.builtin.get_url'] for task in tasks
+                        if 'ansible.builtin.get_url' in task)
+        self.assertEqual(download['dest'], '/usr/local/bin/homelabd')
+        self.assertEqual(download['checksum'], 'sha256:{{ homelabd_binary_sha256 }}')
+        for task in tasks:
+            if 'enrollment' in task['name'].lower() or 'enrolled' in task['name'].lower():
+                self.assertTrue(task['no_log'])
+        commands = [
+            task['ansible.builtin.command']['argv'] for task in tasks
+            if 'ansible.builtin.command' in task
+        ]
+        self.assertEqual(commands, [['systemctl', 'is-active', 'homelabd']])
 
     def test_identity_and_maintenance_gates(self):
         """Reject changed lifetimes and existing maintenance ownership."""
