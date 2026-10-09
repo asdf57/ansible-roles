@@ -165,6 +165,7 @@ function configure_live_environment() {
   # avoids an interactive provider choice between iptables and iptables-legacy.
   append_if_missing "iptables" "${profile_dir}/packages.x86_64"
   append_if_missing "lldpd" "${profile_dir}/packages.x86_64"
+  append_if_missing "kexec-tools" "${profile_dir}/packages.x86_64"
   append_if_missing "sudo" "${profile_dir}/packages.x86_64"
 
   mkdir -p "$ssh_config_dir" "$wants_dir" "${root_fs}/var/lib"

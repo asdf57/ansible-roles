@@ -6,17 +6,17 @@
   register: bootstrap_probe
   changed_when: false
 
-- name: Require a verified independent Arch live session
+- name: Require an owned independent live session before a fresh boot
   ansible.builtin.assert:
     that:
       - (bootstrap_probe.stdout | from_json).live
-      - (bootstrap_probe.stdout | from_json).os.ID | trim('"') == 'arch'
+      - provision_attempt_id == provision_run_uid
+      - not (bootstrap_probe.stdout | from_json).rootOnTarget
       - (bootstrap_probe.stdout | from_json).bootID == provision_source_boot_id
       - (bootstrap_probe.stdout | from_json).disk == provision_disk_identity
-      - not (bootstrap_probe.stdout | from_json).mounted
       - (bootstrap_probe.stdout | from_json).uefi
       - (bootstrap_probe.stdout | from_json).secureBoot == false
-      - provision_operating_system.distribution == 'arch'
+      - provision_live_boot_arguments | length > 0
 
 - name: Require kexec to be permitted by the running kernel
   ansible.builtin.command:
@@ -37,7 +37,7 @@
 - name: Require the supported HTTPS netboot artifact layout
   ansible.builtin.assert:
     that:
-      - bootstrap_rootfs.url is match('^https://.+/arch/x86_64/airootfs.sfs$')
+      - bootstrap_rootfs.url is match('^https://')
       - bootstrap_kernel.url is match('^https://')
       - bootstrap_initrd.url is match('^https://')
       - bootstrap_kernel.sha256 is match('^[a-f0-9]{64}$')
@@ -47,7 +47,6 @@
   ansible.builtin.package:
     name: kexec-tools
     state: present
-    update_cache: true
 
 - name: Create a protected RAM-backed live bootstrap directory
   ansible.builtin.file:
@@ -75,4 +74,4 @@
       - --load
       - /run/homelab-live-bootstrap/kernel
       - --initrd=/run/homelab-live-bootstrap/initrd
-      - "--command-line=archisobasedir=arch archiso_http_srv={{ bootstrap_rootfs.url | regex_replace('arch/x86_64/airootfs.sfs$', '') }} ip=dhcp net.ifnames=0 BOOTIF=01-{{ provision_boot_mac | replace(':', '-') }}"
+      - "--command-line={{ provision_live_boot_arguments | join(' ') }}"

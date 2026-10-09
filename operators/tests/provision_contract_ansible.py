@@ -91,6 +91,7 @@ def main():
         },
         'provision_live_build_id': 'build',
         'provision_live_boot_id': 'live',
+        'provision_source_boot_id': 'source',
         'provision_disk_identity': identity,
         'destructive_probe': {
             'stdout': json.dumps(probe)
@@ -100,6 +101,7 @@ def main():
     for field, replacement in [('provision_run_uid', ''), ('provision_attempt_id', 'other'),
                                ('provision_destructive_authorized', False),
                                ('provision_live_boot_id', 'other'),
+                               ('provision_source_boot_id', 'live'),
                                ('provision_disk_identity', {
                                    **identity, 'serial': 'other'
                                })]:
@@ -123,38 +125,43 @@ def main():
                 result.returncode == 0) == expected, label + '\n' + result.stdout + result.stderr
         print(label + ': passed')
 
-    cleanup = yaml.safe_load((root / 'roles/provision/tasks/cleanup_staging.yml').read_text())
-    guard = next(
-        task for task in cleanup
-        if task['name'] == 'Require the owned independent live session before staging cleanup')
-    staged = {**probe, 'mounted': True, 'rootOnTarget': False, 'cleanupMounts': ['/mnt']}
-    for field, value, accepted in [('cleanupMounts', ['/mnt'], True),
-                                   ('cleanupMounts', None, False), ('rootOnTarget', True, False),
-                                   ('bootID', 'other', False), ('liveBuildID', 'other', False)]:
-        case = {
-            **variables, 'provision_cleanup_boot_id': 'live',
-            'provision_cleanup_build_id': 'build',
-            'staging_probe': {
-                'stdout': json.dumps({
-                    **staged, field: value
-                })
+    refresh = yaml.safe_load((root / 'roles/provision/tasks/refresh_live.yml').read_text())
+    guard = next(task for task in refresh
+                 if task['name'] == 'Require an owned independent live session before a fresh boot')
+    for source in ('arch', 'debian'):
+        for independent in (True, False):
+            case = {
+                **variables, 'provision_source_boot_id': 'source',
+                'provision_live_boot_arguments': ['BOOTIF=01-00-11-22-33-44-55'],
+                'bootstrap_probe': {
+                    'stdout':
+                    json.dumps({
+                        **probe, 'bootID': 'source',
+                        'rootOnTarget': not independent,
+                        'mounted': True,
+                        'uefi': True,
+                        'secureBoot': False,
+                        'os': {
+                            'ID': source
+                        }
+                    })
+                }
             }
-        }
-        with tempfile.TemporaryDirectory(prefix='cleanup-contract-') as temporary:
-            play = Path(temporary) / 'guard.yml'
-            play.write_text(
-                yaml.safe_dump([{
-                    'hosts': 'localhost',
-                    'connection': 'local',
-                    'gather_facts': False,
-                    'vars': case,
-                    'tasks': [guard]
-                }]))
-            result = subprocess.run(['ansible-playbook', '-i', 'localhost,',
-                                     str(play)], capture_output=True, text=True, timeout=60,
-                                    check=False)
-            assert (result.returncode == 0) == accepted, result.stdout + result.stderr
-        print(f'Staging guard {field} accepted={accepted}: passed')
+            with tempfile.TemporaryDirectory(prefix='handoff-contract-') as temporary:
+                play = Path(temporary) / 'guard.yml'
+                play.write_text(
+                    yaml.safe_dump([{
+                        'hosts': 'localhost',
+                        'connection': 'local',
+                        'gather_facts': False,
+                        'vars': case,
+                        'tasks': [guard]
+                    }]))
+                result = subprocess.run(['ansible-playbook', '-i', 'localhost,',
+                                         str(play)], capture_output=True, text=True, timeout=60,
+                                        check=False)
+                assert (result.returncode == 0) == independent, result.stdout + result.stderr
+            print(f'Live handoff {source} independent={independent}: passed')
 
 
 if __name__ == '__main__':

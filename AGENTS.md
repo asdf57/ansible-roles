@@ -21,6 +21,16 @@
 
 ## Provisioning procedure
 
+Design boundary: read RFC 0003's Desired provisioning lifecycle before changes.
+Every new run must boot a fresh pinned live image and verify a changed boot ID
+before wiping/installing the approved disk, then boot locally and verify.
+Installed hosts use GRUB/iPXE; live hosts use generic kexec, even on the current
+live image. Firmware/iPXE handles initial discovery. Both consume shared ISO
+bootArguments; do not duplicate distro recipes or substitute staging cleanup
+for fresh boot. Orderly kexec shutdown replaces the old session. Recovery restores the normal path;
+test boot-path availability across failure stages. Current code still has gaps;
+do not describe this desired lifecycle as deployed until acceptance verifies it.
+
 System operations use ordinary Commands: run
 `python3 "$ANSIBLE_ROLES_PATH/../operators/system_operations.py" reboot --server
 <name> --uid <server-uid> --machine-uid <bound-machine-uid>` in the initialized
@@ -68,11 +78,8 @@ Do not bypass it with a broad-inventory playbook call. Tests never reboot nodes.
 - Installed OS boots locally by default. Reprovision uses the one-shot
   `grub-reboot homelab-netboot` entry; do not make network/API availability a
   dependency of every normal boot.
-- An older verified Arch USB-live session can refresh into the pinned Arch
-  image through guarded Ansible kexec stages. It cannot be accepted directly
-  for erasure without the immutable live-build marker.
 - Arch HTTP-live boot requires `ip=dhcp net.ifnames=0 BOOTIF=01-<boot-MAC>`.
-  In iPXE use `BOOTIF=01-${netX/mac}`; in kexec use the verified MAC with hyphens.
+  In iPXE use `BOOTIF=01-${netX/mac}`.
   Without BOOTIF, ip-config can report `SIOCGIFFLAGS: No such device`.
 - Debian live-boot must not receive `ip=dhcp`: its static-IP parser turns this
   into `nameserver dhcp`. HTTPS fetch already requests DHCP. Keep BOOTIF, omit
@@ -106,10 +113,9 @@ Do not bypass it with a broad-inventory playbook call. Tests never reboot nodes.
 
 ## Failure and repair
 
-- Starting over uses DELETE of the Blocked run, then a normal new ProvisioningRun.
-  The new attempt cleans up exact approved-disk /mnt staging mounts through
-  cleanup_staging.yml before live refresh and installation. Never force/lazy
-  unmount, delete active runs, or assume API deletion changed the machine.
+- Starting over uses DELETE of the Blocked run, then a normal new ProvisioningRun
+  following the fresh-live-boot contract above. Never force/lazy unmount,
+  delete active runs, or assume API deletion changed the machine.
 
 - For a proven failure before erasure with an intact prior installation, use
   `plays/verify_failed_provision_cleanup.yml` with a Beelink-only inventory and

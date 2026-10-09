@@ -323,6 +323,42 @@ class ProvisioningTests(unittest.TestCase):
         stage.assert_called_once_with(value, Path('/private'), Path('/private/known_hosts'),
                                       'reboot')
 
+    def test_every_live_image_requires_fresh_handoff_before_install(self):
+        """Current/old Arch/Debian sessions, including staged mounts, must restart."""
+        for distribution in ('arch', 'debian'):
+            for current_build in ('build', 'older-build'):
+                with self.subTest(distribution=distribution, build=current_build):
+                    api = RunAPI()
+                    api.run['status']['snapshot']['distribution'] = distribution
+                    data = {
+                        **facts(), 'mounted': True,
+                        'liveBuildID': current_build,
+                        'os': {
+                            'ID': distribution
+                        }
+                    }
+                    with tempfile.TemporaryDirectory() as tmp, \
+                            patch.object(p, 'inspect', return_value=data), \
+                            patch.object(p, 'verify_dependencies'), patch.object(p, 'drain_commands'), \
+                            patch.object(p, 'artifact_preflight'), patch.object(p, 'run_stage') as stage, \
+                            patch.object(p, 'await_session', side_effect=p.OperatorError('Wait', 'fixture')):
+                        with self.assertRaises(p.OperatorError):
+                            p.reconcile(api, api.view(), {}, Path(tmp), 'revision')
+                    self.assertEqual([call.args[3] for call in stage.call_args_list],
+                                     ['prime', 'refresh-prepare', 'refresh-boot'])
+                    self.assertEqual(api.run['status']['phase'], 'AwaitingLive')
+                    self.assertIsNone(api.run['status'].get('liveBootID'))
+
+    def test_unchanged_live_boot_cannot_enter_installing(self):
+        """A recorded build match is insufficient without a new boot session."""
+        api = RunAPI('AwaitingLive')
+        with tempfile.TemporaryDirectory() as tmp, patch.object(p, 'inspect', return_value=facts()), \
+                patch.object(p, 'verify_dependencies'), patch.object(p, 'drain_commands'), \
+                patch.object(p, 'run_stage') as stage:
+            with self.assertRaises(p.OperatorError):
+                p.reconcile(api, api.view(), {}, Path(tmp), 'revision')
+            stage.assert_not_called()
+
     def test_successful_live_first_flow_installs_once_and_records_run(self):
         api = RunAPI('Pending')
 
@@ -330,6 +366,8 @@ class ProvisioningTests(unittest.TestCase):
             if value['status']['provisioning'].get('phase') == 'Verifying':
                 return self.installed(value)
             data = facts()
+            if value['status']['provisioning'].get('phase') not in ('Pending', 'PreparingBoot'):
+                data['bootID'] = 'fresh-live-boot'
             if value['status']['provisioning'].get('phase') == 'AwaitingInstalled':
                 data.update(
                     stagedBootReady=True, stagedMarker={
@@ -339,17 +377,28 @@ class ProvisioningTests(unittest.TestCase):
                         'planDigest': 'plan'
                     })
             return data
+
+        def enrolled(api, value, data, known, _directory):
+            p.checkpoint(api, value, 'AwaitingLive', liveBootID=data['bootID'], netbootArmed=False)
+            return known
+
+        def awaited(_api, value, *args, **kwargs):
+            if kwargs.get('live'):
+                return {**facts(), 'bootID': 'fresh-live-boot'}, Path('known')
+            return self.installed(value), Path('known')
+
         with tempfile.TemporaryDirectory() as tmp, patch.object(p, 'inspect', side_effect=observed), \
                 patch.object(p, 'plan', return_value=snapshot(api.server)), patch.object(p, 'verify_dependencies'), \
                 patch.object(p, 'drain_commands'), patch.object(p, 'artifact_preflight'), \
-                patch.object(p, 'enroll_live', side_effect=lambda _api, _value, _facts, known, _dir: known), \
+                patch.object(p, 'enroll_live', side_effect=enrolled), \
                 patch.object(p, 'run_stage') as stage, patch.object(p, 'reboot') as reboot, \
-                patch.object(p, 'await_session', side_effect=lambda _api, value, *a, **kw: (self.installed(value), Path('known'))), \
+                patch.object(p, 'await_session', side_effect=awaited), \
                 patch.object(p.subprocess, 'run') as services, \
                 patch.dict(os.environ, {'ANSIBLE_CERTIFICATE_FILE':'cert','ANSIBLE_PRIVATE_KEY_FILE':'key'}):
             services.return_value.returncode = 0
             p.reconcile(api, api.view(), {}, Path(tmp), 'revision')
-        self.assertEqual([call.args[3] for call in stage.call_args_list], ['install', 'post'])
+        self.assertEqual([call.args[3] for call in stage.call_args_list],
+                         ['prime', 'refresh-prepare', 'refresh-boot', 'install', 'post'])
         self.assertEqual(reboot.call_count, 1)
         self.assertEqual(api.run['status']['phase'], 'Succeeded')
         self.assertEqual(api.server['status']['provisioning']['lastSuccessfulRunRef']['uid'],

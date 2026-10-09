@@ -164,15 +164,13 @@ def inspect(server, known):
     return json.loads(result.stdout)
 
 
-def validate_disk(facts, live_required=False, allow_staging=False):
+def validate_disk(facts, live_required=False):
     if not facts["uefi"] or facts["secureBoot"] is not False:
         raise OperatorError(
             "ProvisioningBlocked",
             "Unsigned v1 GRUB/iPXE path requires UEFI with Secure Boot off; do not change firmware automatically"
         )
-    cleanup_allowed = (allow_staging and facts.get('cleanupMounts') is not None
-                       and not facts.get('rootOnTarget', True))
-    if live_required and (not facts["live"] or (facts["mounted"] and not cleanup_allowed)):
+    if live_required and (not facts["live"] or facts["mounted"] or facts['rootOnTarget']):
         raise OperatorError(
             "ProvisioningBlocked",
             "Installation requires live execution independent of the unmounted target disk")
@@ -216,12 +214,11 @@ def plan(api, server, variables, facts, revision):
             }:
         raise OperatorError("ProvisioningBlocked", "Machine binding is stale")
     build_id = image_status["completedBuild"]["id"]
-    if facts["live"] and facts.get("liveBuildID") != build_id:
-        if image['spec']['distribution'] != 'arch' or facts['os'].get('ID',
-                                                                      '').strip('"') != 'arch':
-            raise OperatorError(
-                "ProvisioningBlocked",
-                "Refreshing an older live session currently requires Arch-to-Arch bootstrap")
+    boot_arguments = image_status.get('bootArguments')
+    if not boot_arguments or any(not isinstance(arg, str) or any(c.isspace()
+                                                                 for c in arg) or '$' in arg
+                                 for arg in boot_arguments):
+        raise OperatorError('ProvisioningBlocked', 'Selected ISO has no valid shared boot recipe')
     if desired["operatingSystem"]["distribution"] == "arch" and image["spec"][
             "distribution"] != "arch":
         raise OperatorError("ProvisioningBlocked",
@@ -298,6 +295,7 @@ def plan(api, server, variables, facts, revision):
         "trustBundleDigest": ca["trustBundleDigest"],
         "isoBuildID": build_id,
         "distribution": image["spec"]["distribution"],
+        "bootArguments": boot_arguments,
         "artifacts": image_status["artifacts"],
         "targetDisk": target,
         "diskIdentity": facts["disk"],
@@ -375,7 +373,7 @@ def failed_ansible_task(output):
     return failures[-1] if failures else 'initialization (see playbook output)'
 
 
-def run_stage(server, directory, known, stage, facts=None):
+def run_stage(server, directory, known, stage):
     p = server["status"]["provisioning"]
     snapshot = p["snapshot"]
     inventory = {
@@ -413,10 +411,11 @@ def run_stage(server, directory, known, stage, facts=None):
         "ssh_ca_bundle_digest": snapshot["trustBundleDigest"]
     }
     variables['provision_live_artifacts'] = snapshot['artifacts']
+    variables['provision_live_boot_arguments'] = [
+        arg.replace('@BOOT_MAC@', snapshot['bootMAC'].replace(':', '-'))
+        for arg in snapshot.get('bootArguments', [])
+    ]
     variables['provision_source_boot_id'] = p['sourceBootID']
-    if stage == 'cleanup':
-        variables['provision_cleanup_boot_id'] = facts['bootID']
-        variables['provision_cleanup_build_id'] = facts['liveBuildID']
     write_private(directory / "inventory.json", json.dumps(inventory))
     write_private(directory / "variables.json", json.dumps(variables))
     plays = Path(os.environ.get("ANSIBLE_PLAYS_PATH", "/homelab/plays"))
@@ -572,7 +571,10 @@ def reconcile(api, server, variables, directory, revision, preflight=False):
         identity(server)
         known = known_file(server, directory)
         facts = inspect(server, known)
-        validate_disk(facts, live_required=facts["live"], allow_staging=True)
+        # Existing staging mounts/swap are irrelevant until the new live boot.
+        validate_disk(facts)
+        if facts['live'] and facts['rootOnTarget']:
+            raise OperatorError('ProvisioningBlocked', 'Live root depends on the approved disk')
         if not facts["live"] and not facts["grubReady"]:
             raise OperatorError(
                 "ProvisioningBlocked",
@@ -630,21 +632,13 @@ def reconcile(api, server, variables, directory, revision, preflight=False):
                                 "Unexpected session/disk before boot preparation")
         artifact_preflight(api, server)
         if facts["live"]:
-            if facts['mounted']:
-                current(api, server)
-                run_stage(server, directory, known, 'cleanup', facts)
-                facts = inspect(server, known)
-                validate_disk(facts, live_required=True)
-            if facts["liveBuildID"] != p["snapshot"]["isoBuildID"]:
-                run_stage(server, directory, known, 'prime')
-                checkpoint(api, server, 'PreparingBoot', netbootArmed=True)
-                run_stage(server, directory, known, 'refresh-prepare')
-                current(api, server)
-                checkpoint(api, server, 'AwaitingLive', liveBootID=None, netbootArmed=True)
-                current(api, server)
-                run_stage(server, directory, known, 'refresh-boot')
-            else:
-                checkpoint(api, server, "AwaitingLive", liveBootID=facts["bootID"])
+            run_stage(server, directory, known, 'prime')
+            checkpoint(api, server, 'PreparingBoot', netbootArmed=True)
+            run_stage(server, directory, known, 'refresh-prepare')
+            current(api, server)
+            checkpoint(api, server, 'AwaitingLive', liveBootID=None, netbootArmed=True)
+            current(api, server)
+            run_stage(server, directory, known, 'refresh-boot')
         else:
             if "next_entry=" in facts["grubEnvironment"]:
                 raise OperatorError("ProvisioningBlocked", "Unaccounted pending GRUB entry")
@@ -658,8 +652,9 @@ def reconcile(api, server, variables, directory, revision, preflight=False):
     if p["phase"] == "AwaitingLive":
         if p.get("liveBootID"):
             facts = inspect(server, known)
-            if facts["bootID"] != p["liveBootID"] or not facts["live"] or facts["liveBuildID"] != p[
-                    "snapshot"]["isoBuildID"]:
+            if facts['bootID'] == p['sourceBootID'] or facts["bootID"] != p[
+                    "liveBootID"] or not facts["live"] or facts["liveBuildID"] != p["snapshot"][
+                        "isoBuildID"]:
                 raise OperatorError("ProvisioningBlocked", "Recorded live session changed")
         else:
             facts, known = await_session(api, server, directory, live=True)
@@ -668,7 +663,7 @@ def reconcile(api, server, variables, directory, revision, preflight=False):
         current(api, server)
         checkpoint(api, server, "Installing",
                    message="Destructive stage entered; interrupted runs require manual inspection")
-        run_stage(server, directory, known, "install", facts)
+        run_stage(server, directory, known, "install")
         checkpoint(api, server, "AwaitingInstalled", bootTarget="installed", netbootArmed=False)
     p = server["status"]["provisioning"]
     if p["phase"] == "AwaitingInstalled":

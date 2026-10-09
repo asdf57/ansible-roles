@@ -137,6 +137,7 @@ debootstrap
 arch-install-scripts
 locales
 lldpd
+kexec-tools
 sudo
 EOF
 
