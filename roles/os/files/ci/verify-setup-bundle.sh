@@ -12,12 +12,9 @@ case "$type" in
         mapfile -t images < <(find "$output" -maxdepth 1 -type f -name '*.iso')
         [[ ${#images[@]} == 1 ]] || { echo 'Expected one ISO artifact' >&2; exit 1; }
         # Debian uses /live, Arch uses /arch/x86_64.
-        if xorriso -indev "${images[0]}" -ls /live/filesystem.squashfs >/dev/null 2>&1; then
-            path=/live/filesystem.squashfs
-        else
-            path=/arch/x86_64/airootfs.sfs
+        if ! xorriso -osirrox on -indev "${images[0]}" -extract /live/filesystem.squashfs "$check_dir/filesystem.squashfs" >/dev/null 2>&1; then
+            xorriso -osirrox on -indev "${images[0]}" -extract /arch/x86_64/airootfs.sfs "$check_dir/filesystem.squashfs" >/dev/null 2>&1
         fi
-        xorriso -osirrox on -indev "${images[0]}" -extract "$path" "$check_dir/filesystem.squashfs" >/dev/null 2>&1
         filesystem="$check_dir/filesystem.squashfs"
         ;;
     netboot)

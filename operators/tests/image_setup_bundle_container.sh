@@ -14,6 +14,12 @@ bash /source/roles/os/files/ci/verify-setup-bundle.sh netboot "$fixture/netboot"
 cp "$fixture/netboot/filesystem.squashfs" "$fixture/media/live/"
 xorriso -as mkisofs -o "$fixture/iso/test.iso" "$fixture/media" >/dev/null 2>&1
 bash /source/roles/os/files/ci/verify-setup-bundle.sh iso "$fixture/iso" /assets
+mkdir -p "$fixture/arch-media/arch/x86_64" "$fixture/arch-iso" "$fixture/arch-netboot/arch/x86_64"
+cp "$fixture/netboot/filesystem.squashfs" "$fixture/arch-media/arch/x86_64/airootfs.sfs"
+cp "$fixture/netboot/filesystem.squashfs" "$fixture/arch-netboot/arch/x86_64/airootfs.sfs"
+xorriso -as mkisofs -o "$fixture/arch-iso/test.iso" "$fixture/arch-media" >/dev/null 2>&1
+bash /source/roles/os/files/ci/verify-setup-bundle.sh iso "$fixture/arch-iso" /assets
+bash /source/roles/os/files/ci/verify-setup-bundle.sh netboot "$fixture/arch-netboot" /assets
 rm "$fixture/root/usr/share/homelabd/setup/agent/configure-debian-lldp.sh"
 mksquashfs "$fixture/root" "$fixture/netboot/filesystem.squashfs" -noappend -processors 1 >/dev/null
 if bash /source/roles/os/files/ci/verify-setup-bundle.sh netboot "$fixture/netboot" /assets; then
