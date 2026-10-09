@@ -1,6 +1,7 @@
 """Exercise real installation assertions locally, without disk commands or SSH."""
 import copy
 import json
+import os
 from pathlib import Path
 import subprocess
 import tempfile
@@ -10,6 +11,46 @@ import yaml
 
 def main():
     root = Path(__file__).resolve().parents[2]
+    # Exercise the real asset gate locally, including the missing-helper failure.
+    with tempfile.TemporaryDirectory(prefix='provision-assets-') as temporary:
+        assets = Path(temporary) / 'setup'
+        names = ('management/install.sh', 'management/ensure-ansible-user',
+                 'management/ansible.sudoers', 'agent/install.sh', 'systemd/homelabd.service',
+                 'systemd/ansible-account.service', 'systemd/ansible-account.timer',
+                 'sshd/00-ansible-management.conf', 'sshd/10-homelabd.conf',
+                 'agent/configure-debian-lldp.sh')
+        for name in names:
+            file = assets / name
+            file.parent.mkdir(parents=True, exist_ok=True)
+            file.write_text('fixture\n')
+        play = Path(temporary) / 'assets.yml'
+        play.write_text(
+            yaml.safe_dump([{
+                'hosts':
+                'localhost',
+                'connection':
+                'local',
+                'gather_facts':
+                False,
+                'vars': {
+                    'provision_operating_system': {
+                        'distribution': 'debian'
+                    }
+                },
+                'tasks': [{
+                    'ansible.builtin.include_tasks':
+                    str(root / 'roles/provision/tasks/validate_management_assets.yml')
+                }]
+            }]))
+        for complete in (True, False):
+            if not complete:
+                (assets / 'agent/configure-debian-lldp.sh').unlink()
+            result = subprocess.run(['ansible-playbook', '-i', 'localhost,',
+                                     str(play)], env={
+                                         **os.environ, 'HOMELABD_SETUP_SOURCE': str(assets)
+                                     }, capture_output=True, text=True, timeout=60)
+            assert (result.returncode == 0) == complete, result.stdout + result.stderr
+            print('Complete bundle accepted' if complete else 'Missing helper rejected')
     tasks = yaml.safe_load((root / 'roles/provision/tasks/install.yml').read_text())
     assertions = [
         tasks[0],

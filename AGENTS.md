@@ -94,6 +94,9 @@ Do not bypass it with a broad-inventory playbook call. Tests never reboot nodes.
   Use the shared homelabd agent setup for PATH, _lldpd membership and the
   non-setuid package override; never grant adm to fix discovery. An active
   daemon is insufficient: post provisioning queries neighbors as homelabd.
+- Validate retained setup dependencies before erasure. Build CI checks the
+  complete asset bundle inside both ISO and netboot filesystems; container tests
+  must install from /usr/share/homelabd/setup, not only the source checkout.
 - To inspect a completed ISO inside a build task, use xorriso -osirrox on
   -indev <iso> -extract /live/filesystem.squashfs <temporary-file>, then
   unsquashfs -cat for the agent unit/group or -ll for lldpcli permissions.

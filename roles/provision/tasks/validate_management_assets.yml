@@ -1,0 +1,18 @@
+---
+- name: Check complete management assets before installation work
+  ansible.builtin.stat:
+    path: "{{ (lookup('env', 'HOMELABD_SETUP_SOURCE') | default('/usr/share/homelabd/setup', true)) }}/{{ item }}"
+  delegate_to: "{{ 'localhost' if lookup('env', 'HOMELABD_SETUP_SOURCE') else inventory_hostname }}"
+  become: "{{ not lookup('env', 'HOMELABD_SETUP_SOURCE') }}"
+  loop: "{{ ['management/install.sh', 'management/ensure-ansible-user', 'management/ansible.sudoers', 'agent/install.sh', 'systemd/homelabd.service', 'systemd/ansible-account.service', 'systemd/ansible-account.timer', 'sshd/00-ansible-management.conf', 'sshd/10-homelabd.conf'] + (['agent/configure-debian-lldp.sh'] if provision_operating_system.distribution == 'debian' else []) }}"
+  register: provision_management_assets
+
+- name: Reject incomplete management assets before touching storage
+  ansible.builtin.assert:
+    that:
+      - item.stat.isreg | default(false)
+      - item.stat.size | default(0) > 0
+    fail_msg: "Incomplete management setup bundle: {{ item.item }}"
+  loop: "{{ provision_management_assets.results }}"
+  loop_control:
+    label: "{{ item.item }}"

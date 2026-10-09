@@ -363,6 +363,16 @@ def artifact_preflight(api, server):
                             "Boot endpoint did not select the pinned live image")
 
 
+def failed_ansible_task(output):
+    """Keep the failure label even when an always cleanup task follows."""
+    blocks = re.split(r'TASK \[([^\]\r\n]+)\][^\r\n]*', output)
+    failures = [
+        blocks[index] for index in range(1, len(blocks), 2)
+        if re.search(r'(?m)^fatal: .*?(FAILED!|UNREACHABLE!)', blocks[index + 1])
+    ]
+    return failures[-1] if failures else 'initialization (see playbook output)'
+
+
 def run_stage(server, directory, known, stage, facts=None):
     p = server["status"]["provisioning"]
     snapshot = p["snapshot"]
@@ -414,9 +424,8 @@ def run_stage(server, directory, known, stage, facts=None):
         str(plays / "provision_stage.yml"), "-e", "@" + str(directory / "variables.json")
     ], diagnostic, timeout=7200 if stage in ("install", "repair") else 600)
     if result.returncode:
-        tasks = re.findall(r'TASK \[([^\]\r\n]+)\]', result.stdout)
         # Private diagnostics remain in the failed task container, not build logs.
-        last = tasks[-1] if tasks else 'initialization'
+        last = failed_ansible_task(result.stdout)
         raise OperatorError(
             "ProvisioningBlocked", "Ansible stage failed at " + last +
             "; see playbook output (credential tasks remain redacted)")

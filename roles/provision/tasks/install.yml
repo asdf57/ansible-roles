@@ -14,6 +14,9 @@
       - provision_plan_digest is defined
       - storage.partitions | map(attribute='fs_type') | list == ['efi', 'swap', 'ext4']
 
+- name: Validate the complete setup bundle before any disk operations
+  ansible.builtin.include_tasks: validate_management_assets.yml
+
 - name: Resolve the approved stable disk
   ansible.builtin.command:
     argv: [readlink, -e, "{{ provision_target_disk }}"]

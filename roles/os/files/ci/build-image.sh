@@ -56,4 +56,5 @@ export HOMELABD_MANAGEMENT_INSTALL_SOURCE="$PWD/homelabd/setup/management/instal
 export HOMELAB_API_ENDPOINT="$(jq -r .apiEndpoint "$input")"
 for type in iso netboot; do
     bash builder/roles/os/files/build.sh -d "$distro" -o "$PWD/image-output/$type" -c "$bundle" -- -t "$type"
+    bash builder/roles/os/files/ci/verify-setup-bundle.sh "$type" "$PWD/image-output/$type" "$PWD/homelabd/setup"
 done

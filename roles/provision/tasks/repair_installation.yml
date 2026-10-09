@@ -6,6 +6,9 @@
       - not provision_destructive_authorized | bool
       - provision_target_disk is match('^/dev/disk/by-id/[^/]+$')
 
+- name: Validate setup dependencies before configuration repair
+  ansible.builtin.include_tasks: validate_management_assets.yml
+
 - name: Verify the original live session and physical disk before configuration repair
   ansible.builtin.command:
     argv: [python3, '-', "{{ provision_target_disk }}"]
