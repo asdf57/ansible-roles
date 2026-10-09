@@ -164,13 +164,15 @@ def inspect(server, known):
     return json.loads(result.stdout)
 
 
-def validate_disk(facts, live_required=False):
+def validate_disk(facts, live_required=False, allow_staging=False):
     if not facts["uefi"] or facts["secureBoot"] is not False:
         raise OperatorError(
             "ProvisioningBlocked",
             "Unsigned v1 GRUB/iPXE path requires UEFI with Secure Boot off; do not change firmware automatically"
         )
-    if live_required and (not facts["live"] or facts["mounted"]):
+    cleanup_allowed = (allow_staging and facts.get('cleanupMounts') is not None
+                       and not facts.get('rootOnTarget', True))
+    if live_required and (not facts["live"] or (facts["mounted"] and not cleanup_allowed)):
         raise OperatorError(
             "ProvisioningBlocked",
             "Installation requires live execution independent of the unmounted target disk")
@@ -412,6 +414,9 @@ def run_stage(server, directory, known, stage, facts=None):
     }
     variables['provision_live_artifacts'] = snapshot['artifacts']
     variables['provision_source_boot_id'] = p['sourceBootID']
+    if stage == 'cleanup':
+        variables['provision_cleanup_boot_id'] = facts['bootID']
+        variables['provision_cleanup_build_id'] = facts['liveBuildID']
     write_private(directory / "inventory.json", json.dumps(inventory))
     write_private(directory / "variables.json", json.dumps(variables))
     plays = Path(os.environ.get("ANSIBLE_PLAYS_PATH", "/homelab/plays"))
@@ -567,7 +572,7 @@ def reconcile(api, server, variables, directory, revision, preflight=False):
         identity(server)
         known = known_file(server, directory)
         facts = inspect(server, known)
-        validate_disk(facts, live_required=facts["live"])
+        validate_disk(facts, live_required=facts["live"], allow_staging=True)
         if not facts["live"] and not facts["grubReady"]:
             raise OperatorError(
                 "ProvisioningBlocked",
@@ -625,6 +630,11 @@ def reconcile(api, server, variables, directory, revision, preflight=False):
                                 "Unexpected session/disk before boot preparation")
         artifact_preflight(api, server)
         if facts["live"]:
+            if facts['mounted']:
+                current(api, server)
+                run_stage(server, directory, known, 'cleanup', facts)
+                facts = inspect(server, known)
+                validate_disk(facts, live_required=True)
             if facts["liveBuildID"] != p["snapshot"]["isoBuildID"]:
                 run_stage(server, directory, known, 'prime')
                 checkpoint(api, server, 'PreparingBoot', netbootArmed=True)

@@ -106,6 +106,11 @@ Do not bypass it with a broad-inventory playbook call. Tests never reboot nodes.
 
 ## Failure and repair
 
+- Starting over uses DELETE of the Blocked run, then a normal new ProvisioningRun.
+  The new attempt cleans up exact approved-disk /mnt staging mounts through
+  cleanup_staging.yml before live refresh and installation. Never force/lazy
+  unmount, delete active runs, or assume API deletion changed the machine.
+
 - For a proven failure before erasure with an intact prior installation, use
   `plays/verify_failed_provision_cleanup.yml` with a Beelink-only inventory and
   the exact run UID, Server UID, live boot/build IDs, disk identity and by-id path.

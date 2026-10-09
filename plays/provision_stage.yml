@@ -7,7 +7,7 @@
     - name: Require an explicit supported stage and pinned attempt
       ansible.builtin.assert:
         that:
-          - provision_stage in ['prime', 'arm', 'clear', 'install', 'repair', 'post', 'refresh-prepare', 'refresh-boot', 'refresh-clear', 'reboot']
+          - provision_stage in ['prime', 'arm', 'clear', 'cleanup', 'install', 'repair', 'post', 'refresh-prepare', 'refresh-boot', 'refresh-clear', 'reboot']
           - provision_attempt_id is defined
           - provision_server_uid is defined
     - name: Prime the boot NIC
@@ -29,6 +29,11 @@
         name: provision
         tasks_from: install
       when: provision_stage == 'install'
+    - name: Clean up verified leftover installation mounts for a fresh request
+      ansible.builtin.include_role:
+        name: provision
+        tasks_from: cleanup_staging
+      when: provision_stage == 'cleanup'
     - name: Prepare the pinned live bootstrap without changing disks
       ansible.builtin.include_role:
         name: provision

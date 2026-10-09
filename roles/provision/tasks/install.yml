@@ -29,6 +29,12 @@
     partition_prefix: "{{ approved_disk.stdout }}{{ 'p' if approved_disk.stdout is search('[0-9]$') else '' }}"
     chroot_name: chroot
 
+- name: Clean up any verified staging mounts before a fresh installation
+  ansible.builtin.include_tasks: cleanup_staging.yml
+  vars:
+    provision_cleanup_boot_id: "{{ provision_live_boot_id }}"
+    provision_cleanup_build_id: "{{ provision_live_build_id }}"
+
 - name: Reinspect the approved disk immediately before erasure
   ansible.builtin.command:
     argv: [python3, '-', "{{ provision_target_disk }}"]

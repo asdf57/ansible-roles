@@ -7,6 +7,42 @@ import subprocess
 import sys
 
 
+def cleanup_mounts(device, nodes, mounts):
+    """Reject unrelated mounts; return ordinary unmount targets deepest first."""
+    prefix = device + ('p' if device[-1].isdigit() else '')
+    partitions = {node['path'] for node in nodes}
+    disk_mounts = [path for node in nodes for path in (node.get('mountpoints') or []) if path]
+    if any(path != '/mnt' and not path.startswith('/mnt/') for path in disk_mounts):
+        raise RuntimeError('Approved disk is mounted outside the installation staging root')
+    staged = [
+        mount for mount in mounts
+        if mount['target'] == '/mnt' or mount['target'].startswith('/mnt/')
+    ]
+    if not staged and not disk_mounts:
+        return []
+    roots = {mount['target']: mount for mount in staged}
+    if len(roots) != len(staged):
+        raise RuntimeError('Stacked staging mounts require manual inspection')
+    if roots.get('/mnt', {}).get('source') != prefix + '3':
+        raise RuntimeError('Staging root is not partition 3 of the approved disk')
+    for mount in staged:
+        target, source = mount['target'], mount['source'].split('[')[0]
+        if target == '/mnt' and source == prefix + '3':
+            continue
+        if target == '/mnt/boot/efi' and source == prefix + '1':
+            continue
+        if source in partitions or source.startswith('/dev/'):
+            raise RuntimeError('Unexpected device mounted below the installation staging root')
+        if not any(target == '/mnt/' + base or target.startswith('/mnt/' + base + '/')
+                   for base in ('dev', 'proc', 'sys', 'run')):
+            raise RuntimeError('Unexpected mount below the installation staging root')
+        if mount['fstype'] not in ('devtmpfs', 'devpts', 'proc', 'sysfs', 'efivarfs', 'tmpfs',
+                                   'cgroup2', 'securityfs', 'debugfs', 'tracefs', 'pstore',
+                                   'mqueue', 'hugetlbfs', 'bpf', 'fusectl', 'configfs'):
+            raise RuntimeError('Unexpected staging bind filesystem')
+    return sorted(roots, key=lambda path: (path.count('/'), path), reverse=True)
+
+
 def command(*args):
     return subprocess.check_output(args, text=True, timeout=30).strip()
 
@@ -66,6 +102,15 @@ def probe(target):
 
     nodes = list(descendants(disk))
     live = Path("/var/lib/is_live_env").exists()
+    mounted = any(any(node.get('mountpoints') or []) for node in nodes)
+    cleanup = None
+    if live:
+        try:
+            mounts = json.loads(command('findmnt', '--json', '--list', '-o',
+                                        'TARGET,SOURCE,FSTYPE'))['filesystems']
+            cleanup = cleanup_mounts(resolved, nodes, mounts)
+        except (RuntimeError, ValueError, KeyError):
+            cleanup = None
     marker_file = Path("/var/lib/homelab/provisioning.json")
     marker = json.loads(marker_file.read_text()) if marker_file.is_file() else None
     staged_file = Path('/mnt/var/lib/homelab/provisioning.json')
@@ -106,7 +151,9 @@ def probe(target):
         "partitioned":
         bool(disk.get("children")) or bool(disk.get("fstype")),
         "mounted":
-        any(any(node.get("mountpoints") or []) for node in nodes),
+        mounted,
+        "cleanupMounts":
+        cleanup,
         "marker":
         marker,
         "stagedMarker":
