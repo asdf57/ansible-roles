@@ -12,7 +12,7 @@ if [[ -f /etc/arch-release ]]; then
     pacman-key --init
     pacman-key --populate archlinux
     pacman -Syu --noconfirm
-    pacman -S --needed --noconfirm arch-install-scripts archiso curl dosfstools e2fsprogs \
+    pacman -S --needed --noconfirm arch-install-scripts archiso curl diffutils dosfstools e2fsprogs \
         erofs-utils git grub jq libarchive libisoburn mtools openssh python python-docutils squashfs-tools sudo zsync
 else
     apt-get update
@@ -20,6 +20,9 @@ else
         ca-certificates curl debootstrap dosfstools git grub-pc-bin grub-efi-amd64-bin \
         isolinux jq live-build mtools openssh-client python3 squashfs-tools sudo syslinux tar wget xorriso
 fi
+for tool in cmp unsquashfs xorriso; do
+    command -v "$tool" >/dev/null || { echo "Missing image verification dependency: $tool" >&2; exit 1; }
+done
 [[ $(jq -r .architecture "$input") == amd64 ]] || { echo 'Unsupported architecture' >&2; exit 1; }
 [[ $(jq -r .recipeVersion "$input") == 1 ]] || { echo 'Unsupported recipe version' >&2; exit 1; }
 expected=$(jq -r .trustBundleDigest "$input")
