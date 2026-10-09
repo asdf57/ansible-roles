@@ -78,6 +78,11 @@
       ansible.builtin.command:
         argv: [sysctl, --system]
       when: provision_stage == 'post' and (provision_server_spec.sysctls | default({}) | length > 0)
+    - name: Install ACL support for Ansible unprivileged verification
+      ansible.builtin.package:
+        name: acl
+        state: present
+      when: provision_stage == 'post'
     - name: Verify LLDP discovery as the unprivileged installed agent
       ansible.builtin.command:
         argv: [lldpcli, -f, json0, show, neighbors, details]

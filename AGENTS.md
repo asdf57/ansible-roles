@@ -101,6 +101,12 @@ Do not bypass it with a broad-inventory playbook call. Tests never reboot nodes.
   Use the shared homelabd agent setup for PATH, _lldpd membership and the
   non-setuid package override; never grant adm to fix discovery. An active
   daemon is insufficient: post provisioning queries neighbors as homelabd.
+- Install `acl` before Ansible switches from ansible to homelabd for verification.
+  Linux `setfacl` safely shares module files; otherwise Ansible can fall through
+  to an unsupported macOS `chmod A+user:...` syntax. Keep the check unprivileged.
+  A Verifying-stage failure does not require another install: verify the installed
+  marker/disk/boot, apply only the corrected post stage, then resume the original
+  pinned operator. Never rewrite its snapshot or repeat erasure for this repair.
 - Validate retained setup dependencies before erasure. Build CI checks the
   complete asset bundle inside both ISO and netboot filesystems; container tests
   must install from /usr/share/homelabd/setup, not only the source checkout.

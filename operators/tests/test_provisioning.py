@@ -11,6 +11,22 @@ from test_operators import server
 import provisioning as p
 import runner_trust
 import ssh_host_keys
+import yaml
+
+
+class PostVerificationContract(unittest.TestCase):
+
+    def test_acl_is_installed_before_switching_to_agent(self):
+        play = yaml.safe_load(
+            (Path(__file__).resolve().parents[2] / 'plays/provision_stage.yml').read_text())[0]
+        tasks = play['tasks']
+        acl = next(i for i, task in enumerate(tasks)
+                   if task.get('ansible.builtin.package', {}).get('name') == 'acl')
+        agent = next(i for i, task in enumerate(tasks) if task.get('become_user') == 'homelabd')
+        self.assertTrue(play['become'])
+        self.assertLess(acl, agent)
+        self.assertEqual(tasks[acl]['when'], "provision_stage == 'post'")
+        self.assertNotIn('become_user', tasks[acl])
 
 
 def host():
