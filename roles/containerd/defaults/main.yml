@@ -1,0 +1,14 @@
+---
+# Cluster reconciliation resolves its version pin to a distro package reference
+# (for example containerd=1.7.24~ds1-6+deb13u1 on Debian, or an approved pinned
+# package artifact/repository on Arch) and verifies the resulting upstream version.
+containerd_package_reference: containerd
+containerd_expected_version: ''
+
+# Leave the packaged runtime's sandbox image unchanged until a cluster version
+# is selected. The cluster operator can supply kubeadm's required image here.
+containerd_sandbox_image: ''
+
+# This role owns /etc/containerd/config.toml. Existing workloads require an
+# explicit maintenance decision before adopting that configuration.
+containerd_allow_active_workloads: false

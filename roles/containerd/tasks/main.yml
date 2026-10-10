@@ -1,0 +1,119 @@
+---
+- name: Require a supported installed systemd host
+  ansible.builtin.assert:
+    quiet: true
+    that:
+      - ansible_facts.system == 'Linux'
+      - ansible_facts.distribution in ['Debian', 'Archlinux']
+      - ansible_facts.service_mgr == 'systemd'
+      - containerd_sandbox_image is string
+      - containerd_package_reference is string
+      - containerd_package_reference | length > 0
+      - containerd_expected_version is string
+      - containerd_expected_version == '' or containerd_expected_version is match('^[12]\.\d+\.\d+$')
+      - containerd_allow_active_workloads is boolean
+    fail_msg: Containerd requires an installed Debian or Arch Linux systemd host.
+
+- name: Inspect the live environment marker
+  ansible.builtin.stat:
+    path: /etc/homelabd/live-build-id
+  register: containerd_live_marker
+
+- name: Refuse runtime installation in a live provisioning environment
+  ansible.builtin.assert:
+    quiet: true
+    that:
+      - not containerd_live_marker.stat.exists
+      - ansible_facts.mounts | selectattr('mount', 'equalto', '/') | selectattr('fstype', 'in', ['overlay', 'squashfs', 'tmpfs']) | list | length == 0
+    fail_msg: Install containerd in the installed OS, not in the live provisioning image.
+
+- name: Inspect existing runtime consumers before changing configuration
+  ansible.builtin.service_facts:
+
+- name: Require explicit maintenance approval for active runtime consumers
+  ansible.builtin.assert:
+    quiet: true
+    that:
+      - containerd_allow_active_workloads or ansible_facts.services.get('docker.service', {}).get('state', '') != 'running'
+      - containerd_allow_active_workloads or ansible_facts.services.get('kubelet.service', {}).get('state', '') != 'running'
+    fail_msg: Docker or kubelet is active; approve runtime maintenance explicitly before running this role.
+
+- name: Install the distro container runtime and OCI runtime
+  ansible.builtin.package:
+    name: ["{{ containerd_package_reference }}", runc]
+    state: present
+  notify: Restart managed containerd
+
+- name: Read the installed containerd version
+  ansible.builtin.command:
+    argv: [containerd, --version]
+  register: containerd_version
+  changed_when: false
+  check_mode: false
+
+- name: Require a supported containerd configuration generation
+  ansible.builtin.assert:
+    quiet: true
+    that:
+      - containerd_version.stdout is match('^containerd\s+\S+\s+v?[12]\.\d+\.\d+')
+    fail_msg: This role supports containerd 1.x and 2.x only; inspect a new major version before configuring it.
+
+- name: Select native CRI configuration for the installed runtime
+  ansible.builtin.set_fact:
+    containerd_major_version: "{{ (containerd_version.stdout.split()[2] | regex_replace('^v', '')).split('.')[0] | int }}"
+
+- name: Require the cluster-selected runtime version before configuring it
+  ansible.builtin.assert:
+    quiet: true
+    that:
+      - containerd_expected_version == '' or containerd_version.stdout.split()[2] | regex_replace('^v', '') == containerd_expected_version
+    fail_msg: The installed containerd version does not match the selected cluster version.
+
+- name: Verify runc is available
+  ansible.builtin.command:
+    argv: [runc, --version]
+  changed_when: false
+  check_mode: false
+
+- name: Create the containerd configuration directory
+  ansible.builtin.file:
+    path: /etc/containerd
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Install and validate the Kubernetes CRI configuration
+  ansible.builtin.template:
+    src: config.toml.j2
+    dest: /etc/containerd/config.toml
+    owner: root
+    group: root
+    mode: '0644'
+    backup: true
+    validate: containerd --config %s config dump
+  notify: Restart managed containerd
+
+- name: Apply pending runtime changes before verification
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable and start containerd
+  ansible.builtin.systemd_service:
+    name: containerd
+    enabled: true
+    state: started
+
+- name: Read runtime plugin readiness
+  ansible.builtin.command:
+    argv: [ctr, --timeout, 10s, plugins, ls]
+  register: containerd_plugins
+  changed_when: false
+  retries: 6
+  delay: 2
+  until: >-
+    (containerd_plugins.rc == 0) and
+    (containerd_plugins.stdout is search('(?m)^io\.containerd\.grpc\.v1\s+cri\s+.*\s+ok\s*$')) and
+    ((containerd_major_version | int == 1) or
+     ((containerd_plugins.stdout is search('(?m)^io\.containerd\.cri\.v1\s+images\s+.*\s+ok\s*$')) and
+      (containerd_plugins.stdout is search('(?m)^io\.containerd\.cri\.v1\s+runtime\s+.*\s+ok\s*$'))))
+  when: not ansible_check_mode

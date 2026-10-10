@@ -1,0 +1,50 @@
+---
+- name: Validate containerd templates locally without touching managed nodes
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Render both native configurations with and without a cluster pause image
+      ansible.builtin.template:
+        src: ../templates/config.toml.j2
+        dest: "{{ containerd_test_directory | mandatory }}/config-{{ item.major }}-{{ item.variant }}.toml"
+        mode: '0600'
+        validate: containerd --config %s config dump
+      vars:
+        containerd_major_version: "{{ item.major }}"
+        containerd_sandbox_image: "{{ item.image }}"
+      loop:
+        - {major: 1, variant: default, image: ''}
+        - {major: 1, variant: pinned, image: 'registry.k8s.io/pause:3.10'}
+        - {major: 2, variant: default, image: ''}
+        - {major: 2, variant: pinned, image: 'registry.k8s.io/pause:3.10'}
+
+    - name: Verify TOML structure and runtime settings in all rendered configurations
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - |
+            from pathlib import Path
+            import sys
+            import tomllib
+
+            for major in (1, 2):
+                for variant in ('default', 'pinned'):
+                    path = Path(sys.argv[1]) / f'config-{major}-{variant}.toml'
+                    config = tomllib.loads(path.read_text())
+                    assert config['version'] == (2 if major == 1 else 3)
+                    assert config['disabled_plugins'] == []
+                    plugin = ('io.containerd.grpc.v1.cri' if major == 1
+                              else 'io.containerd.cri.v1.runtime')
+                    runtime = config['plugins'][plugin]['containerd']['runtimes']['runc']
+                    assert runtime['runtime_type'] == 'io.containerd.runc.v2'
+                    assert runtime['options']['SystemdCgroup'] is True
+                    if variant == 'pinned':
+                        image = (config['plugins'][plugin]['sandbox_image'] if major == 1
+                                 else config['plugins']['io.containerd.cri.v1.images']
+                                 ['pinned_images']['sandbox'])
+                        assert image == 'registry.k8s.io/pause:3.10'
+            print('PASS: native runtime settings and cluster image overrides')
+          - "{{ containerd_test_directory | mandatory }}"
+      changed_when: false

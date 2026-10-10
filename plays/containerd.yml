@@ -1,0 +1,16 @@
+---
+- name: Install containerd on one explicitly selected installed host
+  hosts: "{{ containerd_target | mandatory }}"
+  gather_facts: true
+  become: true
+  pre_tasks:
+    - name: Require a single explicitly selected target
+      ansible.builtin.assert:
+        quiet: true
+        that:
+          - ansible_play_hosts_all | length == 1
+          - inventory_hostname == containerd_target
+        fail_msg: Set containerd_target to one inventory host name, not a group or pattern.
+
+  roles:
+    - containerd
