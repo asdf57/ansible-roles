@@ -89,7 +89,9 @@ def run_ansible(command, diagnostic, timeout):
     write_private(diagnostic, '')
     environment = dict(os.environ)
     environment.update(ANSIBLE_STDOUT_CALLBACK='default', ANSIBLE_NOCOLOR='1',
-                       ANSIBLE_DISPLAY_ARGS_TO_STDOUT='false', ANSIBLE_VERBOSITY='0')
+                       ANSIBLE_DISPLAY_ARGS_TO_STDOUT='false', ANSIBLE_VERBOSITY='0',
+                       ANSIBLE_DISPLAY_SKIPPED_HOSTS='false', ANSIBLE_SSH_USETTY='false',
+                       ANSIBLE_INJECT_FACT_VARS='false', ANSIBLE_CALLBACK_RESULT_FORMAT='yaml')
     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                                bufsize=1, env=environment, start_new_session=True)
 

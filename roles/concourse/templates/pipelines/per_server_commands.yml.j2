@@ -23,7 +23,7 @@ jobs:
           inputs:
             - name: commands
           params:
-{% for key, value in hostvars['localhost']['ansible_env'].items() %}
+{% for key, value in hostvars['localhost']['ansible_facts']['env'].items() %}
             {{ key }}: {{ value | to_json }}
 {% endfor %}
             IS_BOOTSTRAP_ENV: "false"

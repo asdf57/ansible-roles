@@ -6,6 +6,7 @@
   tasks:
     - name: Require the reviewed run and stable disk contract
       ansible.builtin.assert:
+        quiet: true
         that:
           - provision_run_uid | length > 0
           - provision_server_uid | length > 0
@@ -22,6 +23,7 @@
 
     - name: Refuse cleanup of a changed session, mounted disk or partial installation
       ansible.builtin.assert:
+        quiet: true
         that:
           - (cleanup_probe.stdout | from_json).live
           - (cleanup_probe.stdout | from_json).bootID == provision_live_boot_id
@@ -40,6 +42,7 @@
 
     - name: Refuse an armed kernel selection
       ansible.builtin.assert:
+        quiet: true
         that: cleanup_kexec.stdout == '0'
 
     - name: Create a temporary RAM-backed inspection mountpoint
@@ -93,6 +96,7 @@
 
         - name: Refuse cleanup while GRUB retains a one-shot selection
           ansible.builtin.assert:
+            quiet: true
             that: cleanup_grub.stdout is not search('(?m)^next_entry=')
 
         - name: Flush the verified boot-selection change
@@ -123,6 +127,7 @@
 
     - name: Require unchanged boot and disk identity after cleanup verification
       ansible.builtin.assert:
+        quiet: true
         that:
           - not (cleaned_probe.stdout | from_json).mounted
           - (cleaned_probe.stdout | from_json).bootID == provision_live_boot_id

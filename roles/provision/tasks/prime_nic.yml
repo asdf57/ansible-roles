@@ -1,6 +1,7 @@
 ---
 - name: Require the pinned management NIC MAC
   ansible.builtin.assert:
+    quiet: true
     that:
       - provision_boot_mac is match('^[a-f0-9]{2}(:[a-f0-9]{2}){5}$')
 
@@ -28,6 +29,7 @@
 
 - name: Refuse to prime another NIC
   ansible.builtin.assert:
+    quiet: true
     that: (boot_interface_mac.content | b64decode | trim) == provision_boot_mac
 
 - name: Enable magic-packet wake on the boot NIC
@@ -47,6 +49,7 @@
 
 - name: Require magic-packet wake readback
   ansible.builtin.assert:
+    quiet: true
     that: "'Wake-on: g' in boot_nic_settings.stdout"
 
 - name: Verify EEE settings on affected NIC
@@ -58,5 +61,6 @@
 
 - name: Require disabled EEE readback
   ansible.builtin.assert:
+    quiet: true
     that: "'EEE status: disabled' in boot_nic_eee.stdout"
   when: provision_disable_eee | default(false) | bool

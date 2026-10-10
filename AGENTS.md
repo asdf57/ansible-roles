@@ -176,6 +176,14 @@ resource; unpin/check latest after the owned attempt completes.
 
 Standard Ansible task/results/recap output streams live through `run_ansible`.
 Credential tasks require `no_log`; do not enable verbose argument display.
+Use `ansible_facts.<name>`, not injected `ansible_<name>` aliases. Assertions
+use `quiet: true` (failures still include their reason). Default callback keeps
+executed tasks/results/recap, hides skipped tasks and uses YAML result formatting.
+Automation disables SSH TTY allocation to keep PAM OSC 3008 terminal context
+out of module JSON; do not silence warnings or alter system-wide PAM policy.
+Run `python3 operators/tests/logging_ansible.py` for real local callback checks.
+For a homelabd-user probe use Ansible's unique temp directories under `/tmp`,
+not its root-owned home; retain ACL support for unprivileged module sharing.
 Private logs (0700 directory, 0600 file) are retained inside task containers:
 
 - `/tmp/provision-operator-diagnostics/<attemptID>-<stage>.log`

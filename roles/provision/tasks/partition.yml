@@ -5,6 +5,7 @@
 
 - name: Require the operator-approved physical disk
   ansible.builtin.assert:
+    quiet: true
     that: disk_name is defined and partition_prefix is defined
 
 - name: Grab info about the disk
@@ -15,7 +16,8 @@
   register: storage_info
 
 - name: Assert that there are no active partitions
-  assert:
+  ansible.builtin.assert:
+    quiet: true
     that: storage_info.partitions | length == 0
     fail_msg: "There are active partitions on the disk ({{ storage_info.partitions | length }} partitions found)"
     success_msg: "No active partitions found on the disk ({{ storage_info.partitions | length }} partitions found)"
@@ -49,7 +51,8 @@
         var: disk_partitions
 
     - name: Check that correct number of partitions were created
-      assert:
+      ansible.builtin.assert:
+        quiet: true
         that: "disk_partitions.partitions | length == storage.partitions | length"
         fail_msg: "Incorrect number of partitions created ({{ disk_partitions.partitions | length }} partitions created)"
         success_msg: "Correct number of partitions created ({{ disk_partitions.partitions | length }} partitions created)"

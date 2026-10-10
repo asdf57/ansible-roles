@@ -1,6 +1,7 @@
 ---
 - name: Require an operator-owned boot transition
   ansible.builtin.assert:
+    quiet: true
     that: provision_attempt_id is defined
 
 - name: Prime the selected NIC

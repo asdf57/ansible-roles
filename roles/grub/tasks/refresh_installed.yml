@@ -8,6 +8,7 @@
 
 - name: Require the approved installed root and exact boot session
   ansible.builtin.assert:
+    quiet: true
     that:
       - not (boot_repair_probe.stdout | from_json).live
       - (boot_repair_probe.stdout | from_json).bootID == boot_repair_boot_id
@@ -59,4 +60,5 @@
 
 - name: Require cleared boot selection before releasing maintenance
   ansible.builtin.assert:
+    quiet: true
     that: "not (repaired_grub_environment.stdout is search('(?m)^next_entry=.+$'))"

@@ -1,6 +1,7 @@
 ---
 - name: Require a UID-bound single-Server reboot selected by the command runner
   ansible.builtin.assert:
+    quiet: true
     that:
       - system_operation_server_uid | length > 0
       - system_operation_machine_uid | length > 0

@@ -6,6 +6,7 @@
   tasks:
     - name: Require an explicit supported stage and pinned attempt
       ansible.builtin.assert:
+        quiet: true
         that:
           - provision_stage in ['prime', 'arm', 'clear', 'install', 'repair', 'post', 'refresh-prepare', 'refresh-boot', 'refresh-clear', 'reboot']
           - provision_attempt_id is defined
@@ -57,10 +58,12 @@
       when: provision_stage == 'refresh-clear'
     - name: Refuse to release an uncleared bootstrap selection
       ansible.builtin.assert:
+        quiet: true
         that: cleared_kexec.stdout == '0'
       when: provision_stage == 'refresh-clear'
     - name: Refuse an unprepared live bootstrap
       ansible.builtin.assert:
+        quiet: true
         that: prepared_kexec.stdout == '1'
       when: provision_stage == 'refresh-boot'
     - name: Request the checkpointed reboot through systemd
@@ -84,6 +87,10 @@
         state: present
       when: provision_stage == 'post'
     - name: Verify LLDP discovery as the unprivileged installed agent
+      vars:
+        # Ansible creates a unique temporary directory here; the agent's home
+        # is root-owned and must not be made writable just for a probe.
+        ansible_remote_tmp: /tmp
       ansible.builtin.command:
         argv: [lldpcli, -f, json0, show, neighbors, details]
       become_user: homelabd
@@ -94,6 +101,7 @@
       when: provision_stage == 'post'
     - name: Require a discoverable installed LLDP location
       ansible.builtin.assert:
+        quiet: true
         that:
           - (installed_lldp.stdout | from_json).lldp | map(attribute='interface') | flatten | length > 0
         fail_msg: Installed agent cannot discover its LLDP location

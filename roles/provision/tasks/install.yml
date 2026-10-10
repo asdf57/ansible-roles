@@ -1,6 +1,7 @@
 ---
 - name: Require the pinned installation contract
   ansible.builtin.assert:
+    quiet: true
     that:
       - provision_destructive_authorized | default(false) | bool
       - provision_run_uid is defined
@@ -38,6 +39,7 @@
 
 - name: Require the same unmounted physical disk and live boot session
   ansible.builtin.assert:
+    quiet: true
     that:
       - (destructive_probe.stdout | from_json).live
       - (destructive_probe.stdout | from_json).liveBuildID == provision_live_build_id
@@ -53,6 +55,7 @@
 
 - name: Require a protected existing daemon identity
   ansible.builtin.assert:
+    quiet: true
     that:
       - agent_enrollment.stat.isreg | default(false)
       - agent_enrollment.stat.uid == 0
@@ -66,6 +69,7 @@
 
 - name: Require a valid daemon token before erasure
   ansible.builtin.assert:
+    quiet: true
     that:
       - (agent_enrollment_content.content | b64decode) is search('(?m)^API_TOKEN=[a-f0-9]{64}$')
   no_log: true

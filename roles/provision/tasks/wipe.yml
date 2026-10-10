@@ -17,7 +17,7 @@
 
     - name: Gather mounted devices
       set_fact:
-        mounted_devices: "{{ ansible_mounts | selectattr('device', 'contains', disk_name) | list }}"
+        mounted_devices: "{{ ansible_facts.mounts | selectattr('device', 'contains', disk_name) | list }}"
 
     - name: Print mounts
       debug:
@@ -45,18 +45,18 @@
     - name: Disable swap if active
       ansible.builtin.command:
         cmd: "swapoff -a"
-      when: ansible_swaptotal_mb > 0
+      when: ansible_facts.swaptotal_mb > 0
 
     - name: Wipe the disk using blkdiscard for SSD/flash drives
       ansible.builtin.command:
         cmd: "blkdiscard -f {{ disk_name }}"
-      when: ansible_devices[disk_name.split('/')[-1]].rotational == '0'
+      when: ansible_facts.devices[disk_name.split('/')[-1]].rotational == '0'
 
     - name: Wipe the disk using dd for HDDs
       ansible.builtin.shell:
         cmd: "dd if=/dev/zero of={{ disk_name }} bs=4M status=progress"
       register: dd_result
-      when: ansible_devices[disk_name.split('/')[-1]].rotational == '1'
+      when: ansible_facts.devices[disk_name.split('/')[-1]].rotational == '1'
       failed_when: "'No space left on device' not in dd_result.stderr and dd_result.rc != 0"
       changed_when: false
 
@@ -71,7 +71,8 @@
       register: disk_info
 
     - name: Ensure that no partitions exist
-      assert:
+      ansible.builtin.assert:
+        quiet: true
         that:
           - "disk_info.partitions | length == 0"
         fail_msg: "Partitions still exist on the disk ({{ disk_info.partitions | length }} partitions exist)"
@@ -82,8 +83,9 @@
           - mounts
 
     - name: Ensure no mounted devices exist
-      assert:
+      ansible.builtin.assert:
+        quiet: true
         that:
-          - "ansible_mounts | selectattr('device', 'contains', disk_name) | list | length == 0"
+          - "ansible_facts.mounts | selectattr('device', 'contains', disk_name) | list | length == 0"
         fail_msg: "Mounted devices still exist on the disk."
   when: do_partitions_exist | bool

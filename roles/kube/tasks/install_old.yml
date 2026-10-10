@@ -1,31 +1,31 @@
 - name: Delete existing Kubernetes key files
   ansible.builtin.shell: |
     rm -f /etc/apt/keyrings/kubernetes-apt-keyring.gpg /tmp/kubernetes-release.key
-  when: ansible_distribution == 'Debian'
+  when: ansible_facts.distribution == 'Debian'
 
 - name: Download Kubernetes GPG key
   ansible.builtin.get_url:
     url: https://pkgs.k8s.io/core:/stable:/v1.31/deb/Release.key
     dest: /tmp/kubernetes-release.key
     mode: '0644'
-  when: ansible_distribution == 'Debian'
+  when: ansible_facts.distribution == 'Debian'
 
 - name: Convert Kubernetes GPG key to binary format
   ansible.builtin.shell: |
     gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg /tmp/kubernetes-release.key
-  when: ansible_distribution == 'Debian'
+  when: ansible_facts.distribution == 'Debian'
 
 - name: Add Kubernetes APT repository
   ansible.builtin.apt_repository:
     repo: "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.31/deb/ /"
     state: present
-  when: ansible_distribution == 'Debian'
+  when: ansible_facts.distribution == 'Debian'
 
 - name: Install required packages
   ansible.builtin.package:
     name: "{{ item }}"
     state: present
-  loop: "{{ required_packages_by_distro[ansible_distribution | lower] | list }}"
+  loop: "{{ required_packages_by_distro[ansible_facts.distribution | lower] | list }}"
 
 - name: Run checks
   block:

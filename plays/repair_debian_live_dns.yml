@@ -13,6 +13,7 @@
 
     - name: Refuse repair on another boot or disk or a partial installation
       ansible.builtin.assert:
+        quiet: true
         that:
           - (dns_probe.stdout | from_json).live
           - (dns_probe.stdout | from_json).os.ID == 'debian'

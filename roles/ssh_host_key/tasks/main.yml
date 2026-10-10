@@ -1,6 +1,7 @@
 ---
 - name: Validate managed host-key inputs
   ansible.builtin.assert:
+    quiet: true
     that:
       - managed_host_private_key_file is defined
       - managed_host_public_key is defined
@@ -32,6 +33,7 @@
 
     - name: Require the staged key to match the desired public identity
       ansible.builtin.assert:
+        quiet: true
         that: staged_host_public_key.stdout.split()[:2] | join(' ') == managed_host_public_key | trim
       no_log: true
 
@@ -74,7 +76,7 @@
 
     - name: Reload sshd without terminating existing sessions
       ansible.builtin.systemd_service:
-        name: "{{ 'ssh' if ansible_os_family == 'Debian' else 'sshd' }}"
+        name: "{{ 'ssh' if ansible_facts.os_family == 'Debian' else 'sshd' }}"
         state: reloaded
       when: installed_host_key.changed or installed_host_key_config.changed
 

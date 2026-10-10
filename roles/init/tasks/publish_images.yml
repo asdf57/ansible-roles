@@ -1,11 +1,13 @@
 ---
 - name: Require the registry hostname
   ansible.builtin.assert:
+    quiet: true
     that: registry_fqdn | default('') | length > 0
     fail_msg: registry_fqdn is required to publish provisioning images.
 
 - name: Require the operator image name
   ansible.builtin.assert:
+    quiet: true
     that: lookup('env', 'HOMELAB_IMAGE') | length > 0
     fail_msg: HOMELAB_IMAGE must be provided by homelabc.
 

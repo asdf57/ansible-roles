@@ -1,6 +1,7 @@
 ---
 - name: Require explicit non-destructive configuration repair
   ansible.builtin.assert:
+    quiet: true
     that:
       - provision_stage == 'repair'
       - not provision_destructive_authorized | bool
@@ -18,6 +19,7 @@
 
 - name: Require the pinned live build, boot session and approved disk
   ansible.builtin.assert:
+    quiet: true
     that:
       - (repair_probe.stdout | from_json).live
       - (repair_probe.stdout | from_json).liveBuildID == provision_live_build_id
@@ -44,6 +46,7 @@
 
 - name: Refuse configuration repair of any other disk or layout
   ansible.builtin.assert:
+    quiet: true
     that:
       - repair_mounts.results[0].stdout == partition_prefix + '3'
       - repair_mounts.results[1].stdout == partition_prefix + '1'
@@ -61,6 +64,7 @@
 
 - name: Refuse repair before a base system exists
   ansible.builtin.assert:
+    quiet: true
     that: repair_package_manager.stat.isreg | default(false)
 
 - name: Complete configuration only; never partition, format or bootstrap again

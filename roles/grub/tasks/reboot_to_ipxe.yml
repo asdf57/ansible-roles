@@ -11,4 +11,5 @@
 
 - name: Require a successful one-shot selection before rebooting
   ansible.builtin.assert:
+    quiet: true
     that: "'next_entry=homelab-netboot' in armed_grub.stdout_lines"

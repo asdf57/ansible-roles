@@ -5,6 +5,7 @@
 
 - name: Require the mounted data path
   ansible.builtin.assert:
+    quiet: true
     that: mounted_data_path | length > 0
     fail_msg: MOUNT_DATA_PATH must be provided to the bootstrap container.
 
@@ -15,6 +16,7 @@
 
 - name: Require the published group variables
   ansible.builtin.assert:
+    quiet: true
     that: inventory_group_vars.stat.exists
     fail_msg: >-
       Expected /homelab/inventory/group_vars/all.yaml. Run init.yml so the

@@ -8,6 +8,7 @@
 
 - name: Require an owned independent live session before a fresh boot
   ansible.builtin.assert:
+    quiet: true
     that:
       - (bootstrap_probe.stdout | from_json).live
       - provision_attempt_id == provision_run_uid
@@ -26,6 +27,7 @@
 
 - name: Refuse a kernel with disabled kexec loading
   ansible.builtin.assert:
+    quiet: true
     that: kexec_disabled.stdout == '0'
 
 - name: Resolve the immutable bootstrap artifacts
@@ -36,6 +38,7 @@
 
 - name: Require the supported HTTPS netboot artifact layout
   ansible.builtin.assert:
+    quiet: true
     that:
       - bootstrap_rootfs.url is match('^https://')
       - bootstrap_kernel.url is match('^https://')

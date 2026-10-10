@@ -1,6 +1,7 @@
 ---
 - name: Validate required platform variables
   ansible.builtin.assert:
+    quiet: true
     that:
       - required_init_group_vars | difference(vars.keys() | list) | length == 0
     fail_msg: >-
@@ -43,6 +44,7 @@
 
 - name: Validate certificate account inputs
   ansible.builtin.assert:
+    quiet: true
     that:
       - lookup('env', 'CLOUDFLARE_EMAIL') | length > 0
       - lookup('env', 'ZEROSSL_EMAIL') | length > 0
@@ -55,17 +57,20 @@
 
 - name: Require the host data path
   ansible.builtin.assert:
+    quiet: true
     that: host_data_path | length > 0
     fail_msg: HOST_DATA_PATH must be provided by homelabc.
 
 - name: Require the Concourse credential input
   ansible.builtin.assert:
+    quiet: true
     that: lookup('env', 'CONCOURSE_PASSWORD') | length > 0
     fail_msg: CONCOURSE_PASSWORD must be provided to the bootstrap container.
   no_log: true
 
 - name: Require the Copyparty credential input
   ansible.builtin.assert:
+    quiet: true
     that: lookup('env', 'FILE_REGISTRY_PASSWORD') | length > 0
     fail_msg: FILE_REGISTRY_PASSWORD must be provided to the bootstrap container.
   no_log: true

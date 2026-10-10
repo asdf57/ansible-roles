@@ -15,6 +15,7 @@
 
     - name: Require the Server's desired trust to be resolved
       ansible.builtin.assert:
+        quiet: true
         that:
           - management_server.json.spec.sshCertificateAuthorityRef is defined
           - management_server.json.status.desiredSSHTrustBundleDigest is defined
@@ -27,6 +28,7 @@
 
 - name: Require resolved public trust and the shared homelabd assets
   ansible.builtin.assert:
+    quiet: true
     that:
       - ssh_ca_bundle is defined
       - ssh_ca_bundle | length > 0
@@ -125,6 +127,7 @@
 
     - name: Require the managed host identity before installed-system provisioning
       ansible.builtin.assert:
+        quiet: true
         that:
           - provisioning_host_identity.json.status.hostSSH.phase == 'Ready'
           - provisioning_host_identity.json.status.hostSSH.installedKeyPairRef == provisioning_host_identity.json.status.hostSSH.keyPairRef
@@ -140,6 +143,7 @@
 
     - name: Require the live identity to match the API-managed public key
       ansible.builtin.assert:
+        quiet: true
         that: provisioning_live_host_public_key.stdout.split()[:2] | join(' ') == provisioning_host_identity.json.status.hostSSH.publicKey.split()[:2] | join(' ')
       when: management_target_root == '/mnt'
 
@@ -194,12 +198,12 @@
     - name: Validate installed-system SSH configuration
       ansible.builtin.command:
         argv: [chroot, /mnt, /usr/sbin/sshd, -t]
-      when: management_target_root == '/mnt' and (provision_operating_system.distribution | default(ansible_distribution | lower)) == 'debian'
+      when: management_target_root == '/mnt' and (provision_operating_system.distribution | default(ansible_facts.distribution | lower)) == 'debian'
 
     - name: Validate installed-system SSH configuration on Arch
       ansible.builtin.command:
         argv: [chroot, /mnt, /usr/bin/sshd, -t]
-      when: management_target_root == '/mnt' and (provision_operating_system.distribution | default(ansible_distribution | lower)) in ['arch', 'archlinux']
+      when: management_target_root == '/mnt' and (provision_operating_system.distribution | default(ansible_facts.distribution | lower)) in ['arch', 'archlinux']
 
     - name: Validate running SSH configuration
       ansible.builtin.command: sshd -t
@@ -215,7 +219,7 @@
 
     - name: Reload running SSH after configuration validation
       ansible.builtin.systemd_service:
-        name: "{{ 'ssh' if ansible_distribution == 'Debian' else 'sshd' }}"
+        name: "{{ 'ssh' if ansible_facts.distribution == 'Debian' else 'sshd' }}"
         state: reloaded
       when: management_target_root == '/'
 
@@ -234,6 +238,7 @@
 
 - name: Require the installed trust digest to match desired trust
   ansible.builtin.assert:
+    quiet: true
     that: "('sha256:' + installed_management_bundle.stat.checksum) == ssh_ca_bundle_digest"
 
 - name: Expose installed trust as a playbook result

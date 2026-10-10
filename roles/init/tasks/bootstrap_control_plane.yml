@@ -1,6 +1,7 @@
 ---
 - name: Validate control-plane bootstrap environment
   ansible.builtin.assert:
+    quiet: true
     that:
       - lookup('env', item) | length > 0
     fail_msg: "{{ item }} must be provided to the bootstrap container."
@@ -146,6 +147,7 @@
 
 - name: Require every environment-backed secret
   ansible.builtin.assert:
+    quiet: true
     that: item.value | length > 0
     fail_msg: "The value for bootstrap Secret/{{ item.name }} is empty."
   loop: "{{ bootstrap_secrets }}"

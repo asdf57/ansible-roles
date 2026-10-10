@@ -20,6 +20,7 @@
 
 - name: Refuse selecting an unverified EFI entry
   ansible.builtin.assert:
+    quiet: true
     that: not (registered_efi_plan.stdout | from_json).needsCreate
 
 - name: Select the new installed GRUB while preserving other firmware entries

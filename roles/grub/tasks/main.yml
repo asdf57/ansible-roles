@@ -1,6 +1,7 @@
 ---
 - name: Require a reviewed netboot artifact and supported installed layout
   ansible.builtin.assert:
+    quiet: true
     that:
       - chroot_path == '/mnt'
       - provision_operating_system.architecture == 'amd64'

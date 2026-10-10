@@ -9,6 +9,7 @@
 
 - name: Reject incomplete management assets before touching storage
   ansible.builtin.assert:
+    quiet: true
     that:
       - item.stat.isreg | default(false)
       - item.stat.size | default(0) > 0
