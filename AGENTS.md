@@ -2,11 +2,18 @@
 
 ## Code ownership and verification
 
-- Install `requirements-dev.txt` in a virtual environment. Format with
-  `yapf -i -r operators`; check with `yapf --diff -r operators` and
-  `PYTHONPATH=operators:operators/tests pylint --persistent=n operators`.
-  Keep lint warnings visible; do not
-  suppress safety findings to manufacture a clean score.
+- Run `make sync` for the uv-locked development environment; `make format`
+  applies YAPF and `make check` gates formatting, ty, focused Pylint and tests.
+  `make lint-report` shows all Pylint findings (and may exit nonzero); keep
+  deliberate exception-boundary findings visible, not hidden behind a score.
+- Name state by its meaning (`attempt_status`, `attempt_snapshot`, `current_run`),
+  not `p` or `ca`. Group refusal checks by invariant and give specific reasons.
+  Do not use `Any`, `object`, unchecked casts or type-ignore directives to get
+  clean type checks. Use concrete field types; recursive JSON unions belong
+  only at wire/generic-data boundaries and require narrowing before access.
+  Keep phase functions bounded. Docstrings describe contracts/side effects;
+  comments explain safety reasoning, not obvious syntax. A clean tool run is
+  not proof of human readability or physical provisioning correctness.
 - `operators/provisioning.py` owns the bounded provisioning state machine.
   `operators/ssh_host_keys.py` owns managed SSH identity/trust reconciliation.
   `operators/common.py` contains shared API, SSH and live Ansible output helpers.

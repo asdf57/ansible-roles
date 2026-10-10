@@ -7,6 +7,7 @@ import tempfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from common import run_ansible, write_private
+from models import JSONObject
 
 
 def main():
@@ -16,7 +17,7 @@ def main():
         os.environ['ANSIBLE_LOCAL_TEMP'] = str(directory / 'local')
         os.environ['ANSIBLE_REMOTE_TEMP'] = str(directory / 'remote')
         play = directory / 'logging.json'
-        tasks = [{
+        tasks: list[JSONObject] = [{
             'name': 'Visible successful safety check',
             'ansible.builtin.assert': {
                 'that': ['ansible_facts.distribution | length > 0'],

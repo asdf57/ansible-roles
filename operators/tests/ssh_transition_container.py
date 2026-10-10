@@ -53,6 +53,7 @@ def main():
             ["/usr/sbin/sshd", "-D", "-e", "-f",
              str(directory / "sshd_config")], stderr=subprocess.PIPE)
         try:
+            assert daemon.stderr is not None
             time.sleep(0.2)
             if daemon.poll() is not None:
                 raise RuntimeError("Test sshd failed: " + daemon.stderr.read().decode())
@@ -84,6 +85,7 @@ def main():
 
             def install(value, host, task_dir, known, play, variables=None):
                 if play == "ssh_host_keys.yml":
+                    assert variables is not None
                     # The real role is syntax checked separately. This simulates
                     # its atomic file replacement/reload without systemd in Docker.
                     private_path = Path(variables["managed_host_private_key_file"])
@@ -126,7 +128,8 @@ def main():
         finally:
             daemon.terminate()
             daemon.wait(timeout=5)
-            daemon.stderr.close()
+            if daemon.stderr is not None:
+                daemon.stderr.close()
 
 
 if __name__ == "__main__":

@@ -1,0 +1,25 @@
+[project]
+name = "homelab-operators"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = []
+
+[dependency-groups]
+dev = ["pylint==4.1.2", "yapf==0.43.0", "ty", "PyYAML>=6,<7"]
+
+[tool.uv]
+package = false
+
+[tool.ty.environment]
+extra-paths = ["operators", "operators/tests"]
+
+[tool.pylint.main]
+init-hook = "import sys; sys.path[:0] = ['operators', 'operators/tests']"
+
+[tool.pylint.format]
+max-line-length = 100
+
+[tool.pylint.basic]
+# These names obscure safety-sensitive state; ordinary loop indices remain OK.
+bad-names = ["p", "ca", "foo", "bar", "baz", "toto", "tutu", "tata"]
+

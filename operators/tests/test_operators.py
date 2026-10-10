@@ -1,5 +1,6 @@
 import base64
 import copy
+from email.message import Message
 import json
 import io
 import os
@@ -12,6 +13,7 @@ from urllib.error import HTTPError
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import common
+from models import Resource
 import runner_trust
 import ssh_host_keys as operator
 
@@ -70,7 +72,7 @@ class API:
     def patch_status(self, value, status):
         if self.conflict or value["metadata"]["resourceVersion"] != self.server["metadata"][
                 "resourceVersion"]:
-            error = HTTPError("", 409, "Conflict", {}, io.BytesIO())
+            error = HTTPError("", 409, "Conflict", Message(), io.BytesIO())
             error.close()
             raise error
         self.writes.append(copy.deepcopy(status))
@@ -96,15 +98,17 @@ class OperatorTests(unittest.TestCase):
                         STIGMERGY_API_TOKEN='test-token'):
             api = common.API()
         for kind, collection in [('Server', 'servers'), ('ProvisioningRun', 'provisioning-runs')]:
-            resource = {
+            resource: Resource = {
                 'kind': kind,
                 'metadata': {
                     'name': 'node',
                     'uid': 'uid',
                     'resourceVersion': '7'
-                }
+                },
+                'spec': {},
+                'status': {},
             }
-            with patch('common.request_json', return_value={}) as request:
+            with patch('common.request_json', return_value=resource) as request:
                 api.patch_status(resource, {'phase': 'Pending'})
             args = request.call_args.args
             self.assertEqual(args[0], f'https://api.example/api/v1alpha1/{collection}/node/status')

@@ -6,6 +6,7 @@ import unittest
 SPEC = importlib.util.spec_from_file_location(
     'verify_efi',
     Path(__file__).resolve().parents[2] / 'roles/provision/files/verify_efi.py')
+assert SPEC is not None and SPEC.loader is not None
 efi = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(efi)
 

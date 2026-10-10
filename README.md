@@ -2,6 +2,30 @@
 
 Ansible playbooks and reusable tasks for the homelab.
 
+## Operator development
+
+```sh
+make sync        # uv.lock pins the development tools
+make format      # YAPF
+make check       # formatting, ty, Pylint policy, local unit tests
+make lint-report # full Pylint findings, independently of the focused gate
+```
+
+The gate checks function/class/module documentation, naming, unused code,
+function size/branching, compound-condition size, subprocess checks and types.
+The full report also includes advisory findings such as broad exception handlers;
+passing the gate does not mean the full report is empty. Wire JSON has an explicit
+recursive union of JSON values, not `Any` or `object`. The client validates resource
+envelopes and narrows endpoint response fields before using them; spec/status
+contents still require workflow validation. Type checking does not replace runtime
+identity checks. Tools cannot establish meaningful names or explanations:
+review must still check those, along with fail-closed behavior.
+
+The checks do not connect to managed nodes, reboot or provision them. Real local
+Ansible callback/contract fixtures are separate runner tests described in AGENTS.md.
+GitHub Actions runs the same gate on pushes and pull requests and also shows the
+full advisory Pylint report. It does not deploy anything.
+
 ## Initialize the platform
 
 The core initialization entry point is:

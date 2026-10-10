@@ -4,10 +4,12 @@ import os
 import shlex
 import sys
 
-from common import API, alias, capture_inventory, fingerprint, inventory_hosts, public_key, write_private
+from common import (API, alias, capture_inventory, fingerprint, inventory_hosts, public_key,
+                    write_private)
 
 
 def prepare(api, inventory):
+    """Accept verified managed identities; ordinary commands never perform TOFU."""
     entries = []
     for name in inventory_hosts(inventory):
         server = api.get("servers", name)
@@ -35,6 +37,7 @@ def prepare(api, inventory):
 
 
 def main():
+    """Build private inventory/trust files before ordinary Command execution."""
     api = API()
     _, inventory = capture_inventory(api, os.environ["INVENTORY_CAPTURE_GROUP"])
     trust = prepare(api, inventory)

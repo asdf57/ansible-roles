@@ -1,9 +1,11 @@
 """Run ownership, no-replay and physical attestation regression tests."""
 import copy
+from email.message import Message
 import os
 from pathlib import Path
 import tempfile
 import unittest
+from typing import NotRequired, TypedDict
 from unittest.mock import patch
 from urllib.error import HTTPError
 
@@ -12,6 +14,7 @@ import provisioning as p
 import runner_trust
 import ssh_host_keys
 import yaml
+from models import JSONValue, JSONObject, Metadata
 
 
 class PostVerificationContract(unittest.TestCase):
@@ -123,12 +126,32 @@ def snapshot(value):
     }
 
 
+class RunStatus(TypedDict):
+    """Checkpoint fields exercised by the fake store's mutation/refusal tests."""
+    phase: str
+    maintenance: bool
+    selectedDisk: JSONValue
+    attemptID: NotRequired[str]
+    snapshot: NotRequired[JSONObject]
+    sourceBootID: NotRequired[str]
+    liveBootID: NotRequired[str | None]
+    message: NotRequired[str]
+    netbootArmed: NotRequired[bool]
+
+
+class RunFixture(TypedDict):
+    """The run fixture has a precise envelope, not an untyped heterogeneous map."""
+    metadata: Metadata
+    spec: JSONObject
+    status: RunStatus
+
+
 class RunAPI:
     """Separate CAS-versioned Server and run objects, like the real API."""
 
     def __init__(self, phase='PreparingBoot'):
         self.server = host()
-        self.run = {
+        self.run: RunFixture = {
             'metadata': {
                 'name': 'run',
                 'uid': 'run-uid',
@@ -167,7 +190,7 @@ class RunAPI:
     def patch_status(self, value, fields):
         target = self.run if value['metadata']['uid'] == 'run-uid' else self.server
         if value['metadata']['resourceVersion'] != target['metadata']['resourceVersion']:
-            raise HTTPError('', 409, 'Conflict', {}, None)
+            raise HTTPError('', 409, 'Conflict', Message(), None)
         self.writes.append((target['metadata']['uid'], copy.deepcopy(fields)))
 
         def merge(destination, updates):
@@ -185,6 +208,90 @@ class RunAPI:
 
     def view(self):
         return p.bind_run(self, self.get('servers', 'node'))
+
+
+class PinnedAttemptGuardTests(unittest.TestCase):
+    """Every stage must reject drift without depending on unrelated status writes."""
+
+    def test_checkpoint_drift_is_rejected(self):
+        changes = [
+            ('run identity', ('_run', 'metadata', 'uid'), 'replacement'),
+            ('run spec', ('_run', 'spec', 'storage'), {}),
+            ('attempt identity', ('status', 'provisioning', 'attemptID'), 'replacement'),
+            ('pinned plan', ('status', 'provisioning', 'snapshot'), {}),
+            ('checkpoint', ('status', 'provisioning', 'phase'), 'Installing'),
+        ]
+        expected = RunAPI().view()
+        for label, path, replacement in changes:
+            with self.subTest(invariant=label):
+                actual = copy.deepcopy(expected)
+                destination = actual
+                for field in path[:-1]:
+                    destination = destination[field]
+                destination[path[-1]] = replacement
+                with self.assertRaises(p.OperatorError):
+                    p.validate_attempt_checkpoint(actual, expected)
+
+    def test_every_pinned_spec_input_is_checked(self):
+        expected = RunAPI().view()
+        pinned = expected['status']['provisioning']['snapshot']
+        for field in p.SPEC_INPUTS:
+            with self.subTest(field=field):
+                actual = copy.deepcopy(expected)
+                actual['spec'][field] = 'changed'
+                with self.assertRaisesRegex(p.OperatorError, 'Server spec.' + field):
+                    p.validate_pinned_server(actual, pinned)
+
+    def test_machine_mac_and_host_key_bindings_are_checked(self):
+        expected = RunAPI().view()
+        pinned = expected['status']['provisioning']['snapshot']
+        changes = [
+            ('machine', ('machineRef', ), {}),
+            ('MAC', ('networking', 'management', 'interface', 'mac'), 'aa:bb:cc:dd:ee:ff'),
+            ('host key', ('hostSSH', 'keyPairRef'), {}),
+        ]
+        for label, path, replacement in changes:
+            with self.subTest(invariant=label):
+                actual = copy.deepcopy(expected)
+                destination = actual['status']
+                for field in path[:-1]:
+                    destination = destination[field]
+                destination[path[-1]] = replacement
+                with self.assertRaises(p.OperatorError):
+                    p.validate_pinned_server(actual, pinned)
+
+    def test_pause_exception_is_only_for_completion_or_cleanup(self):
+        for disabled in (True, False):
+            with self.subTest(disabled=disabled):
+                api = RunAPI()
+                expected = api.view()
+                if disabled:
+                    api.server['spec']['provisioning']['enabled'] = False
+                else:
+                    api.server['spec']['reconciliation'] = {'paused': True}
+                with self.assertRaises(p.OperatorError):
+                    p.current(api, expected)
+                p.current(api, expected, allow_paused=True)
+                api.run['status']['attemptID'] = 'replacement'
+                with self.assertRaises(p.OperatorError):
+                    p.current(api, expected, allow_paused=True)
+
+    def test_terminating_or_replaced_server_is_rejected(self):
+        for field, replacement in (('uid', 'replacement'), ('deletionTimestamp', 'now')):
+            with self.subTest(field=field):
+                api = RunAPI()
+                expected = api.view()
+                api.server['metadata'][field] = replacement
+                with self.assertRaises(p.OperatorError):
+                    p.current(api, expected, allow_paused=True)
+
+    def test_unrelated_status_and_revision_updates_are_allowed(self):
+        api = RunAPI()
+        expected = api.view()
+        api.server['status']['heartbeat'] = {'lastSeen': 'now'}
+        api.server['metadata']['resourceVersion'] = '99'
+        actual = p.current(api, expected)
+        self.assertEqual(actual['metadata']['resourceVersion'], '99')
 
 
 class ProvisioningTests(unittest.TestCase):

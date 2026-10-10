@@ -8,37 +8,45 @@ import subprocess
 import sys
 import tempfile
 from urllib.error import HTTPError
+from models import json_object, json_string
 from server_operation import reservation
 
 from common import (API, OperatorError, alias, address, capture_inventory, fingerprint,
                     inventory_hosts, public_key, request_json, ssh_args, ssh_probe, write_private,
-                    run_ansible)
+                    run_ansible, management_address)
 
 
 def current(api, snapshot):
-    value = api.get("servers", snapshot["metadata"]["name"])
-    observed_host = value.get("status", {}).get("hostSSH", {})
-    snapshot_host = snapshot.get("status", {}).get("hostSSH", {})
-    if (value["metadata"]["uid"] != snapshot["metadata"]["uid"] or value.get(
-            'status', {}).get('operation') != snapshot.get('status', {}).get('operation')
-            or value.get("status", {}).get("provisioning", {}).get("maintenance")
-            or value["metadata"]["generation"] != snapshot["metadata"]["generation"]
-            or value["metadata"].get("deletionTimestamp") or any(
-                observed_host.get(field) != snapshot_host.get(field)
-                for field in ("keyPairRef", "publicKey", "fingerprint", "keyReady",
-                              "bootstrapPublicKey", "installedKeyPairRef", "installedFingerprint"))
-            or value.get("status", {}).get("machineRef") != snapshot.get("status",
-                                                                         {}).get("machineRef")
-            or value.get("status", {}).get("desiredSSHTrustBundleDigest") != snapshot.get(
-                "status", {}).get("desiredSSHTrustBundleDigest")
-            or value.get("status", {}).get("networking", {}).get("management") != snapshot.get(
-                "status", {}).get("networking", {}).get("management")):
-        raise RuntimeError(
-            "Server identity, desired state, or management binding changed; retry next pass")
-    return value
+    """Reread identity, ownership and trust before delivering keys or reporting status."""
+    server = api.get("servers", snapshot["metadata"]["name"])
+    metadata = server["metadata"]
+    expected_metadata = snapshot["metadata"]
+    status = server.get("status", {})
+    expected_status = snapshot.get("status", {})
+    if metadata.get("deletionTimestamp"):
+        raise RuntimeError("Server is terminating; retry next pass")
+    if status.get("provisioning", {}).get("maintenance"):
+        raise RuntimeError("Provisioning owns the Server; retry next pass")
+    for field in ("uid", "generation"):
+        if metadata[field] != expected_metadata[field]:
+            raise RuntimeError("Server " + field + " changed; retry next pass")
+    for field in ("operation", "machineRef", "desiredSSHTrustBundleDigest"):
+        if status.get(field) != expected_status.get(field):
+            raise RuntimeError("Server " + field + " changed; retry next pass")
+    if status.get("networking", {}).get("management") != expected_status.get("networking",
+                                                                             {}).get("management"):
+        raise RuntimeError("Management binding changed; retry next pass")
+    observed_host = status.get("hostSSH", {})
+    expected_host = expected_status.get("hostSSH", {})
+    for field in ("keyPairRef", "publicKey", "fingerprint", "keyReady", "bootstrapPublicKey",
+                  "installedKeyPairRef", "installedFingerprint"):
+        if observed_host.get(field) != expected_host.get(field):
+            raise RuntimeError("Host SSH " + field + " changed; retry next pass")
+    return server
 
 
 def observation(api, snapshot, fields, expected_pin=None, additional_status=None):
+    """CAS-merge verified observations while preserving unrelated status writers."""
     for _ in range(5):
         latest = current(api, snapshot)
         if expected_pin is not None and latest.get("status", {}).get(
@@ -53,6 +61,7 @@ def observation(api, snapshot, fields, expected_pin=None, additional_status=None
 
 
 def pin_first_contact(api, server, host, directory):
+    """Persist a Server-bound TOFU pin before delivering private host material."""
     known = directory / "first-contact-known-hosts"
     write_private(known, "")
     # No private host material has been read yet. A successful SSH login pins
@@ -84,14 +93,16 @@ def pin_first_contact(api, server, host, directory):
 
 
 def host_private_key(api, server):
+    """Validate ownership before reading one host key with a short-lived Bao token."""
     host = server["status"]["hostSSH"]
     reference = host["keyPairRef"]
     key = api.get("ssh-key-pairs", reference["name"])
     uid = server["metadata"]["uid"]
     if (key["metadata"]["uid"] != reference["uid"] or key["metadata"].get("deletionTimestamp")
             or key["metadata"].get("annotations", {}).get("homelab.io/server-uid") != uid
-            or key["spec"]["path"] != "ssh/hosts/" + uid
-            or key.get("status", {}).get("phase") != "Ready"
+            or key["spec"]["path"] != "ssh/hosts/" + uid):
+        raise RuntimeError("Host key ownership does not match the Server")
+    if (key.get("status", {}).get("phase") != "Ready"
             or key["status"].get("observedGeneration") != key["metadata"]["generation"]
             or public_key(key["status"]["publicKey"]) != public_key(host["publicKey"])):
         raise RuntimeError("Owned host key is not current and Ready")
@@ -103,20 +114,25 @@ def host_private_key(api, server):
             "role_id": os.environ["HOST_KEY_BAO_ROLE_ID"],
             "secret_id": os.environ["HOST_KEY_BAO_SECRET_ID"]
         })
-    token = login["auth"]["client_token"]
+    auth = json_object(login.get('auth'), 'OpenBao auth')
+    token = json_string(auth.get('client_token'), 'OpenBao client_token')
     try:
-        data = request_json(base + "/v1/kv2/data/secrets/ssh/hosts/" + uid, token,
-                            token_header="X-Vault-Token")["data"]["data"]
+        response = request_json(base + "/v1/kv2/data/secrets/ssh/hosts/" + uid, token,
+                                token_header="X-Vault-Token")
+        version = json_object(response.get('data'), 'OpenBao version')
+        data = json_object(version.get('data'), 'OpenBao key data')
         if data.get("sshKeyPairUID") != reference["uid"] or public_key(
-                data["publicKey"]) != public_key(host["publicKey"]):
+                json_string(data.get('publicKey'), 'OpenBao publicKey')) != public_key(
+                    host["publicKey"]):
             raise RuntimeError("OpenBao host identity does not match the owned SSHKeyPair")
-        return data["privateKey"]
+        return json_string(data.get('privateKey'), 'OpenBao privateKey')
     finally:
         request_json(base + "/v1/auth/token/revoke-self", token, "POST", {},
                      token_header="X-Vault-Token")
 
 
 def run_play(server, host, directory, known, play, variables=None):
+    """Execute the reviewed host-key/trust play with a private scoped inventory."""
     inventory = {
         "all": {
             "hosts": {
@@ -151,6 +167,7 @@ def run_play(server, host, directory, known, play, variables=None):
 
 
 def reconcile(api, server, host, directory):
+    """Acquire short-operation ownership; defer busy Servers to the next pass."""
     try:
         with reservation(api, server):
             reconcile_owned(api, server, host, directory)
@@ -161,6 +178,7 @@ def reconcile(api, server, host, directory):
 
 
 def reconcile_owned(api, server, host, directory):
+    """Inspect, install and verify managed trust while this pass holds ownership."""
     provisioning = server.get("status", {}).get("provisioning", {})
     if provisioning.get("maintenance") or provisioning.get("phase") in (
             "PreparingBoot", "AwaitingLive", "Installing", "AwaitingInstalled", "Verifying"):
@@ -231,6 +249,7 @@ def reconcile_owned(api, server, host, directory):
 
 
 def main():
+    """Run a bounded pass; isolate target failures without exposing credentials."""
     api = API()
     group, inventory = capture_inventory(api, os.environ["INVENTORY_CAPTURE_GROUP"])
     kinds = group["spec"]["selector"].get("matchKinds", [])
@@ -246,9 +265,7 @@ def main():
             if server["metadata"].get("deletionTimestamp"):
                 continue
             host = address(variables["ansible_host"])
-            actual = server.get("status", {}).get("networking", {}).get("management",
-                                                                        {}).get("address",
-                                                                                {}).get("address")
+            actual = management_address(server)
             if actual != host:
                 raise RuntimeError("Capture-group management address is stale")
             with tempfile.TemporaryDirectory(prefix="ssh-host-operator-") as tmp:
@@ -258,9 +275,11 @@ def main():
             failed = True
             # Do not print exceptions that may include HTTP bodies/key material.
             reason = exc.reason if isinstance(exc, OperatorError) else "ReconciliationFailed"
-            message = str(exc) if isinstance(
-                exc, OperatorError
-            ) else "Operator could not verify convergence; inspect connectivity, binding, credentials and host identity"
+            if isinstance(exc, OperatorError):
+                message = str(exc)
+            else:
+                message = ("Operator could not verify convergence; "
+                           "inspect connectivity, binding, credentials and host identity")
             print(name + ": " + reason + ": " + message, file=sys.stderr)
             if server:
                 try:

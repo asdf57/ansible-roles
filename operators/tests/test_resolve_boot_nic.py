@@ -6,6 +6,7 @@ import unittest
 spec = importlib.util.spec_from_file_location(
     'resolve_boot_nic',
     Path(__file__).resolve().parents[2] / 'roles/provision/files/resolve_boot_nic.py')
+assert spec is not None and spec.loader is not None
 resolver = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(resolver)
 

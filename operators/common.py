@@ -10,25 +10,32 @@ import signal
 import subprocess
 import tempfile
 import threading
-from urllib.error import HTTPError
 from urllib.parse import quote, urlparse
 from urllib.request import Request, build_opener, HTTPRedirectHandler
 
+from models import JSONValue, JSONObject, Resource, json_object, json_string, resource
+
 
 class NoRedirect(HTTPRedirectHandler):
+    """Refuse redirect-based credential forwarding, even to another HTTPS host."""
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):
+        """Reject rather than resend a credential-bearing request to a new URL."""
         raise RuntimeError("Credential-bearing requests must not redirect")
 
 
 class OperatorError(RuntimeError):
+    """A classified, safe-to-log refusal; raw HTTP/secret bodies must not be logged."""
 
     def __init__(self, reason, message):
         super().__init__(message)
         self.reason = reason
 
 
-def request_json(url, token, method="GET", body=None, headers=None, token_header="Authorization"):
+def request_json(url: str, token: str, method: str = "GET", body: JSONObject | None = None,
+                 headers: dict[str, str] | None = None,
+                 token_header: str = "Authorization") -> JSONObject:
+    """Exchange JSON without redirecting credentials; schema validation belongs to the API."""
     parsed = urlparse(url)
     if parsed.scheme != "https" and not (parsed.scheme == "http"
                                          and parsed.hostname in ("localhost", "127.0.0.1")):
@@ -41,10 +48,12 @@ def request_json(url, token, method="GET", body=None, headers=None, token_header
     with build_opener(NoRedirect()).open(Request(url, data=data, headers=values, method=method),
                                          timeout=30) as response:
         data = response.read()
-        return json.loads(data) if data else {}
+        decoded: JSONValue = json.loads(data) if data else {}
+        return json_object(decoded, 'API response')
 
 
 class API:
+    """Authenticated API transport with UID/revision-bound status writes."""
 
     def __init__(self):
         self.url = os.environ["STIGMERGY_API_URL"].rstrip("/") + "/api/v1alpha1"
@@ -52,38 +61,48 @@ class API:
         if not self.token:
             raise RuntimeError("An API token is required")
 
-    def get(self, collection, name):
-        return request_json(self.url + "/" + collection + "/" + quote(name, safe=""), self.token)
+    def get(self, collection: str, name: str) -> Resource:
+        """Fetch a named resource; its JSON shape is defined by the API schema."""
+        return resource(
+            request_json(self.url + "/" + collection + "/" + quote(name, safe=""), self.token))
 
-    def list(self, collection):
-        return request_json(self.url + "/" + collection, self.token)["items"]
+    def list(self, collection: str) -> list[Resource]:
+        """Fetch the current collection, not a cached operator snapshot."""
+        items = request_json(self.url + "/" + collection, self.token).get('items')
+        if not isinstance(items, list):
+            raise ValueError('API collection.items must be a list')
+        return [resource(json_object(item, 'collection item')) for item in items]
 
-    def patch_status(self, server, status):
+    def patch_status(self, server: Resource, status: JSONObject) -> Resource:
+        """Merge owned status fields only for the same resource lifetime/revision."""
         collection = {'Server': 'servers', 'ProvisioningRun': 'provisioning-runs'}[server['kind']]
-        return request_json(
-            self.url + "/" + collection + "/" + quote(server["metadata"]["name"], safe="") +
-            "/status", self.token, "PATCH", {
-                "metadata": {
-                    "uid": server["metadata"]["uid"]
-                },
-                "status": status
-            }, {
-                "If-Match": '"' + server["metadata"]["resourceVersion"] + '"',
-                "Content-Type": "application/merge-patch+json"
-            })
+        return resource(
+            request_json(
+                self.url + "/" + collection + "/" + quote(server["metadata"]["name"], safe="") +
+                "/status", self.token, "PATCH", {
+                    "metadata": {
+                        "uid": server["metadata"]["uid"]
+                    },
+                    "status": status
+                }, {
+                    "If-Match": '"' + server["metadata"]["resourceVersion"] + '"',
+                    "Content-Type": "application/merge-patch+json"
+                }))
 
 
-def write_private(path, content):
+def write_private(path: str | Path, content: str) -> None:
+    """Write secret-bearing task data only inside the caller's private directory."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     # All callers use private fresh task/temporary directories.
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w") as stream:
+    with os.fdopen(fd, "w", encoding="utf-8") as stream:
         stream.write(content)
     path.chmod(0o600)
 
 
-def run_ansible(command, diagnostic, timeout):
+def run_ansible(command: list[str], diagnostic: Path,
+                timeout: float) -> subprocess.CompletedProcess[str]:
     """Stream Ansible's standard, no_log-aware output and keep a private copy."""
     diagnostic = Path(diagnostic)
     write_private(diagnostic, '')
@@ -92,31 +111,37 @@ def run_ansible(command, diagnostic, timeout):
                        ANSIBLE_DISPLAY_ARGS_TO_STDOUT='false', ANSIBLE_VERBOSITY='0',
                        ANSIBLE_DISPLAY_SKIPPED_HOSTS='false', ANSIBLE_SSH_USETTY='false',
                        ANSIBLE_INJECT_FACT_VARS='false', ANSIBLE_CALLBACK_RESULT_FORMAT='yaml')
-    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                               bufsize=1, env=environment, start_new_session=True)
+    with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                          bufsize=1, env=environment, start_new_session=True) as process:
+        output_stream = process.stdout
+        if output_stream is None:
+            raise RuntimeError('Ansible output pipe was not created')
 
-    def stream():
-        with diagnostic.open('a') as log:
-            for line in process.stdout:
-                log.write(line)
-                log.flush()
-                print(line, end='', flush=True)
+        def stream():
+            """Drain continuously so a full pipe cannot stall the playbook."""
+            with diagnostic.open('a', encoding='utf-8') as log:
+                for line in output_stream:
+                    log.write(line)
+                    log.flush()
+                    print(line, end='', flush=True)
 
-    output = threading.Thread(target=stream, daemon=True)
-    output.start()
-    try:
-        result = process.wait(timeout=timeout)
-    except subprocess.TimeoutExpired:
-        os.killpg(process.pid, signal.SIGKILL)
-        process.wait()
-        raise
-    finally:
-        output.join(timeout=10)
-        process.stdout.close()
-    return subprocess.CompletedProcess(command, result, stdout=diagnostic.read_text(), stderr='')
+        output = threading.Thread(target=stream, daemon=True)
+        output.start()
+        try:
+            result = process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            # Kill the local process group, not an arbitrary managed-node process.
+            os.killpg(process.pid, signal.SIGKILL)
+            process.wait()
+            raise
+        finally:
+            output.join(timeout=10)
+    return subprocess.CompletedProcess(command, result,
+                                       stdout=diagnostic.read_text(encoding='utf-8'), stderr='')
 
 
-def public_key(value):
+def public_key(value: str) -> str:
+    """Validate and normalize an Ed25519 wire-format public key."""
     fields = value.strip().split()
     if len(fields) < 2 or fields[0] != "ssh-ed25519":
         raise RuntimeError("An Ed25519 host key is required")
@@ -130,24 +155,37 @@ def public_key(value):
     return " ".join(fields[:2])
 
 
-def fingerprint(key):
+def fingerprint(key: str) -> str:
+    """Compute the OpenSSH SHA256 fingerprint of a validated public key."""
     raw = base64.b64decode(public_key(key).split()[1])
     return "SHA256:" + base64.b64encode(hashlib.sha256(raw).digest()).decode().rstrip("=")
 
 
 def alias(server):
+    """Bind SSH trust to a Server UID rather than a reusable IP or name."""
     uid = server["metadata"]["uid"]
     if not re.fullmatch(r"[A-Za-z0-9-]+", uid):
         raise RuntimeError("Invalid Server UID")
     return "server-" + uid
 
 
-def address(value):
+def address(value: str) -> str:
+    """Require a literal IP address, never arbitrary SSH command/hostname input."""
     # Management inventory is an address, not arbitrary SSH arguments or a URL.
     return str(ipaddress.ip_address(value))
 
 
+def management_address(server: Resource) -> str | None:
+    """Read the optional management address after narrowing each JSON mapping."""
+    networking = json_object(server['status'].get('networking', {}), 'networking')
+    management = json_object(networking.get('management', {}), 'management')
+    endpoint = json_object(management.get('address', {}), 'management address')
+    value = endpoint.get('address')
+    return None if value is None else json_string(value, 'management IP')
+
+
 def ssh_args(server, known_hosts, checking="yes"):
+    """Build strict, non-forwarding SSH options for exactly one Server identity."""
     return [
         "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", "-o", "ConnectionAttempts=1", "-o",
         "IdentitiesOnly=yes", "-o", "IdentityAgent=none", "-o", "ForwardAgent=no", "-o",
@@ -160,11 +198,13 @@ def ssh_args(server, known_hosts, checking="yes"):
 
 
 def ssh_probe(server, host, known_hosts, checking="yes"):
+    """Authenticate one connection; accept-new is only for scoped first contact."""
     result = subprocess.run(
         ["ssh", *ssh_args(server, known_hosts, checking), "ansible@" + address(host), "true"],
-        capture_output=True, text=True, timeout=45)
+        capture_output=True, text=True, timeout=45, check=False)
     if result.returncode:
-        if "Host key verification failed" in result.stderr or "REMOTE HOST IDENTIFICATION HAS CHANGED" in result.stderr:
+        identity_errors = ("Host key verification failed", "REMOTE HOST IDENTIFICATION HAS CHANGED")
+        if any(message in result.stderr for message in identity_errors):
             raise OperatorError(
                 "HostIdentityMismatch",
                 "SSH host identity changed; explicit recovery or reenrollment is required")
@@ -177,6 +217,7 @@ def ssh_probe(server, host, known_hosts, checking="yes"):
 
 
 def inventory_hosts(inventory):
+    """Collect raw host variables, rejecting ambiguous management addresses."""
     result = {}
     for group in inventory.values():
         for name, variables in group.get("hosts", {}).items():
@@ -200,6 +241,7 @@ def resolved_inventory_hosts(inventory):
 
 
 def capture_inventory(api, group_name):
+    """Read the selected group's usable inventory; reject missing state."""
     group = api.get("inventory-capture-groups", group_name)
     if group["metadata"].get("deletionTimestamp"):
         raise RuntimeError("Inventory capture group is terminating")

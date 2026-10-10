@@ -17,11 +17,11 @@ def selected_server(api, name, uid, machine_uid):
     """Recheck current identity and lifecycle gates; discovery is not SSH trust."""
     server = api.get('servers', name)
     status = server.get('status', {})
-    reservation = status.get('provisioning', {})
+    provisioning = status.get('provisioning', {})
     if (server['metadata']['uid'] != uid or server['metadata'].get('deletionTimestamp')
             or status.get('machineRef', {}).get('uid') != machine_uid):
         raise RuntimeError('Server or Machine identity changed; create a newly reviewed Command')
-    if reservation.get('maintenance') or reservation.get('activeRunRef') is not None:
+    if provisioning.get('maintenance') or provisioning.get('activeRunRef') is not None:
         raise RuntimeError('Provisioning owns the Server; system operation refused')
     if status.get('operation', {}).get('phase') == 'Held':
         raise RuntimeError('Another operation owns the Server')

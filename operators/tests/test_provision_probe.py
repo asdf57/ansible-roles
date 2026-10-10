@@ -9,6 +9,7 @@ from unittest.mock import patch
 spec = importlib.util.spec_from_file_location(
     'provision_probe',
     Path(__file__).resolve().parents[2] / 'roles/provision/files/probe.py')
+assert spec is not None and spec.loader is not None
 probe = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(probe)
 
