@@ -29,10 +29,12 @@ while IFS= read -r -d '' source; do
 done < <(find "$setup/agent" "$setup/management" "$setup/systemd" "$setup/sshd" -type f -print0)
 echo "Verified complete retained setup bundle in $type filesystem"
 unsquashfs -cat "$filesystem" etc/NetworkManager/conf.d/90-homelab.conf | grep -qx 'dhcp=internal'
+unsquashfs -cat "$filesystem" etc/NetworkManager/conf.d/90-homelab.conf | grep -qx 'rc-manager=file'
 unsquashfs -cat "$filesystem" etc/NetworkManager/conf.d/90-homelab.conf | grep -qx 'keep-configuration=no'
 unsquashfs -cat "$filesystem" etc/NetworkManager/system-connections/homelab-wired.nmconnection | grep -qx 'dhcp-client-id=mac'
 unsquashfs -ll "$filesystem" etc/NetworkManager/system-connections/homelab-wired.nmconnection | grep -q '^-rw------- '
 for unit in systemd-networkd.service systemd-networkd.socket systemd-networkd-wait-online.service \
+    systemd-resolved.service dbus-org.freedesktop.resolve1.service \
     dhcpcd.service dhcpcd@.service dhclient.service dhclient@.service networking.service ifup@.service; do
     unsquashfs -ll "$filesystem" "etc/systemd/system/$unit" | grep -Fq -- ' -> /dev/null'
 done

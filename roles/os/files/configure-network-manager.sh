@@ -10,6 +10,7 @@ install -d -m 0700 "$target/etc/NetworkManager/system-connections"
 
 # Stock Arch profiles and Debian package presets must not create another owner.
 for unit in systemd-networkd.service systemd-networkd.socket systemd-networkd-wait-online.service \
+    systemd-resolved.service dbus-org.freedesktop.resolve1.service \
     dhcpcd.service dhcpcd@.service dhclient.service dhclient@.service networking.service ifup@.service; do
     pattern=$(printf '%s' "$unit" | sed 's/@\./@*./')
     find "$systemd" -type l -name "$pattern" -delete
@@ -22,7 +23,8 @@ cat > "$target/etc/NetworkManager/conf.d/90-homelab.conf" <<'EOF'
 plugins=keyfile
 dhcp=internal
 dns=default
-rc-manager=symlink
+rc-manager=file
+systemd-resolved=false
 
 [device-homelab-wired]
 match-device=type:ethernet
@@ -49,4 +51,10 @@ dhcp-client-id=mac
 method=auto
 EOF
 chmod 0600 "$target/etc/NetworkManager/system-connections/homelab-wired.nmconnection"
-ln -sfn /run/NetworkManager/resolv.conf "$target/etc/resolv.conf"
+# Preserve regular build-time DNS: live-build still downloads packages after
+# its chroot hooks. Replace only factory resolver symlinks, whose runtime target
+# belongs to a service we disabled. NetworkManager writes this file at boot.
+if [ -L "$target/etc/resolv.conf" ]; then
+    unlink "$target/etc/resolv.conf"
+    printf '# Managed by NetworkManager at boot\n' > "$target/etc/resolv.conf"
+fi

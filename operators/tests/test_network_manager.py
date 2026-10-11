@@ -25,17 +25,19 @@ class NetworkManagerImageTests(unittest.TestCase):
             for _ in range(2):
                 subprocess.run(['sh', str(SCRIPT), str(root)], check=True, capture_output=True)
             for unit in ('systemd-networkd.service', 'systemd-networkd.socket',
-                         'systemd-networkd-wait-online.service', 'dhcpcd.service',
+                         'systemd-networkd-wait-online.service', 'systemd-resolved.service',
+                         'dbus-org.freedesktop.resolve1.service', 'dhcpcd.service',
                          'dhcpcd@.service', 'dhclient.service', 'dhclient@.service',
                          'networking.service', 'ifup@.service'):
                 self.assertEqual((wants.parent / unit).readlink(), Path('/dev/null'))
             self.assertEqual(sorted(path.name for path in wants.iterdir()),
                              ['NetworkManager.service'])
-            self.assertEqual((root / 'etc/resolv.conf').readlink(),
-                             Path('/run/NetworkManager/resolv.conf'))
+            self.assertEqual((root / 'etc/resolv.conf').read_text(encoding='utf-8'),
+                             'nameserver 192.0.2.1\n')
             configuration = configparser.ConfigParser()
             configuration.read(root / 'etc/NetworkManager/conf.d/90-homelab.conf')
             self.assertEqual(configuration['main']['dhcp'], 'internal')
+            self.assertEqual(configuration['main']['rc-manager'], 'file')
             self.assertEqual(configuration['main']['plugins'], 'keyfile')
             self.assertEqual(configuration['device-homelab-wired']['keep-configuration'], 'no')
             profile_path = root / 'etc/NetworkManager/system-connections/homelab-wired.nmconnection'
@@ -51,6 +53,16 @@ class NetworkManagerImageTests(unittest.TestCase):
             result = subprocess.run(['sh', str(SCRIPT), directory], check=False,
                                     capture_output=True)
             self.assertNotEqual(result.returncode, 0)
+
+    def test_factory_resolver_symlink_becomes_a_network_manager_owned_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'etc').mkdir()
+            resolver = root / 'etc/resolv.conf'
+            resolver.symlink_to('/run/systemd/resolve/stub-resolv.conf')
+            subprocess.run(['sh', str(SCRIPT), str(root)], check=True, capture_output=True)
+            self.assertFalse(resolver.is_symlink())
+            self.assertIn('NetworkManager', resolver.read_text(encoding='utf-8'))
 
     def test_builders_and_installer_use_the_same_recipe(self):
         arch = (ROOT / 'roles/os/files/arch/build.sh').read_text(encoding='utf-8')
