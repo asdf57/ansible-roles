@@ -14,7 +14,7 @@ import provisioning as p
 import runner_trust
 import ssh_host_keys
 import yaml
-from models import JSONValue, JSONObject, Metadata
+from models import JSONValue, JSONObject, Metadata, Resource
 
 
 class PostVerificationContract(unittest.TestCase):
@@ -231,6 +231,75 @@ class RunAPI:
 
 class PinnedAttemptGuardTests(unittest.TestCase):
     """Every stage must reject drift without depending on unrelated status writes."""
+
+    def test_missing_network_is_pending_not_mac_drift(self):
+        api = RunAPI('AwaitingLive')
+        expected = api.view()
+        for missing in (None, {}):
+            with self.subTest(missing=missing):
+                api.server['status']['networking'] = missing
+                with self.assertRaises(p.OperatorError) as raised:
+                    p.current(api, expected)
+                self.assertEqual(raised.exception.reason, 'ManagementNetworkPending')
+                p.current(api, expected, allow_network_pending=True)
+                with self.assertRaises(p.OperatorError) as raised:
+                    p.host_address(api.server)
+                self.assertEqual(raised.exception.reason, 'ManagementNetworkPending')
+
+    def test_missing_network_still_checks_key_and_plan_and_retains_ownership(self):
+        api = RunAPI('AwaitingLive')
+        expected = api.view()
+        api.server['status']['networking'] = {}
+        with tempfile.TemporaryDirectory() as directory, patch.object(p, 'run_stage') as stage:
+            p.handle_failure(api, expected, Path(directory), 'waiting for network',
+                             'ManagementNetworkPending')
+            stage.assert_not_called()
+        self.assertEqual(api.run['status']['phase'], 'AwaitingLive')
+        self.assertTrue(api.run['status']['maintenance'])
+        self.assertTrue(p.eligible(api.server))
+        api.server['status']['hostSSH']['keyPairRef'] = {}
+        with self.assertRaisesRegex(p.OperatorError, 'Managed host key reference changed'):
+            p.current(api, api.view(), allow_network_pending=True)
+
+    def test_session_wait_does_not_connect_until_network_resolves(self):
+        api = RunAPI('AwaitingLive')
+        expected = api.view()
+        missing = copy.deepcopy(expected)
+        missing['status']['networking'] = None
+        fresh = {**facts(), 'bootID': 'new-live-boot'}
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(p, 'current', side_effect=[missing, expected]), \
+                patch.object(p, 'inspect', return_value=fresh) as inspect, \
+                patch.object(p.time, 'sleep') as sleep:
+            actual, _known = p.await_session(api, copy.deepcopy(expected), Path(directory),
+                                             live=True)
+        self.assertEqual(actual['bootID'], 'new-live-boot')
+        inspect.assert_called_once()
+        sleep.assert_called_once_with(5)
+
+    def test_omitted_owned_server_is_not_idle_success(self):
+        api = RunAPI('AwaitingLive')
+        group: Resource = {
+            'kind': 'InventoryCaptureGroup',
+            'metadata': {
+                'name': 'group',
+                'uid': 'group-uid',
+                'resourceVersion': '1'
+            },
+            'spec': {},
+            'status': {
+                'omittedResources': [{
+                    'kind': 'Server',
+                    'name': 'node'
+                }]
+            }
+        }
+        with patch.object(p.API, 'get', side_effect=api.get), patch.dict(
+                os.environ, STIGMERGY_API_URL='https://api.example.test',
+                STIGMERGY_API_TOKEN='test-token'):
+            self.assertTrue(p.omitted_active_runs(p.API(), group))
+            api.server['status']['provisioning'].pop('activeRunRef')
+            self.assertFalse(p.omitted_active_runs(p.API(), group))
 
     def test_checkpoint_drift_is_rejected(self):
         changes = [

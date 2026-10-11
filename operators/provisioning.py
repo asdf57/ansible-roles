@@ -19,7 +19,7 @@ from common import (API, NoRedirect, OperatorError, address, alias, capture_inve
                     resolved_inventory_hosts, public_key, ssh_args, ssh_probe, write_private,
                     run_ansible)
 import ssh_host_keys
-from models import JSONValue
+from models import JSONValue, Resource, json_object, json_string
 from ssh_host_keys import host_private_key
 
 ACTIVE = {"PreparingBoot", "AwaitingLive", "Installing", "AwaitingInstalled", "Verifying"}
@@ -123,7 +123,7 @@ def validate_attempt_checkpoint(current_server, expected_server):
                       'Checkpoint phase')
 
 
-def validate_pinned_server(current_server, attempt_snapshot):
+def validate_pinned_server(current_server, attempt_snapshot, allow_network_pending=False):
     """Keep desired inputs and physical/key bindings fixed before every stage."""
     pinned_spec = attempt_snapshot['inputs']['serverSpec']
     for field in SPEC_INPUTS:
@@ -131,15 +131,19 @@ def validate_pinned_server(current_server, attempt_snapshot):
                           'Server spec.' + field)
     status = current_server['status']
     require_unchanged(status.get('machineRef'), attempt_snapshot['machineRef'], 'Machine binding')
-    management = status.get('networking', {}).get('management', {})
+    management = (status.get('networking') or {}).get('management', {})
     boot_mac = management.get('interface', {}).get('mac', '').lower()
-    require_unchanged(boot_mac, attempt_snapshot['bootMAC'], 'Boot interface MAC')
+    if boot_mac:
+        require_unchanged(boot_mac, attempt_snapshot['bootMAC'], 'Boot interface MAC')
     require_unchanged(
         status.get('hostSSH', {}).get('keyPairRef'), attempt_snapshot['keyPairRef'],
         'Managed host key reference')
+    if not boot_mac and not allow_network_pending:
+        raise OperatorError('ManagementNetworkPending',
+                            'Waiting for an unambiguous management interface and address')
 
 
-def current(api, snapshot, allow_paused=False):
+def current(api, snapshot, allow_paused=False, allow_network_pending=False):
     """Revalidate ownership and pinned inputs, not just a resource version.
 
     Completion/cleanup may continue while paused, but must never bypass identity
@@ -151,7 +155,8 @@ def current(api, snapshot, allow_paused=False):
     if current_server['metadata'].get('deletionTimestamp'):
         raise OperatorError('ProvisioningBlocked', 'Server is terminating')
     validate_attempt_checkpoint(current_server, snapshot)
-    validate_pinned_server(current_server, snapshot['status']['provisioning']['snapshot'])
+    validate_pinned_server(current_server, snapshot['status']['provisioning']['snapshot'],
+                           allow_network_pending=allow_network_pending)
     enabled = current_server['spec']['provisioning']['enabled']
     paused = current_server['spec'].get('reconciliation', {}).get('paused')
     if not allow_paused and (not enabled or paused):
@@ -162,7 +167,8 @@ def current(api, snapshot, allow_paused=False):
 def checkpoint(api, server, phase, **fields):
     """CAS-merge a checkpoint after revalidation; never overwrite another run."""
     for _ in range(5):
-        latest = current(api, server, allow_paused=True)
+        # Status-only writes may record a missing observation; physical stages may not.
+        latest = current(api, server, allow_paused=True, allow_network_pending=True)
         try:
             result = api.patch_status(latest['_run'], {
                 "phase": phase,
@@ -192,7 +198,12 @@ def known_file(server, directory, key=None):
 
 def host_address(server):
     """Read and validate the current management IP from the bound Server."""
-    return address(server["status"]["networking"]["management"]["address"]["address"])
+    management = (server['status'].get('networking') or {}).get('management', {})
+    reported = management.get('address', {}).get('address')
+    if not reported:
+        raise OperatorError('ManagementNetworkPending',
+                            'Waiting for an unambiguous management interface and address')
+    return address(reported)
 
 
 def inspect(server, known):
@@ -519,7 +530,15 @@ def await_session(api, server, directory, live, timeout=600):
     """Wait for a changed boot; TOFU is limited to this run's live handoff."""
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        server.update(current(api, server, allow_paused=not live))
+        server.update(current(api, server, allow_paused=not live, allow_network_pending=True))
+        try:
+            host_address(server)
+        except OperatorError as error:
+            if error.reason != 'ManagementNetworkPending':
+                raise
+            print(server['metadata']['name'] + ': ' + str(error), flush=True)
+            time.sleep(5)
+            continue
         attempt_status = server["status"]["provisioning"]
         pin = attempt_status.get("bootstrapPublicKey") if live else None
         known = known_file(server, directory, pin)
@@ -819,8 +838,11 @@ def reconcile(api, server, variables, directory, revision, preflight=False):
         raise OperatorError("ProvisioningBlocked",
                             "Resume requires the pinned operator-code revision")
     server.update(
-        current(api, server,
-                allow_paused=server['status']['provisioning']['phase'] == 'AwaitingInstalled'))
+        current(
+            api, server,
+            allow_paused=server['status']['provisioning']['phase'] == 'AwaitingInstalled',
+            allow_network_pending=server['status']['provisioning']['phase']
+            in ('AwaitingLive', 'AwaitingInstalled')))
     verify_dependencies(api, server)
     drain_commands(api)
     known = known_file(server, directory)
@@ -837,7 +859,7 @@ def reconcile(api, server, variables, directory, revision, preflight=False):
         verify_completion(api, server, directory, known)
 
 
-def handle_failure(api, server, directory, failure_message=None):
+def handle_failure(api, server, directory, failure_message=None, failure_reason=None):
     """Retain ownership unless safe cleanup is verified; never erase on retry."""
     attempt_status = server.get("status", {}).get("provisioning", {})
     if attempt_status.get("phase") == 'Pending':
@@ -849,6 +871,9 @@ def handle_failure(api, server, directory, failure_message=None):
         server['_run'] = result
         return
     if attempt_status.get("phase") not in ACTIVE:
+        return
+    if failure_reason == 'ManagementNetworkPending':
+        checkpoint(api, server, attempt_status['phase'], message=failure_message)
         return
     if attempt_status["phase"] in ("AwaitingInstalled", "Verifying"):
         checkpoint(api, server, attempt_status["phase"],
@@ -879,6 +904,25 @@ def handle_failure(api, server, directory, failure_message=None):
     release_run(api, server)
 
 
+def omitted_active_runs(api: API, group: Resource) -> bool:
+    """Do not report idle success when a reserved Server has no usable inventory."""
+    omitted = group['status'].get('omittedResources', [])
+    if not isinstance(omitted, list):
+        return False
+    waiting = False
+    for value in omitted:
+        entry = json_object(value, 'omitted inventory resource')
+        if entry.get('kind') != 'Server':
+            continue
+        name = json_string(entry.get('name'), 'omitted Server name')
+        if eligible(api.get('servers', name)):
+            print(
+                name + ': active provisioning request omitted from inventory; '
+                'waiting for unambiguous management networking', flush=True)
+            waiting = True
+    return waiting
+
+
 def main():
     """Poll the selected group; at most one destructive attempt advances per pass."""
     args = argparse.ArgumentParser()
@@ -892,6 +936,8 @@ def main():
     }]:
         raise OperatorError("ProvisioningBlocked",
                             "Provisioning requires a Server-only capture group")
+    if omitted_active_runs(api, group):
+        return 1
     checkout = str(Path(__file__).resolve().parents[1])
     # Concourse's explicit Git input is root-owned; trust only this checkout for
     # this read, never a global wildcard or every repository on the runner.
@@ -904,10 +950,11 @@ def main():
         if not eligible(server):
             continue
         server = bind_run(api, server)
-        if host_address(server) != address(variables["ansible_host"]):
-            raise OperatorError("ProvisioningBlocked", "Capture-group management address is stale")
         with tempfile.TemporaryDirectory(prefix="provision-operator-") as tmp:
             try:
+                if host_address(server) != address(variables["ansible_host"]):
+                    raise OperatorError("ProvisioningBlocked",
+                                        "Capture-group management address is stale")
                 reconcile(api, server, variables, Path(tmp), revision, options.preflight)
             except Exception as exc:
                 # Never print raw HTTP/Ansible exception bodies containing credentials.
@@ -919,7 +966,8 @@ def main():
                                'inspect dependencies and checkpoints')
                 print(name + ': ' + message, file=sys.stderr)
                 if not options.preflight:
-                    handle_failure(api, server, Path(tmp), message)
+                    reason = exc.reason if isinstance(exc, OperatorError) else None
+                    handle_failure(api, server, Path(tmp), message, reason)
                 if server.get('status', {}).get(
                         'provisioning', {}).get('phase') in ACTIVE or server.get('status', {}).get(
                             'provisioning', {}).get('maintenance'):

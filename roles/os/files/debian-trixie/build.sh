@@ -137,6 +137,7 @@ debootstrap
 arch-install-scripts
 locales
 lldpd
+network-manager
 kexec-tools
 sudo
 EOF
@@ -151,6 +152,16 @@ EOF
   # Overlay installation precedes package installation. Apply the same reviewed
   # Debian client/socket access setup after live-build has installed lldpd.
   install -d config/hooks/normal
+  # Apply after package presets; the same script configures installed roots.
+  install -d config/includes.chroot/usr/share/homelab
+  install -m 0755 "$(dirname "$0")/../configure-network-manager.sh" \
+    config/includes.chroot/usr/share/homelab/configure-network-manager.sh
+  write_file config/hooks/normal/0910-network-manager.hook.chroot <<'EOF'
+#!/bin/sh
+set -eu
+sh /usr/share/homelab/configure-network-manager.sh /
+EOF
+  chmod 0755 config/hooks/normal/0910-network-manager.hook.chroot
   install -m 0755 "$(dirname "$HOMELABD_SERVICE_SOURCE")/../agent/configure-debian-lldp.sh" \
     config/hooks/normal/0900-homelabd-lldp.hook.chroot
 

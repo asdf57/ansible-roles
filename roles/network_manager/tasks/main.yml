@@ -1,0 +1,5 @@
+---
+- name: Configure NetworkManager as the sole installed network owner
+  ansible.builtin.script:
+    cmd: "{{ role_path }}/../os/files/configure-network-manager.sh {{ network_manager_target_root | quote }}"
+    executable: /bin/sh

@@ -63,13 +63,18 @@
     PROVISION_GROUPS: "{{ provision_server_spec.groups | default([]) | to_json }}"
   no_log: true
 
-- name: Enable installed management and network services
+- name: Configure the shared installed networking contract
+  ansible.builtin.include_role:
+    name: network_manager
+  vars:
+    network_manager_target_root: /mnt
+
+- name: Enable installed management services
   ansible.builtin.command:
     argv: [chroot, /mnt, systemctl, enable, "{{ item }}"]
   loop:
     - "{{ 'ssh' if provision_operating_system.distribution == 'debian' else 'sshd' }}"
     - lldpd
-    - NetworkManager
 
 - name: Generate an installed-only fstab
   ansible.builtin.include_tasks: fstab.yml

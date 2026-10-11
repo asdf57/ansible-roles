@@ -131,6 +131,7 @@ function prepare_workspace() {
   printf '\nfile_permissions["/usr/local/bin/homelabd"]="0:0:755"\n' \
     >> "${profile_dir}/profiledef.sh"
   printf '\nfile_permissions["/etc/homelabd"]="0:0:700"\n' >> "${profile_dir}/profiledef.sh"
+  printf '\nfile_permissions["/etc/NetworkManager/system-connections"]="0:0:700"\nfile_permissions["/etc/NetworkManager/system-connections/homelab-wired.nmconnection"]="0:0:600"\n' >> "${profile_dir}/profiledef.sh"
   if [[ -n "${HOMELABD_API_TOKEN:-}" ]]; then
     printf '\nfile_permissions["/etc/homelabd/environment"]="0:0:600"\n' >> "${profile_dir}/profiledef.sh"
   fi
@@ -212,7 +213,8 @@ EOF
   # Enabling a service in a systemd image build usually means creating the
   # symlink that would exist under multi-user.target.wants after
   # `systemctl enable`. That is what these links are doing.
-  ln -sf /usr/lib/systemd/system/dhcpcd.service "${wants_dir}/dhcpcd.service"
+  append_if_missing networkmanager "${profile_dir}/packages.x86_64"
+  sh "$(dirname "$0")/../configure-network-manager.sh" "$root_fs"
   ln -sf /usr/lib/systemd/system/sshd.service "${wants_dir}/sshd.service"
   ln -sf /usr/lib/systemd/system/lldpd.service "${wants_dir}/lldpd.service"
   ln -sf /etc/systemd/system/generate-ssh-host-keys.service "${wants_dir}/generate-ssh-host-keys.service"
