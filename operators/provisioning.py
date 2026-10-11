@@ -223,27 +223,35 @@ def validate_disk(facts, live_required=False):
             'Clear/reconcile competing firmware BootNext services before provisioning')
 
 
-def validate_storage(variables, facts):
-    """Accept only a disk-fitting v1 layout; this does not authorize erasure."""
-    storage = {
-        "partitions": [{
-            field: part[field]
-            for field in ('fs_type', 'alloc_type', 'size', 'flags') if field in part
-        } for part in variables.get("storage", {}).get("partitions", [])]
-    }
-    if [part.get("fs_type") for part in storage.get("partitions", [])] != ["efi", "swap", "ext4"]:
-        raise OperatorError(
-            "ProvisioningBlocked",
-            "v1 requires an explicit EFI/swap/ext4-root layout in capture-group variables")
-    for index, part in enumerate(storage["partitions"]):
-        if (part.get("alloc_type") != ("percentage" if index == 2 else "size")
-                or int(part.get("size", 0)) <= 0 or index == 2 and int(part["size"]) != 100):
-            raise OperatorError("ProvisioningBlocked", "Invalid v1 partition sizing")
-    if int(storage['partitions'][0]['size']) < 260 or (sum(
-            int(part['size'])
-            for part in storage['partitions'][:2]) + 1024) * 1024 * 1024 > facts['disk']['size']:
-        raise OperatorError("ProvisioningBlocked", 'EFI/root sizing does not fit the approved disk')
-    return storage
+def validate_storage(run_status, facts):
+    """Normalize the API-pinned layout; never consult mutable group variables."""
+    partitions = []
+    previous_end = 1
+    numbers = set()
+    mounts = set()
+    for entry in run_status.get('storagePlan', {}).get('partitions', []):
+        spec = entry['spec']
+        start, end = entry['startMiB'], entry['endMiB']
+        if (start != previous_end or end <= start
+                or end > facts['disk']['size'] // (1024 * 1024) - 1 or spec['number'] in numbers
+                or spec.get('mountPoint') in mounts):
+            raise OperatorError('ProvisioningBlocked', 'Invalid pinned partition geometry')
+        numbers.add(spec['number'])
+        if spec.get('mountPoint'):
+            mounts.add(spec['mountPoint'])
+        partitions.append({
+            'number': spec['number'],
+            'role': spec['role'],
+            'filesystem': spec['filesystem'],
+            'mountPoint': spec.get('mountPoint', ''),
+            'startMiB': start,
+            'endMiB': end
+        })
+        previous_end = end
+    roles = [part['role'] for part in partitions]
+    if roles.count('root') != 1 or roles.count('efi') != 1:
+        raise OperatorError('ProvisioningBlocked', 'A pinned root and EFI partition are required')
+    return {'partitions': partitions}
 
 
 def validate_server_settings(desired):
@@ -343,7 +351,7 @@ def plan(api, server, variables, facts, revision):
             "distribution"] != "arch":
         raise OperatorError("ProvisioningBlocked",
                             "Arch targets currently require the Arch live installation tools")
-    storage = validate_storage(variables, facts)
+    storage = validate_storage(server['_run']['status'], facts)
     validate_server_settings(desired)
     result = {
         "serverUID": server["metadata"]["uid"],
@@ -366,6 +374,7 @@ def plan(api, server, variables, facts, revision):
                 for field in SPEC_INPUTS if field in desired
             },
             "storage": storage,
+            "storagePlan": server['_run']['status']['storagePlan'],
             "users": resolve_users(api, desired),
             "disableEEE": bool(variables.get("provision_disable_eee", False))
         }
@@ -585,6 +594,26 @@ def enroll_live(api, server, facts, known, directory):
     return known
 
 
+def verify_installed_storage(storage, facts):
+    """Attest exact geometry, filesystems and mounts, not just root availability."""
+    observed = {partition['number']: partition for partition in facts.get('partitions', [])}
+    planned = storage.get('partitions', [])
+    if len(observed) != len(planned) or len(observed) != len(facts.get('partitions', [])):
+        raise OperatorError('ProvisioningBlocked', 'Installed partition set differs from the plan')
+    for partition in planned:
+        actual = observed.get(partition['number'], {})
+        geometry_matches = (actual.get('startBytes') == partition['startMiB'] * 1048576
+                            and actual.get('size')
+                            == (partition['endMiB'] - partition['startMiB']) * 1048576)
+        filesystem_matches = (actual.get('filesystem') == partition['filesystem']
+                              and bool(actual.get('uuid')) and bool(actual.get('partUUID')))
+        mounted = (actual.get('activeSwap', False) if partition['role'] == 'swap' else
+                   partition['mountPoint'] in actual.get('mountPoints', []))
+        if not geometry_matches or not filesystem_matches or not mounted:
+            raise OperatorError('ProvisioningBlocked',
+                                f"Installed partition {partition['number']} differs from the plan")
+
+
 def verify_installed(server, facts):
     """Attest fresh boot, marker, root disk, OS and restored GRUB before completion."""
     attempt_status, marker = server["status"]["provisioning"], facts.get("marker") or {}
@@ -609,6 +638,7 @@ def verify_installed(server, facts):
         raise OperatorError("ProvisioningBlocked", "Installed OS differs from requested target")
     if not facts["grubReady"] or "next_entry=" in facts["grubEnvironment"]:
         raise OperatorError("ProvisioningBlocked", "Installed GRUB contract is not restored")
+    verify_installed_storage(attempt_status['snapshot']['inputs']['storage'], facts)
 
 
 def prepare_attempt(api, server, variables, directory, revision, preflight):

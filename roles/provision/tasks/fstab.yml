@@ -1,0 +1,25 @@
+---
+- name: Read the pinned filesystem identities
+  ansible.builtin.command:
+    argv: [blkid, -s, UUID, -o, value, "{{ partition_prefix }}{{ item.number }}"]
+  loop: "{{ storage.partitions }}"
+  register: partition_uuids
+  changed_when: false
+
+- name: Require a filesystem identity for every approved partition
+  ansible.builtin.assert:
+    quiet: true
+    that: item.stdout | length > 0
+  loop: "{{ partition_uuids.results }}"
+  loop_control:
+    label: "{{ item.item.number }}"
+
+- name: Write only the approved installed mounts
+  ansible.builtin.copy:
+    dest: /mnt/etc/fstab
+    mode: '0644'
+    content: |
+      # Managed by the pinned ProvisioningRun.
+      {% for result in partition_uuids.results %}
+      UUID={{ result.stdout }} {{ 'none' if result.item.role == 'swap' else result.item.mountPoint }} {{ result.item.filesystem }} {{ 'sw' if result.item.role == 'swap' else 'defaults' }} 0 {{ 0 if result.item.role == 'swap' else (1 if result.item.role == 'root' else 2) }}
+      {% endfor %}

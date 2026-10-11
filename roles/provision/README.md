@@ -1,9 +1,30 @@
 # Provisioning role
 
-Executed by `operators/provisioning.py` through `plays/provision_stage.yml`; do not invoke installation directly with ordinary inventory variables.
+The external provisioning operator executes bounded stages through
+`plays/provision_stage.yml`. Every destructive installation requires an explicit
+immutable ProvisioningRun and a fresh pinned live boot with a changed boot ID.
 
-The operator pins the Server UID, request counter, immutable live ISO build, desired OS, stable disk identity and installation inputs before reserving maintenance. The install stage rechecks the live boot ID and physical disk immediately before erasure. Existing partitions require an explicit replacement request; counter zero only accepts a blank disk.
+The run pins per-server DiskPartition specifications and concrete MiB geometry.
+Roles consume explicit partition numbers, filesystems and mount points; root
+and EFI are required, swap is optional, and ext4 data partitions are supported.
+Storage is never inherited from capture-group variables.
 
-V1 supports amd64 UEFI with Secure Boot disabled, Arch rolling or Debian trixie, and an EFI/swap/ext4 layout on a nonremovable SATA/NVMe disk selected by `/dev/disk/by-id`. It preserves the management account, SSH identity, CA trust and protected homelabd enrollment. Installation writes an attempt marker and restores GRUB before the operator reboots and verifies the installed OS.
+Support remains amd64 UEFI with Secure Boot off, Arch rolling or Debian trixie,
+and one writable nonremovable SATA/ATA/NVMe/MMC user-area disk selected by stable
+by-id identity. MMC hardware boot/RPMB/general-purpose areas are never targets;
+the live probe rejects their resolved kernel names even if writable. Discovery
+still reports all devices. Existing ordinary GPT partitions are replaceable
+only as part of an explicitly approved whole-disk installation.
+Installation rechecks disk/session/mount/swap safety before erasure, verifies
+the complete created layout, generates UUID-based fstab and installs GRUB using
+the declared EFI partition. Final verification attests actual installed storage,
+OS, boot contract, managed SSH identity and healthy discovery.
+Installed initramfs is regenerated with final mounts/fstab before installing GRUB.
 
-An interrupted Installing checkpoint requires manual investigation and a new authorized request; it never automatically repeats erasure. See `stigmergy/docs/server-provisioning-rollout.md` in the workspace for rollout and recovery steps.
+See Stigmergy RFCs 0003 and 0007 and its server-provisioning-rollout guide.
+
+Run `ansible-playbook -i localhost, roles/provision/tests/storage_geometry.yml`
+to test the real numbered-GPT creation task on a temporary regular file. It
+requires local sgdisk/sfdisk/truncate, never uses a block device, and removes
+only its allocated fixture directory. Run the assertion fixtures separately
+with `python3 operators/tests/provision_contract_ansible.py` in the runner image.

@@ -20,6 +20,9 @@ class FakePath(PurePosixPath):
         '/etc/homelabd/live-build-id': 'build',
         '/proc/sys/kernel/random/boot_id': 'boot',
         '/etc/os-release': 'ID=arch\n',
+        '/sys/class/block/sda1/partition': '1',
+        '/sys/class/block/sda1/start': '2048',
+        '/sys/class/block/sda/queue/logical_block_size': '512',
         '/sys/firmware/efi/efivars/SecureBoot-fixture': b'\x00\x00\x00\x00\x00',
     }
 
@@ -54,9 +57,11 @@ class ProbeTests(unittest.TestCase):
                 if '--nodeps' not in args:
                     self.assertIn('--tree', args, 'PATH-only JSON must explicitly request children')
                 return json.dumps({'blockdevices': [disk]})
+            if args[0] == 'swapon':
+                return json.dumps({'swapdevices': []})
             return 'overlay' if 'FSTYPE' in args else ''
         with patch.object(probe, 'Path', FakePath), patch.object(probe, 'command', side_effect=command), \
-                patch.object(probe.os.path, 'realpath', return_value='/dev/sda'), \
+                patch.object(probe.os.path, 'realpath', return_value=disk['path']), \
                 patch.object(probe.subprocess, 'run', return_value=SimpleNamespace(returncode=1)):
             return probe.probe(selector or '/dev/disk/by-id/disk')
 
@@ -79,6 +84,7 @@ class ProbeTests(unittest.TestCase):
             'path': '/dev/sda1',
             'type': 'part',
             'fstype': 'vfat',
+            'size': 536870912,
             'mountpoints': [None]
         }]
         result = self.inspect(disk)
@@ -88,7 +94,12 @@ class ProbeTests(unittest.TestCase):
     def test_mounted_or_swap_child_blocks_erasure(self):
         for mount in ('/', '/run/archiso/bootmnt', '[SWAP]'):
             disk = self.disk()
-            disk['children'] = [{'path': '/dev/sda1', 'type': 'part', 'mountpoints': [mount]}]
+            disk['children'] = [{
+                'path': '/dev/sda1',
+                'type': 'part',
+                'size': 536870912,
+                'mountpoints': [mount]
+            }]
             self.assertTrue(self.inspect(disk)['mounted'])
 
     def test_blank_disk_and_whole_disk_filesystem_are_distinct(self):
@@ -108,6 +119,34 @@ class ProbeTests(unittest.TestCase):
             disk = self.disk()
             disk[field] = value
             with self.assertRaises(RuntimeError):
+                self.inspect(disk)
+
+    def test_mmc_main_disk_and_existing_partitions_are_supported(self):
+        disk = self.disk()
+        disk.update(path='/dev/mmcblk12', tran='mmc', serial='0x7722479b')
+        disk['children'] = [{
+            'path': '/dev/mmcblk12p3',
+            'type': 'part',
+            'size': 1024**3,
+            'fstype': 'ext4',
+            'mountpoints': [None]
+        }]
+        files = {
+            **FakePath.files, '/sys/class/block/mmcblk12/queue/logical_block_size': '512',
+            '/sys/class/block/mmcblk12p3/partition': '3',
+            '/sys/class/block/mmcblk12p3/start': '2048'
+        }
+        with patch.object(FakePath, 'files', files):
+            result = self.inspect(disk, json.dumps(probe.disk_identity(disk)))
+        self.assertEqual(result['device'], '/dev/mmcblk12')
+        self.assertEqual(result['partitions'][0]['number'], 3)
+        self.assertTrue(result['partitioned'])
+        self.assertFalse(result['mounted'])
+
+    def test_mmc_hardware_areas_are_rejected_even_if_writable_and_identified(self):
+        for name in ('mmcblk0boot0', 'mmcblk12boot1', 'mmcblk5rpmb', 'mmcblk8gp0'):
+            disk = dict(self.disk(), path='/dev/' + name, tran='mmc')
+            with self.subTest(name=name), self.assertRaisesRegex(RuntimeError, 'hardware areas'):
                 self.inspect(disk)
 
     def test_serial_only_selection_resolves_stable_alias_and_normalizes_null_wwn(self):

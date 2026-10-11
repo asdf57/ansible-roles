@@ -9,8 +9,72 @@ import tempfile
 import yaml
 
 
+def verify_fstab_rendering(root):
+    """Render the real installed fstab task into a temporary, local-only file."""
+    tasks = yaml.safe_load((root / 'roles/provision/tasks/fstab.yml').read_text())
+    write_fstab = copy.deepcopy(tasks[-1])
+    partitions = [
+        {
+            'number': 2,
+            'role': 'efi',
+            'filesystem': 'vfat',
+            'mountPoint': '/boot/efi'
+        },
+        {
+            'number': 7,
+            'role': 'root',
+            'filesystem': 'ext4',
+            'mountPoint': '/'
+        },
+        {
+            'number': 8,
+            'role': 'swap',
+            'filesystem': 'swap'
+        },
+        {
+            'number': 9,
+            'role': 'data',
+            'filesystem': 'ext4',
+            'mountPoint': '/var/lib'
+        },
+    ]
+    with tempfile.TemporaryDirectory(prefix='fstab-contract-') as temporary:
+        destination = Path(temporary) / 'fstab'
+        write_fstab['ansible.builtin.copy']['dest'] = str(destination)
+        play = Path(temporary) / 'render.yml'
+        play.write_text(
+            yaml.safe_dump([{
+                'hosts': 'localhost',
+                'connection': 'local',
+                'gather_facts': False,
+                'vars': {
+                    'partition_uuids': {
+                        'results': [{
+                            'item': partition,
+                            'stdout': f"uuid-{partition['number']}"
+                        } for partition in partitions]
+                    }
+                },
+                'tasks': [write_fstab],
+            }]))
+        subprocess.run(['ansible-playbook', '-i', 'localhost,',
+                        str(play)], capture_output=True, text=True, timeout=60, check=True)
+        entries = [
+            line.split() for line in destination.read_text().splitlines()
+            if line and not line.startswith('#')
+        ]
+        assert entries == [
+            ['UUID=uuid-2', '/boot/efi', 'vfat', 'defaults', '0', '2'],
+            ['UUID=uuid-7', '/', 'ext4', 'defaults', '0', '1'],
+            ['UUID=uuid-8', 'none', 'swap', 'sw', '0', '0'],
+            ['UUID=uuid-9', '/var/lib', 'ext4', 'defaults', '0', '2'],
+        ], entries
+    print('Declared EFI/root/swap/data fstab: passed')
+
+
 def main():
     root = Path(__file__).resolve().parents[2]
+    verify_fstab_rendering(root)
     # Exercise the real asset gate locally, including the missing-helper failure.
     with tempfile.TemporaryDirectory(prefix='provision-assets-') as temporary:
         assets = Path(temporary) / 'setup'
@@ -86,8 +150,8 @@ def main():
         'provision_plan_digest': 'sha256:test',
         'storage': {
             'partitions': [{
-                'fs_type': kind
-            } for kind in ('efi', 'swap', 'ext4')]
+                'role': kind
+            } for kind in ('efi', 'swap', 'root')]
         },
         'provision_live_build_id': 'build',
         'provision_live_boot_id': 'live',

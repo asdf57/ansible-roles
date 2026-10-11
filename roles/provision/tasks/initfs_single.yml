@@ -1,15 +1,4 @@
 ---
-- name: Format the approved EFI partition
+- name: Create the pinned filesystem
   ansible.builtin.command:
-    argv: [mkfs.vfat, -F, '32', "{{ partition_prefix }}{{ idx + 1 }}"]
-  when: item.fs_type == 'efi'
-
-- name: Initialize the approved swap partition
-  ansible.builtin.command:
-    argv: [mkswap, "{{ partition_prefix }}{{ idx + 1 }}"]
-  when: item.fs_type == 'swap'
-
-- name: Create a fresh approved root filesystem
-  ansible.builtin.command:
-    argv: [mkfs.ext4, -F, "{{ partition_prefix }}{{ idx + 1 }}"]
-  when: item.fs_type == 'ext4'
+    argv: "{{ {'vfat': ['mkfs.vfat', '-F', '32'], 'swap': ['mkswap'], 'ext4': ['mkfs.ext4', '-F']}[item.filesystem] + [partition_prefix + (item.number | string)] }}"

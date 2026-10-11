@@ -8,7 +8,7 @@
 
 - name: Register GRUB on the new approved EFI partition if absent
   ansible.builtin.command:
-    argv: [efibootmgr, --create, --disk, "{{ provision_target_disk }}", --part, '1', --label, Homelab, --loader, '\EFI\Homelab\grubx64.efi']
+    argv: [efibootmgr, --create, --disk, "{{ provision_target_disk }}", --part, "{{ (storage.partitions | selectattr('role', 'equalto', 'efi') | first).number }}", --label, Homelab, --loader, '\EFI\Homelab\grubx64.efi']
   when: (efi_entry_plan.stdout | from_json).needsCreate
 
 - name: Reinspect the registered entry before selecting it

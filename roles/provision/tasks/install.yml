@@ -13,7 +13,8 @@
       - provision_operating_system.bootMode == 'uefi'
       - provision_operating_system.version in ['rolling', 'trixie']
       - provision_plan_digest is defined
-      - storage.partitions | map(attribute='fs_type') | list == ['efi', 'swap', 'ext4']
+      - storage.partitions | selectattr('role', 'equalto', 'root') | list | length == 1
+      - storage.partitions | selectattr('role', 'equalto', 'efi') | list | length == 1
 
 - name: Validate the complete setup bundle before any disk operations
   ansible.builtin.include_tasks: validate_management_assets.yml
@@ -53,6 +54,17 @@
     path: /etc/homelabd/environment
   register: agent_enrollment
 
+- name: Pin the live disk logical sector size
+  ansible.builtin.set_fact:
+    partition_sector_bytes: "{{ (destructive_probe.stdout | from_json).logicalSectorSize }}"
+
+- name: Require sector-aligned partition geometry
+  ansible.builtin.assert:
+    quiet: true
+    that:
+      - partition_sector_bytes > 0
+      - 1048576 % partition_sector_bytes == 0
+
 - name: Require a protected existing daemon identity
   ansible.builtin.assert:
     quiet: true
@@ -76,7 +88,7 @@
 
 - name: Install live installation utilities
   ansible.builtin.package:
-    name: "{{ ['parted', 'dosfstools', 'e2fsprogs', 'arch-install-scripts', 'efibootmgr'] + (['debootstrap'] if provision_operating_system.distribution == 'debian' else []) }}"
+    name: "{{ ['parted', 'dosfstools', 'e2fsprogs', 'arch-install-scripts', 'efibootmgr', 'gdisk' if ansible_facts.os_family == 'Debian' else 'gptfdisk'] + (['debootstrap'] if provision_operating_system.distribution == 'debian' else []) }}"
     state: present
     update_cache: true
 

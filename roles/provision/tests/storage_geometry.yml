@@ -1,0 +1,54 @@
+---
+- name: Verify partition endpoints on a disposable regular file, not a disk
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Allocate a temporary fixture directory
+      ansible.builtin.tempfile:
+        state: directory
+        prefix: partition-geometry-
+      register: fixture
+
+    - name: Exercise exact partition geometry
+      block:
+        - name: Require a new fixture image path
+          ansible.builtin.stat:
+            path: "{{ fixture.path }}/disk.img"
+          register: image
+
+        - name: Refuse an existing image
+          ansible.builtin.assert:
+            quiet: true
+            that: not image.stat.exists
+
+        - name: Create a disposable sparse image
+          ansible.builtin.command:
+            argv: [truncate, --size, 64M, "{{ fixture.path }}/disk.img"]
+
+        - name: Use the actual partition creation task
+          ansible.builtin.include_tasks: "{{ playbook_dir }}/../tasks/partition_single.yml"
+          vars:
+            disk_name: "{{ fixture.path }}/disk.img"
+            partition_sector_bytes: 512
+            item: {number: 7, role: data, startMiB: 1, endMiB: 32}
+
+        - name: Inspect the created geometry
+          ansible.builtin.command:
+            argv: [sfdisk, --json, "{{ fixture.path }}/disk.img"]
+          register: geometry
+          changed_when: false
+
+        - name: Require exact planned endpoints and explicit partition number
+          ansible.builtin.assert:
+            quiet: true
+            that:
+              - (geometry.stdout | from_json).partitiontable.partitions[0].start == 2048
+              - (geometry.stdout | from_json).partitiontable.partitions[0].size == 31 * 2048
+              - (geometry.stdout | from_json).partitiontable.partitions[0].node is search('7$')
+
+      always:
+        - name: Remove only the allocated fixture directory
+          ansible.builtin.file:
+            path: "{{ fixture.path }}"
+            state: absent

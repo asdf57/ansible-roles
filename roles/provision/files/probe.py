@@ -22,6 +22,11 @@ def disk_identity(disk):
     }
 
 
+def is_mmc_hardware_area(device_path):
+    """Reject separate MMC hardware areas, not ordinary GPT partitions."""
+    return bool(re.fullmatch(r'mmcblk[0-9]+(?:boot[0-9]+|rpmb|gp[0-9]+)', Path(device_path).name))
+
+
 def probe(target):
     expected = None
     if target.startswith('{'):
@@ -43,10 +48,12 @@ def probe(target):
     if not re.fullmatch(r"/dev/disk/by-id/[^/]+", target):
         raise RuntimeError("A stable physical disk identity is required")
     resolved = os.path.realpath(target)
+    if is_mmc_hardware_area(resolved):
+        raise RuntimeError('MMC hardware areas are not provisioning targets')
     disks = json.loads(
-        command(
-            "lsblk", "--json", "--tree", "--bytes", "-o",
-            "PATH,TYPE,SIZE,MODEL,SERIAL,WWN,TRAN,RM,RO,FSTYPE,UUID,MOUNTPOINTS"))["blockdevices"]
+        command("lsblk", "--json", "--tree", "--bytes", "-o",
+                "PATH,TYPE,SIZE,MODEL,SERIAL,WWN,TRAN,RM,RO,FSTYPE,UUID,PARTUUID,MOUNTPOINTS")
+    )["blockdevices"]
     matches = [disk for disk in disks if disk["path"] == resolved]
     if len(matches) != 1:
         raise RuntimeError("Target is not exactly one top-level physical disk")
@@ -54,7 +61,7 @@ def probe(target):
     if expected is not None and disk_identity(disk) != expected:
         raise RuntimeError('Selected disk changed during inspection')
     if disk["type"] != "disk" or disk.get("rm") or disk.get("ro") or disk.get("tran") not in (
-            "sata", "nvme", "ata"):
+            "sata", "nvme", "ata", "mmc"):
         raise RuntimeError("USB, removable, read-only and nonphysical targets are forbidden")
     if not disk.get("serial") and not disk.get("wwn"):
         raise RuntimeError("Target has no verifiable serial/WWN")
@@ -65,8 +72,26 @@ def probe(target):
             yield from descendants(child)
 
     nodes = list(descendants(disk))
+    active_swap = json.loads(command('swapon', '--show', '--json', '--output', 'NAME'))
+    swap_paths = {os.path.realpath(swap['name']) for swap in active_swap.get('swapdevices', [])}
+    partitions = []
+    for node in disk.get('children', []):
+        if node['type'] != 'part':
+            continue
+        sysfs = Path('/sys/class/block') / Path(node['path']).name
+        partitions.append({
+            'number': int((sysfs / 'partition').read_text()),
+            'startBytes': int((sysfs / 'start').read_text()) * 512,
+            'size': node['size'],
+            'filesystem': node.get('fstype') or '',
+            'uuid': node.get('uuid') or '',
+            'partUUID': node.get('partuuid') or '',
+            'mountPoints': [mount for mount in node.get('mountpoints') or [] if mount],
+            'activeSwap': node['path'] in swap_paths
+        })
     live = Path("/var/lib/is_live_env").exists()
-    mounted = any(any(node.get('mountpoints') or []) for node in nodes)
+    mounted = any(
+        any(node.get('mountpoints') or []) or node['path'] in swap_paths for node in nodes)
     marker_file = Path("/var/lib/homelab/provisioning.json")
     marker = json.loads(marker_file.read_text()) if marker_file.is_file() else None
     staged_file = Path('/mnt/var/lib/homelab/provisioning.json')
@@ -102,8 +127,13 @@ def probe(target):
         priority_services,
         "disk":
         disk_identity(disk),
+        "partitions":
+        partitions,
         "device":
         resolved,
+        "logicalSectorSize":
+        int((Path('/sys/class/block') / Path(resolved).name /
+             'queue/logical_block_size').read_text()),
         "partitioned":
         bool(disk.get("children")) or bool(disk.get("fstype")),
         "mounted":

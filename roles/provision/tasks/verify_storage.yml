@@ -1,0 +1,29 @@
+---
+- name: Inspect the completed approved storage layout
+  ansible.builtin.command:
+    argv: [python3, '-', "{{ provision_target_disk }}"]
+    stdin: "{{ lookup('file', role_path + '/files/probe.py') }}"
+  register: storage_probe
+  changed_when: false
+
+- name: Require exactly the planned partition set
+  ansible.builtin.assert:
+    quiet: true
+    that:
+      - (storage_probe.stdout | from_json).partitions | map(attribute='number') | sort | list == storage.partitions | map(attribute='number') | sort | list
+
+- name: Verify each partition geometry and filesystem
+  ansible.builtin.assert:
+    quiet: true
+    that:
+      - actual_partition.startBytes == item.startMiB * 1048576
+      - actual_partition.size == (item.endMiB - item.startMiB) * 1048576
+      - actual_partition.filesystem == item.filesystem
+      - actual_partition.uuid | length > 0
+      - actual_partition.partUUID | length > 0
+    fail_msg: "Partition {{ item.number }} differs from the approved layout."
+  vars:
+    actual_partition: "{{ (storage_probe.stdout | from_json).partitions | selectattr('number', 'equalto', item.number) | first }}"
+  loop: "{{ storage.partitions }}"
+  loop_control:
+    label: "{{ item.number }}"

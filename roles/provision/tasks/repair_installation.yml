@@ -48,8 +48,8 @@
   ansible.builtin.assert:
     quiet: true
     that:
-      - repair_mounts.results[0].stdout == partition_prefix + '3'
-      - repair_mounts.results[1].stdout == partition_prefix + '1'
+      - repair_mounts.results[0].stdout == partition_prefix + ((storage.partitions | selectattr('role', 'equalto', 'root') | first).number | string)
+      - repair_mounts.results[1].stdout == partition_prefix + ((storage.partitions | selectattr('role', 'equalto', 'efi') | first).number | string)
 
 - name: Verify the existing chroot bind mounts
   ansible.builtin.command:

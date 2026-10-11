@@ -1,8 +1,7 @@
 ---
 - name: Mount the general partitions
   include_tasks: mount_single.yml
-  loop: "{{ storage.partitions }}"
+  loop: "{{ storage.partitions | rejectattr('role', 'equalto', 'efi') | rejectattr('role', 'equalto', 'swap') | sort(attribute='mountPoint') }}"
   loop_control:
     loop_var: item
     index_var: idx
-  when: item.fs_type not in ["efi", "swap"]

@@ -72,12 +72,11 @@
     - NetworkManager
 
 - name: Generate an installed-only fstab
-  ansible.builtin.shell: |
-    set -eu
-    root_uuid=$(blkid -s UUID -o value {{ (partition_prefix + '3') | quote }})
-    efi_uuid=$(blkid -s UUID -o value {{ (partition_prefix + '1') | quote }})
-    swap_uuid=$(blkid -s UUID -o value {{ (partition_prefix + '2') | quote }})
-    printf 'UUID=%s / ext4 defaults 0 1\nUUID=%s /boot/efi vfat defaults 0 2\nUUID=%s none swap sw 0 0\n' "$root_uuid" "$efi_uuid" "$swap_uuid" > /mnt/etc/fstab
+  ansible.builtin.include_tasks: fstab.yml
+
+- name: Generate installed initramfs with the final root and mounted boot filesystems
+  ansible.builtin.command:
+    argv: "{{ ['chroot', '/mnt', 'mkinitcpio', '-P'] if provision_operating_system.distribution == 'arch' else ['chroot', '/mnt', 'update-initramfs', '-u', '-k', 'all'] }}"
 
 - name: Install GRUB in the new EFI partition and register the normal firmware path
   ansible.builtin.command:
@@ -97,7 +96,7 @@
 
 - name: Read the new EFI partition identity
   ansible.builtin.command:
-    argv: [blkid, -s, PARTUUID, -o, value, "{{ partition_prefix }}1"]
+    argv: [blkid, -s, PARTUUID, -o, value, "{{ partition_prefix }}{{ (storage.partitions | selectattr('role', 'equalto', 'efi') | first).number }}"]
   register: installed_efi_uuid
   changed_when: false
 
@@ -112,7 +111,7 @@
 
 - name: Read the new root filesystem identity
   ansible.builtin.command:
-    argv: [blkid, -s, UUID, -o, value, "{{ partition_prefix }}3"]
+    argv: [blkid, -s, UUID, -o, value, "{{ partition_prefix }}{{ (storage.partitions | selectattr('role', 'equalto', 'root') | first).number }}"]
   register: installed_root_uuid
   changed_when: false
 

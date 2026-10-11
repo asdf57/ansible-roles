@@ -119,7 +119,26 @@ def snapshot(value):
             'serverSpec': {
                 'operatingSystem': value['spec']['operatingSystem']
             },
-            'storage': {},
+            'storage': {
+                'partitions': [
+                    {
+                        'number': 1,
+                        'role': 'efi',
+                        'filesystem': 'vfat',
+                        'mountPoint': '/boot/efi',
+                        'startMiB': 1,
+                        'endMiB': 513
+                    },
+                    {
+                        'number': 3,
+                        'role': 'root',
+                        'filesystem': 'ext4',
+                        'mountPoint': '/',
+                        'startMiB': 513,
+                        'endMiB': 9000
+                    },
+                ]
+            },
             'users': [],
             'disableEEE': True
         }
@@ -389,6 +408,15 @@ class ProvisioningTests(unittest.TestCase):
     def installed(value):
         data = facts()
         attempt = value['status']['provisioning']
+        data['partitions'] = [{
+            'number': partition['number'],
+            'startBytes': partition['startMiB'] * 1048576,
+            'size': (partition['endMiB'] - partition['startMiB']) * 1048576,
+            'filesystem': partition['filesystem'],
+            'uuid': 'uuid',
+            'partUUID': 'partuuid',
+            'mountPoints': [partition['mountPoint']]
+        } for partition in attempt['snapshot']['inputs']['storage']['partitions']]
         data.update(
             live=False, bootID='installed-boot', rootUUID='root-uuid', rootType='ext4',
             rootOnTarget=True, marker={
