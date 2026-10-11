@@ -27,6 +27,18 @@ def is_mmc_hardware_area(device_path):
     return bool(re.fullmatch(r'mmcblk[0-9]+(?:boot[0-9]+|rpmb|gp[0-9]+)', Path(device_path).name))
 
 
+def active_swap_paths():
+    """Read kernel swap state without depending on optional util-linux formats."""
+    paths = set()
+    for line in Path('/proc/swaps').read_text().splitlines()[1:]:
+        if not line.strip():
+            continue
+        # procfs escapes whitespace/backslashes in filenames as octal sequences.
+        path = re.sub(r'\\([0-7]{3})', lambda match: chr(int(match[1], 8)), line.split()[0])
+        paths.add(os.path.realpath(path))
+    return paths
+
+
 def probe(target):
     expected = None
     if target.startswith('{'):
@@ -72,8 +84,7 @@ def probe(target):
             yield from descendants(child)
 
     nodes = list(descendants(disk))
-    active_swap = json.loads(command('swapon', '--show', '--json', '--output', 'NAME'))
-    swap_paths = {os.path.realpath(swap['name']) for swap in active_swap.get('swapdevices', [])}
+    swap_paths = active_swap_paths()
     partitions = []
     for node in disk.get('children', []):
         if node['type'] != 'part':

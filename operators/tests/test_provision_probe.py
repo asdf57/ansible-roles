@@ -19,6 +19,7 @@ class FakePath(PurePosixPath):
         '/var/lib/is_live_env': '',
         '/etc/homelabd/live-build-id': 'build',
         '/proc/sys/kernel/random/boot_id': 'boot',
+        '/proc/swaps': 'Filename\tType\tSize\tUsed\tPriority\n',
         '/etc/os-release': 'ID=arch\n',
         '/sys/class/block/sda1/partition': '1',
         '/sys/class/block/sda1/start': '2048',
@@ -61,7 +62,8 @@ class ProbeTests(unittest.TestCase):
                 return json.dumps({'swapdevices': []})
             return 'overlay' if 'FSTYPE' in args else ''
         with patch.object(probe, 'Path', FakePath), patch.object(probe, 'command', side_effect=command), \
-                patch.object(probe.os.path, 'realpath', return_value=disk['path']), \
+                patch.object(probe.os.path, 'realpath', side_effect=lambda path: disk['path']
+                             if str(path).startswith('/dev/disk/by-id/') else str(path)), \
                 patch.object(probe.subprocess, 'run', return_value=SimpleNamespace(returncode=1)):
             return probe.probe(selector or '/dev/disk/by-id/disk')
 
@@ -101,6 +103,32 @@ class ProbeTests(unittest.TestCase):
                 'mountpoints': [mount]
             }]
             self.assertTrue(self.inspect(disk)['mounted'])
+
+    def test_kernel_swap_state_blocks_erasure_without_a_mountpoint(self):
+        disk = self.disk()
+        disk['children'] = [{
+            'path': '/dev/sda1',
+            'type': 'part',
+            'size': 1024**3,
+            'fstype': 'swap',
+            'mountpoints': [None]
+        }]
+        files = {
+            **FakePath.files, '/proc/swaps':
+            'Filename\tType\tSize\tUsed\tPriority\n/dev/sda1 partition 1024 0 -2\n'
+        }
+        with patch.object(FakePath, 'files', files):
+            result = self.inspect(disk)
+        self.assertTrue(result['mounted'])
+        self.assertTrue(result['partitions'][0]['activeSwap'])
+
+    def test_kernel_swap_paths_decode_escaped_whitespace(self):
+        files = {
+            **FakePath.files, '/proc/swaps':
+            'Filename\tType\tSize\tUsed\tPriority\n/tmp/swap\\040file file 1024 0 -2\n'
+        }
+        with patch.object(probe, 'Path', FakePath), patch.object(FakePath, 'files', files):
+            self.assertEqual(probe.active_swap_paths(), {'/tmp/swap file'})
 
     def test_blank_disk_and_whole_disk_filesystem_are_distinct(self):
         disk = self.disk()
