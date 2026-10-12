@@ -1,0 +1,10 @@
+---
+- name: Maintain containerd on the Configuration's installed targets
+  hosts: all
+  become: true
+  vars:
+    containerd_package_reference: "{{ configuration_values.packageReference | mandatory }}"
+    containerd_expected_version: "{{ configuration_target.spec.containerdVersion if configuration_target.kind == 'KubeCluster' else configuration_values.version | mandatory }}"
+    containerd_sandbox_image: "{{ configuration_values.sandboxImage | default('') }}"
+  roles:
+    - role: containerd

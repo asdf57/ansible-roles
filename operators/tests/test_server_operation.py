@@ -7,6 +7,13 @@ from test_operators import API
 
 class ReservationTests(unittest.TestCase):
 
+    def test_uncertain_remote_work_retains_the_claim(self):
+        api = API()
+        with self.assertRaises(OperatorError):
+            with reservation(api, api.get('servers', 'node')):
+                raise OperatorError('RemoteWorkUncertain', 'Remote task may still be running')
+        self.assertEqual(api.server['status']['operation']['phase'], 'Held')
+
     def test_one_owner_and_release_after_failure(self):
         api = API()
         snapshot = api.get('servers', 'node')

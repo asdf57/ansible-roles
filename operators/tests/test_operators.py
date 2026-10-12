@@ -97,7 +97,8 @@ class OperatorTests(unittest.TestCase):
         with patch.dict(os.environ, STIGMERGY_API_URL='https://api.example',
                         STIGMERGY_API_TOKEN='test-token'):
             api = common.API()
-        for kind, collection in [('Server', 'servers'), ('ProvisioningRun', 'provisioning-runs')]:
+        for kind, collection in [('Server', 'servers'), ('ProvisioningRun', 'provisioning-runs'),
+                                 ('Configuration', 'configurations')]:
             resource: Resource = {
                 'kind': kind,
                 'metadata': {

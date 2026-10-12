@@ -1,0 +1,32 @@
+---
+- name: Verify the exact installed host before or after configuration
+  hosts: all
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Read the protected installation marker and live indicator
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - "import json,pathlib; print(json.dumps({'marker':json.loads(pathlib.Path('/var/lib/homelab/provisioning.json').read_text()),'live':pathlib.Path('/etc/homelabd/live-build-id').exists()}))"
+      register: configuration_identity
+      changed_when: false
+
+    - name: Read the actual installed root filesystem identity
+      ansible.builtin.command:
+        argv: [findmnt, -n, -o, "FSTYPE,UUID", /]
+      register: configuration_root
+      changed_when: false
+
+    - name: Require the selected Server and successful installation
+      ansible.builtin.assert:
+        quiet: true
+        that:
+          - not (configuration_identity.stdout | from_json).live
+          - (configuration_identity.stdout | from_json).marker.serverUID == configuration_server_uid
+          - (configuration_identity.stdout | from_json).marker.attemptID == configuration_run_uid
+          - configuration_root.stdout.split() | length == 2
+          - configuration_root.stdout.split()[0] not in ['overlay', 'squashfs', 'tmpfs', 'ramfs']
+          - configuration_root.stdout.split()[1] == (configuration_identity.stdout | from_json).marker.rootUUID
+        fail_msg: Configuration requires the exact verified installed host, never a live or replaced installation.

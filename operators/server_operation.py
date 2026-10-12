@@ -23,27 +23,37 @@ def reservation(api, snapshot):
                                 'Server changed before the operation claim') from exc
         raise
     snapshot.update(claimed)
+    release_safe = True
     try:
         yield snapshot
+    except OperatorError as error:
+        release_safe = error.reason != 'RemoteWorkUncertain'
+        raise
     finally:
-        for _ in range(5):
-            latest = api.get('servers', snapshot['metadata']['name'])
-            operation = latest.get('status', {}).get('operation', {})
-            if (latest['metadata']['uid'] != snapshot['metadata']['uid'] or operation != {
-                    'id': operation_id,
-                    'phase': 'Held'
-            }):
-                raise RuntimeError('Operation ownership changed; refusing release')
-            try:
-                released = api.patch_status(
-                    latest, {'operation': {
-                        'id': operation_id,
-                        'phase': 'Released'
-                    }})
-                snapshot.update(released)
-                break
-            except HTTPError as exc:
-                if exc.code != 409:
-                    raise
-        else:
-            raise RuntimeError('Operation release conflicted; inspect retained ownership')
+        if release_safe:
+            release_owned_operation(api, snapshot, operation_id)
+
+
+def release_owned_operation(api, snapshot, operation_id):
+    """Release only this lifetime/claim after work is known to have stopped."""
+    for _ in range(5):
+        latest = api.get('servers', snapshot['metadata']['name'])
+        operation = latest.get('status', {}).get('operation', {})
+        if (latest['metadata']['uid'] != snapshot['metadata']['uid'] or operation != {
+                'id': operation_id,
+                'phase': 'Held'
+        }):
+            raise RuntimeError('Operation ownership changed; refusing release')
+        try:
+            released = api.patch_status(latest,
+                                        {'operation': {
+                                            'id': operation_id,
+                                            'phase': 'Released'
+                                        }})
+            snapshot.update(released)
+            break
+        except HTTPError as exc:
+            if exc.code != 409:
+                raise
+    else:
+        raise RuntimeError('Operation release conflicted; inspect retained ownership')

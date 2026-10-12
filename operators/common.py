@@ -75,7 +75,11 @@ class API:
 
     def patch_status(self, server: Resource, status: JSONObject) -> Resource:
         """Merge owned status fields only for the same resource lifetime/revision."""
-        collection = {'Server': 'servers', 'ProvisioningRun': 'provisioning-runs'}[server['kind']]
+        collection = {
+            'Server': 'servers',
+            'ProvisioningRun': 'provisioning-runs',
+            'Configuration': 'configurations'
+        }[server['kind']]
         return resource(
             request_json(
                 self.url + "/" + collection + "/" + quote(server["metadata"]["name"], safe="") +
