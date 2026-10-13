@@ -396,6 +396,44 @@ class KubernetesPlanTests(unittest.TestCase):
                 self.assertNotIn('state', task['ansible.builtin.systemd_service'])
         self.assertIn('ansible.builtin.assert', tasks[-1])
 
+    def test_empty_swap_definition_list_is_success_but_errors_are_not_hidden(self):
+        root = Path(__file__).resolve().parents[2]
+        tasks = yaml.safe_load((root / 'roles/kube/tasks/swap.yml').read_text(encoding='utf-8'))
+        predicate = next(task['failed_when'] for task in tasks
+                         if task.get('register') == 'kube_persistent_swap_units')
+        cases = [(0, 'example.swap disabled', '', False), (1, '', '', False),
+                 (1, '', 'Failed to connect to bus', True), (2, '', '', True),
+                 (1, 'unexpected result', '', True)]
+        plays = [{
+            'hosts':
+            'localhost',
+            'connection':
+            'local',
+            'gather_facts':
+            False,
+            'vars': {
+                'kube_persistent_swap_units': {
+                    'rc': code,
+                    'stdout': output,
+                    'stderr': error
+                },
+                'expected_failure': failed
+            },
+            'tasks': [{
+                'ansible.builtin.assert': {
+                    'quiet': True,
+                    'that': [f'({predicate}) == expected_failure']
+                }
+            }]
+        } for code, output, error, failed in cases]
+        with tempfile.TemporaryDirectory() as directory:
+            play = Path(directory) / 'swap-result.json'
+            play.write_text(json.dumps(plays), encoding='utf-8')
+            result = subprocess.run(['ansible-playbook', '-i', 'localhost,',
+                                     str(play)], capture_output=True, text=True, check=False,
+                                    timeout=60)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_runner_tasks_override_captured_node_escalation(self):
         root = Path(__file__).resolve().parents[2]
         with tempfile.TemporaryDirectory() as directory:

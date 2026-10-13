@@ -14,6 +14,13 @@
     argv: [systemctl, list-unit-files, --type=swap, '--state=enabled,enabled-runtime,disabled,static,generated', --no-legend, --no-pager]
   register: kube_persistent_swap_units
   changed_when: false
+  # systemctl returns 1 when the filtered list has no matching definitions.
+  # That is the desired state, not permission to ignore diagnostics/errors.
+  failed_when: >-
+    kube_persistent_swap_units.rc != 0 and not
+    (kube_persistent_swap_units.rc == 1 and
+     kube_persistent_swap_units.stdout | trim == '' and
+     kube_persistent_swap_units.stderr | trim == '')
 
 - name: Prevent remaining native or generated swap definitions from reactivating
   ansible.builtin.systemd_service:
