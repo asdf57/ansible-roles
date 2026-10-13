@@ -1,0 +1,58 @@
+---
+- name: Preserve one approved managed-node address as a static DHCP lease
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  module_defaults:
+    community.routeros.api:
+      hostname: "{{ router_address }}"
+      username: "{{ router_username }}"
+      password: "{{ router_password }}"
+      path: ip dhcp-server lease
+  tasks:
+    - name: Require an explicit address and MAC approval
+      ansible.builtin.assert:
+        quiet: true
+        that:
+          - reservation_address is match('^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$')
+          - reservation_mac is match('^[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){5}$')
+
+    - name: Read the lease at the exact approved address
+      community.routeros.api:
+        query: ".id address mac-address dynamic status WHERE address == {{ reservation_address }}"
+      register: reservation_before
+      changed_when: false
+      no_log: true
+
+    - name: Require a unique bound lease for the approved interface
+      ansible.builtin.assert:
+        quiet: true
+        that:
+          - reservation_before.message | length == 1
+          - reservation_before.message[0]['mac-address'] | lower == reservation_mac | lower
+          - reservation_before.message[0].status == 'bound'
+        fail_msg: The address is not uniquely bound to the approved MAC; inspect DHCP rather than changing another lease.
+
+    - name: Make only the validated dynamic lease static
+      community.routeros.api:
+        cmd: "make-static .id={{ reservation_before.message[0]['.id'] }}"
+      when: reservation_before.message[0].dynamic | bool
+      changed_when: true
+      no_log: true
+
+    - name: Read back the exact lease after reservation
+      community.routeros.api:
+        query: ".id address mac-address dynamic status WHERE address == {{ reservation_address }}"
+      register: reservation_after
+      changed_when: false
+      no_log: true
+
+    - name: Verify the approved address is now statically reserved
+      ansible.builtin.assert:
+        quiet: true
+        that:
+          - reservation_after.message | length == 1
+          - reservation_after.message[0]['mac-address'] | lower == reservation_mac | lower
+          - not reservation_after.message[0].dynamic | bool
+        success_msg: The approved address is statically reserved without changing the node's current connectivity.
