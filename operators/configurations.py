@@ -4,6 +4,7 @@ Configuration dependencies order setups; Ansible orders roles inside each setup.
 The executor never bootstraps, resets or upgrades Kubernetes on its own.
 """
 from contextlib import ExitStack
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
@@ -34,6 +35,9 @@ class Plan:
     servers: list[Resource]
     hosts: dict[str, JSONObject]
     input_revision: str
+    playbook_revision: str
+    resolved_references: list[JSONObject]
+    inventory: JSONObject
 
 
 def mapping(parent: JSONObject, field: str) -> JSONObject:
@@ -42,22 +46,29 @@ def mapping(parent: JSONObject, field: str) -> JSONObject:
 
 
 def reference(parent: JSONObject, field: str) -> JSONObject:
-    """Require a lifetime-bound reference, not just a reusable name."""
+    """Validate a declarative reference by name; observed refs may also carry a UID."""
     value = mapping(parent, field)
     json_string(value.get('name'), field + '.name')
+    return value
+
+
+def pinned_reference(parent: JSONObject, field: str) -> JSONObject:
+    """Observed installation/hardware bindings must still identify a lifetime."""
+    value = reference(parent, field)
     json_string(value.get('uid'), field + '.uid')
     return value
 
 
 def fetch_reference(api: API, collection: str, ref: JSONObject) -> Resource:
-    """Resolve the expected lifetime and refuse deletion/replacement."""
+    """Resolve desired names; enforce UID pins only on observed execution refs."""
     try:
         value = api.get(collection, json_string(ref.get('name'), 'reference name'))
     except HTTPError as error:
         if error.code != 404:
             raise
         raise OperatorError('ReferenceMissing', 'Referenced resource is not available') from error
-    if value['metadata']['uid'] != ref.get('uid') or value['metadata'].get('deletionTimestamp'):
+    if (ref.get('uid') is not None and value['metadata']['uid'] != ref['uid']
+            or value['metadata'].get('deletionTimestamp')):
         raise OperatorError('ReferenceChanged', 'Referenced resource was replaced or deleted')
     return value
 
@@ -108,53 +119,16 @@ def installed_server(api: API, server: Resource) -> None:
             or provisioning.get('maintenance') or server['metadata'].get('deletionTimestamp')):
         raise OperatorError('TargetPending',
                             'Server needs a verified installed OS without provisioning ownership')
-    run = fetch_reference(api, 'provisioning-runs', reference(provisioning, 'lastSuccessfulRunRef'))
+    run = fetch_reference(api, 'provisioning-runs',
+                          pinned_reference(provisioning, 'lastSuccessfulRunRef'))
     if run['status'].get('phase') != 'Succeeded' or mapping(
             run['spec'], 'serverRef').get('uid') != server['metadata']['uid']:
         raise OperatorError('TargetPending',
                             'Successful installation does not match Server identity')
-    machine = fetch_reference(api, 'machines', reference(state, 'machineRef'))
+    machine = fetch_reference(api, 'machines', pinned_reference(state, 'machineRef'))
     if mapping(machine['status'], 'serverRef').get('uid') != server['metadata']['uid']:
         raise OperatorError('TargetPending', 'Machine binding is not reciprocal')
     management_address(server)
-
-
-def cluster_members(api: API, cluster: Resource) -> list[Resource]:
-    """Labels select members; UID annotations prevent same-name cluster adoption."""
-    members = []
-    node_names: set[str] = set()
-    for server in api.list('servers'):
-        metadata = server['metadata']
-        labels = metadata.get('labels', {})
-        if labels.get('homelab.io/kube-cluster') != cluster['metadata']['name']:
-            continue
-        annotations = metadata.get('annotations', {})
-        node_name = annotations.get('homelab.io/kube-node-name', metadata['name'])
-        if annotations.get('homelab.io/kube-cluster-uid') != cluster['metadata']['uid']:
-            raise OperatorError('MembershipConflict', 'Cluster UID binding is invalid')
-        if labels.get('homelab.io/kube-role') not in ('control-plane', 'worker'):
-            raise OperatorError('MembershipConflict', 'Kubernetes node role is invalid')
-        if not valid_node_name(node_name) or node_name in node_names:
-            raise OperatorError('MembershipConflict',
-                                'Kubernetes node names must be valid and unique')
-        node_names.add(node_name)
-        members.append(server)
-    control_planes = [
-        value for value in members
-        if value['metadata'].get('labels', {}).get('homelab.io/kube-role') == 'control-plane'
-    ]
-    if len(control_planes) != 1:
-        raise OperatorError('MembershipConflict', 'V1 requires exactly one control-plane Server')
-    return sorted(members, key=lambda value: value['metadata']['name'])
-
-
-def valid_node_name(name: str) -> bool:
-    """Kubernetes node names use DNS subdomains with bounded DNS labels."""
-    if not 1 <= len(name) <= 253:
-        return False
-    return all(
-        len(part) <= 63 and re.fullmatch(r'[a-z0-9](?:[a-z0-9-]*[a-z0-9])?', part)
-        for part in name.split('.'))
 
 
 def member_inputs(server: Resource) -> JSONObject:
@@ -169,15 +143,18 @@ def member_inputs(server: Resource) -> JSONObject:
 
 
 def resolve_targets(
-        api: API, configuration: Resource
-) -> tuple[Resource, list[Resource], Resource, dict[str, JSONObject]]:
-    """Select installed targets and resolve their inherited inventory variables."""
+    api: API, configuration: Resource
+) -> tuple[Resource, list[Resource], Resource, dict[str, JSONObject], JSONObject]:
+    """Target supplies context; the capture group supplies the execution boundary."""
     ref = reference(configuration['spec'], 'targetRef')
     kind = json_string(ref.get('kind'), 'target kind')
     target = fetch_reference(api, {'Server': 'servers', 'KubeCluster': 'kube-clusters'}[kind], ref)
-    servers = [target] if kind == 'Server' else cluster_members(api, target)
     group_ref = reference(configuration['spec'], 'inventoryCaptureGroupRef')
     group = fetch_reference(api, 'inventory-capture-groups', group_ref)
+    if group['status'].get('omittedResources'):
+        raise OperatorError(
+            'InventoryPending',
+            'Configuration requires a complete capture; selected resources were omitted')
     if mapping(group['spec'], 'selector').get('matchKinds') != [{
             'apiVersion': 'homelab.io/v1alpha1',
             'kind': 'Server'
@@ -189,15 +166,15 @@ def resolve_targets(
             or captured['metadata'].get('generation') != group['metadata'].get('generation')):
         raise OperatorError('InventoryPending', 'Capture group changed during resolution')
     raw_hosts = resolved_inventory_hosts(inventory)
+    if not raw_hosts:
+        raise OperatorError('InventoryPending', 'Capture group has no managed hosts')
+    servers = [fetch_reference(api, 'servers', {'name': name}) for name in sorted(raw_hosts)]
     hosts: dict[str, JSONObject] = {}
     for server in servers:
         installed_server(api, server)
         server_name = server['metadata']['name']
-        if server_name not in raw_hosts:
-            raise OperatorError('InventoryPending',
-                                'Selected Server is absent from current inventory')
         hosts[server_name] = dict(raw_hosts[server_name])
-    return target, servers, group, hosts
+    return target, servers, group, hosts, json_object(inventory, 'capture inventory')
 
 
 def prerequisite_inputs(api: API, configuration: Resource, stack: tuple[str, ...]) -> JSONObject:
@@ -223,30 +200,71 @@ def prerequisite_inputs(api: API, configuration: Resource, stack: tuple[str, ...
     return prerequisite_revisions
 
 
+def observed_reference(value: Resource) -> JSONObject:
+    """Persist the resource lifetime resolved for this execution, never credentials."""
+    return dict(kind=value['kind'], name=value['metadata']['name'], uid=value['metadata']['uid'],
+                generation=value['metadata'].get('generation', 0))
+
+
+def source_commit(repository: Resource, playbook: JSONObject, source: Path) -> str:
+    """Resolve a local trusted Git input to a commit without fetching arbitrary code."""
+    git = ['git', '-c', 'safe.directory=' + str(source), '-C', str(source)]
+    origin = subprocess.check_output([*git, 'remote', 'get-url', 'origin'], text=True).strip()
+    if origin != repository['spec'].get('url'):
+        raise OperatorError('SourceMismatch',
+                            'Playbook repository differs from pipeline code input')
+    revision = playbook.get('revision')
+    if revision is not None:
+        commit = json_string(revision, 'playbook revision')
+        if not re.fullmatch('[0-9a-f]{40}', commit):
+            raise OperatorError('SourceMismatch', 'Revision must be a full immutable commit')
+        candidates = [commit]
+    else:
+        ref = json_string(repository['spec'].get('ref', 'main'), 'repository ref')
+        candidates = ['refs/remotes/origin/' + ref, 'refs/heads/' + ref, 'refs/tags/' + ref]
+    for candidate in candidates:
+        result = subprocess.run(
+            [*git, 'rev-parse', '--verify', '--end-of-options', candidate + '^{commit}'],
+            check=False, capture_output=True, text=True)
+        if result.returncode == 0:
+            return result.stdout.strip()
+    raise OperatorError('SourceUnavailable',
+                        'Requested commit/ref is missing from pipeline Git input')
+
+
 def plan(api: API, configuration: Resource, stack: tuple[str, ...] = ()) -> Plan:
     """Resolve current relevant inputs recursively, not stale Ready flags alone."""
     if configuration['metadata']['name'] in stack:
         raise OperatorError('DependencyCycle', 'Configuration dependency cycle')
     if configuration['spec'].get('suspended') or configuration['metadata'].get('deletionTimestamp'):
         raise OperatorError('Suspended', 'Configuration is suspended or terminating')
-    target, servers, group, hosts = resolve_targets(api, configuration)
+    target, servers, group, hosts, inventory = resolve_targets(api, configuration)
     repository = fetch_reference(
         api, 'git-repositories',
         reference(mapping(configuration['spec'], 'playbook'), 'repositoryRef'))
+    commit = source_commit(repository, mapping(configuration['spec'], 'playbook'),
+                           Path(__file__).resolve().parents[1])
+    references = [observed_reference(value) for value in (target, group, repository, *servers)]
+    references.extend(
+        observed_reference(fetch_reference(api, 'configurations', ref))
+        for ref in dependencies(configuration))
     inputs: JSONObject = dict(spec=configuration['spec'], targetUID=target['metadata']['uid'],
                               targetGeneration=target['metadata'].get('generation', 0),
                               targetSpec=target['spec'], groupUID=group['metadata']['uid'],
                               groupGeneration=group['metadata'].get('generation', 0),
-                              repositorySpec=repository['spec'], dependencies=prerequisite_inputs(
+                              repositorySpec=repository['spec'], playbookRevision=commit,
+                              inventory=inventory, dependencies=prerequisite_inputs(
                                   api, configuration,
                                   stack), members=[member_inputs(server) for server in servers])
+    inputs['resolvedReferences'] = [ref for ref in references]
+    inputs['hosts'] = {name: variables for name, variables in hosts.items()}
     revision = 'sha256:' + hashlib.sha256(
         json.dumps(inputs, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
-    return Plan(configuration, target, servers, hosts, revision)
+    return Plan(configuration, target, servers, hosts, revision, commit, references, inventory)
 
 
-def report(api: API, configuration: Resource, phase: str, reason: str,
-           revision: str | None = None) -> None:
+def report(api: API, configuration: Resource, phase: str, reason: str, revision: str | None = None,
+           resolved: Plan | None = None, outputs: JSONObject | None = None) -> None:
     """Report only for the same desired generation, preserving other writers."""
     latest = api.get('configurations', configuration['metadata']['name'])
     if (latest['metadata']['uid'] != configuration['metadata']['uid']
@@ -270,30 +288,31 @@ def report(api: API, configuration: Resource, phase: str, reason: str,
     }
     if revision:
         status['inputRevision'] = revision
+    if resolved:
+        status['playbookRevision'] = resolved.playbook_revision
+        status['resolvedReferences'] = [ref for ref in resolved.resolved_references]
     if phase == 'Ready':
         status['lastVerifiedAt'] = datetime.now(timezone.utc).isoformat()
+        status['outputs'] = outputs or {}
     build_url = os.environ.get('BUILD_URL')
     if build_url:
         status['buildURL'] = build_url
     api.patch_status(latest, status)
 
 
-def checkout(api: API, configuration: Resource, source: Path, destination: Path) -> Path:
+def checkout(api: API, configuration: Resource, source: Path, destination: Path,
+             expected_commit: str | None = None) -> Path:
     """Extract an exact reviewed commit from the trusted pipeline Git input.
 
-    No arbitrary repository fetch, shell interpolation, floating branch or unsafe
-    archive extraction. An unavailable commit is a visible rollout prerequisite.
+    Optional pins and configured refs both resolve to immutable commits. No remote
+    fetch or unsafe archive extraction; missing code is a visible prerequisite.
     """
     playbook = mapping(configuration['spec'], 'playbook')
     repository = fetch_reference(api, 'git-repositories', reference(playbook, 'repositoryRef'))
     git = ['git', '-c', 'safe.directory=' + str(source), '-C', str(source)]
-    origin = subprocess.check_output([*git, 'remote', 'get-url', 'origin'], text=True).strip()
-    if origin != repository['spec'].get('url'):
-        raise OperatorError('SourceMismatch',
-                            'Playbook repository differs from pipeline code input')
-    revision = json_string(playbook.get('revision'), 'playbook revision')
-    if not re.fullmatch('[0-9a-f]{40}', revision):
-        raise OperatorError('SourceMismatch', 'An immutable full commit is required')
+    revision = source_commit(repository, playbook, source)
+    if expected_commit is not None and revision != expected_commit:
+        raise OperatorError('InputsChanged', 'Playbook source changed before checkout')
     relative = json_string(playbook.get('path'), 'playbook path')
     if not re.fullmatch(r'plays/[a-zA-Z0-9_/-]+\.ya?ml', relative):
         raise OperatorError('SourceMismatch',
@@ -310,10 +329,18 @@ def checkout(api: API, configuration: Resource, source: Path, destination: Path)
 
 
 def prepare_execution(api: API, resolved: Plan, directory: Path) -> None:
-    """Write scoped inventory and namespaced inputs with strict host trust."""
+    """Preserve capture groups; protect host transport and provide namespaced context."""
     configuration = resolved.configuration
     wire_hosts: JSONObject = {name: values for name, values in resolved.hosts.items()}
-    inventory: JSONObject = {'all': {'hosts': wire_hosts}}
+    inventory: JSONObject = deepcopy(resolved.inventory)
+    # Normalize every occurrence to resolved host vars so inherited transport
+    # settings cannot override the verified management connection.
+    for group_value in inventory.values():
+        group = json_object(group_value, 'inventory group')
+        if 'hosts' in group:
+            group['hosts'] = {name: resolved.hosts[name] for name in mapping(group, 'hosts')}
+    all_group = json_object(inventory.setdefault('all', {}), 'all inventory group')
+    all_group['hosts'] = wire_hosts
     known = directory / 'known_hosts'
     write_private(known, prepare(api, inventory))
     for server in resolved.servers:
@@ -323,38 +350,30 @@ def prepare_execution(api: API, resolved: Plan, directory: Path) -> None:
             ansible_connection='ssh', ansible_become=True,
             ansible_ssh_args=shlex.join(ssh_args(server, known)), ansible_ssh_common_args='',
             ansible_ssh_extra_args='', configuration_server_uid=server['metadata']['uid'],
-            configuration_run_uid=reference(mapping(server['status'], 'provisioning'),
-                                            'lastSuccessfulRunRef')['uid'])
-    cluster_groups: JSONObject = {}
-    if resolved.target['kind'] == 'KubeCluster':
-        for role in ('control-plane', 'worker'):
-            cluster_groups[role.replace('-', '_')] = {
-                'hosts': {
-                    server['metadata']['name']: {}
-                    for server in resolved.servers
-                    if server['metadata'].get('labels', {}).get('homelab.io/kube-role') == role
-                }
-            }
-        inventory['all'] = {'hosts': wire_hosts, 'children': cluster_groups}
+            configuration_run_uid=pinned_reference(mapping(server['status'], 'provisioning'),
+                                                   'lastSuccessfulRunRef')['uid'])
     write_private(directory / 'inventory.json', json.dumps(inventory))
     write_private(
         directory / 'values.json',
         json.dumps({
             'configuration_values':
             configuration['spec'].get('values', {}),
+            'configuration_workspace':
+            str(directory),
+            'configuration_playbook_revision':
+            resolved.playbook_revision,
+            'configuration_observed':
+            configuration['status'].get('outputs', {}),
             'configuration_target': {
                 'kind': resolved.target['kind'],
                 'metadata': resolved.target['metadata'],
                 'spec': resolved.target['spec']
             },
             'configuration_nodes': [{
-                'name':
-                server['metadata']['name'],
-                'nodeName':
-                server['metadata'].get('annotations', {}).get('homelab.io/kube-node-name',
-                                                              server['metadata']['name']),
-                'role':
-                server['metadata'].get('labels', {}).get('homelab.io/kube-role')
+                'name': server['metadata']['name'],
+                'uid': server['metadata']['uid'],
+                'labels': dict(server['metadata'].get('labels', {})),
+                'annotations': dict(server['metadata'].get('annotations', {})),
             } for server in resolved.servers]
         }))
 
@@ -371,8 +390,12 @@ def verify_claims(api: API, servers: list[Resource]) -> None:
 
 def run_plays(api: API, resolved: Plan, source: Path, play: Path, directory: Path) -> None:
     """Run the installed-host guard around the reviewed playbook, streaming logs."""
-    previous = os.environ.get('ANSIBLE_ROLES_PATH')
-    os.environ['ANSIBLE_ROLES_PATH'] = str(play.parent.parent / 'roles')
+    paths = {
+        'ANSIBLE_ROLES_PATH': str(play.parent.parent / 'roles'),
+        'ANSIBLE_FILTER_PLUGINS': str(play.parent.parent / 'filter_plugins')
+    }
+    previous = {name: os.environ.get(name) for name in paths}
+    os.environ.update(paths)
     try:
         for selected_play in (source / 'plays/configuration_guard.yml', play,
                               source / 'plays/configuration_guard.yml'):
@@ -381,7 +404,12 @@ def run_plays(api: API, resolved: Plan, source: Path, play: Path, directory: Pat
                 'ansible-playbook', '-i',
                 str(directory / 'inventory.json'),
                 str(selected_play), '-e', '@' + str(directory / 'values.json')
-            ], directory / 'ansible.log', 660)
+            ], directory / 'ansible.log', 3600)
+            if result.returncode in (4, 6):
+                # Transport loss does not prove a remote module/process stopped.
+                raise OperatorError(
+                    'RemoteWorkUncertain',
+                    'SSH became unreachable; inspect remote work before releasing claims')
             if result.returncode:
                 raise OperatorError('PlaybookFailed',
                                     'Reviewed configuration or verification play failed')
@@ -392,16 +420,17 @@ def run_plays(api: API, resolved: Plan, source: Path, play: Path, directory: Pat
             'RemoteWorkUncertain',
             'Timed out; inspect remote work before releasing host claims') from error
     finally:
-        if previous is None:
-            os.environ.pop('ANSIBLE_ROLES_PATH', None)
-        else:
-            os.environ['ANSIBLE_ROLES_PATH'] = previous
+        for name, value in previous.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
 
 
 def execute(api: API, resolved: Plan, source: Path, directory: Path) -> None:
     """Claim all selected hosts, verify installed sessions, execute and recheck inputs."""
     configuration = resolved.configuration
-    play = checkout(api, configuration, source, directory / 'code')
+    play = checkout(api, configuration, source, directory / 'code', resolved.playbook_revision)
     prepare_execution(api, resolved, directory)
     with ExitStack() as owners:
         for server in resolved.servers:
@@ -409,12 +438,22 @@ def execute(api: API, resolved: Plan, source: Path, directory: Path) -> None:
         refreshed = plan(api, configuration)
         if refreshed.input_revision != resolved.input_revision:
             raise OperatorError('InputsChanged', 'Configuration inputs changed before execution')
-        report(api, configuration, 'Reconciling', 'ExecutingPlaybook', resolved.input_revision)
+        report(api, configuration, 'Reconciling', 'ExecutingPlaybook', resolved.input_revision,
+               resolved)
         run_plays(api, resolved, source, play, directory)
         verify_claims(api, resolved.servers)
         if plan(api, configuration).input_revision != resolved.input_revision:
             raise OperatorError('InputsChanged', 'Configuration inputs changed during execution')
-    report(api, configuration, 'Ready', 'PlaybookVerified', resolved.input_revision)
+    outputs: JSONObject = {}
+    result = directory / 'result.json'
+    if result.exists():
+        if result.is_symlink() or not result.is_file() or result.stat().st_size > 65536:
+            raise OperatorError('InvalidResult',
+                                'Playbook result must be a small regular JSON file')
+        outputs = json_object(json.loads(result.read_text(encoding='utf-8')),
+                              'public playbook result')
+    report(api, configuration, 'Ready', 'PlaybookVerified', resolved.input_revision, resolved,
+           outputs)
 
 
 def main() -> int:

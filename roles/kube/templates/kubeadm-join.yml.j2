@@ -1,0 +1,16 @@
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: JoinConfiguration
+discovery:
+  bootstrapToken:
+    apiServerEndpoint: {{ kube_cluster_plan.settings.controlPlaneEndpoint | to_json }}
+    token: {{ kube_join_token | to_json }}
+    caCertHashes:
+      - {{ kube_join_ca_hash | to_json }}
+nodeRegistration:
+  name: {{ kube_node_name | to_json }}
+  criSocket: unix:///run/containerd/containerd.sock
+  kubeletExtraArgs:
+    - name: node-ip
+      value: {{ ansible_host | to_json }}
+    - name: node-labels
+      value: {{ ('homelab.io/server-uid=' ~ configuration_server_uid ~ ',homelab.io/kube-cluster-uid=' ~ kube_cluster_plan.uid) | to_json }}

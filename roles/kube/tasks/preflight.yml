@@ -1,0 +1,61 @@
+---
+- name: Require a supported installed Kubernetes node
+  ansible.builtin.assert:
+    quiet: true
+    that:
+      - ansible_facts.system == 'Linux'
+      - ansible_facts.distribution in ['Debian', 'Archlinux']
+      - ansible_facts.service_mgr == 'systemd'
+      - ansible_facts.architecture in ['x86_64', 'aarch64']
+      - ansible_facts.mounts | selectattr('mount', 'equalto', '/') | selectattr('fstype', 'in', ['overlay', 'squashfs', 'tmpfs']) | list | length == 0
+    fail_msg: Kubernetes requires an installed Debian or Arch Linux systemd node.
+
+- name: Inspect the live-image identity
+  ansible.builtin.stat:
+    path: /etc/homelabd/live-build-id
+  register: kube_live_marker
+
+- name: Refuse Kubernetes setup in the live provisioning image
+  ansible.builtin.assert:
+    quiet: true
+    that:
+      - not kube_live_marker.stat.exists
+    fail_msg: Provision and verify the installed OS before configuring Kubernetes.
+
+- name: Resolve the planned API endpoint through the node's DNS
+  ansible.builtin.command:
+    argv:
+      - getent
+      - ahostsv4
+      - "{{ kube_cluster_plan.settings.controlPlaneEndpoint.rsplit(':', 1)[0] }}"
+  register: kube_endpoint_addresses
+  changed_when: false
+  check_mode: false
+
+- name: Require the endpoint to resolve only to the selected v1 control plane
+  ansible.builtin.assert:
+    quiet: true
+    that:
+      - kube_endpoint_addresses.stdout_lines | map('split') | map('first') | unique | list == [hostvars[kube_cluster_plan.controlPlane.name].ansible_host]
+    fail_msg: Configure API endpoint DNS for the selected single control plane before bootstrap.
+
+- name: Inspect preexisting Kubernetes installation artifacts
+  become: true
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - /etc/kubernetes/kubelet.conf
+    - /etc/kubernetes/admin.conf
+    - /var/lib/etcd/member
+    - /var/lib/homelab/kube-cluster.json
+    - /etc/rancher/k3s
+    - /var/lib/rancher/k3s
+  register: kube_existing_installation
+
+- name: Report the read-only preflight result
+  ansible.builtin.debug:
+    msg:
+      - "{{ kube_node_name }}: {{ kube_node_role }} in {{ kube_cluster_plan.name }}"
+      - "Kubernetes {{ kube_cluster_plan.settings.kubernetesVersion }}, containerd {{ kube_cluster_plan.settings.containerdVersion }}, Flannel {{ kube_cluster_plan.settings.network.version }}"
+      - "Existing installation artifacts: {{ kube_existing_installation.results | selectattr('stat.exists') | map(attribute='item') | list }}"
+      - This is an inspection result, not cluster readiness or permission to reset an existing cluster.

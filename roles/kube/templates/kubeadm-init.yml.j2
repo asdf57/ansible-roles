@@ -1,0 +1,29 @@
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: InitConfiguration
+bootstrapTokens:
+  - ttl: 10m
+nodeRegistration:
+  name: {{ kube_node_name | to_json }}
+  criSocket: unix:///run/containerd/containerd.sock
+  kubeletExtraArgs:
+    - name: node-ip
+      value: {{ ansible_host | to_json }}
+    - name: node-labels
+      value: {{ ('homelab.io/server-uid=' ~ configuration_server_uid ~ ',homelab.io/kube-cluster-uid=' ~ kube_cluster_plan.uid) | to_json }}
+localAPIEndpoint:
+  advertiseAddress: {{ ansible_host | to_json }}
+  bindPort: {{ kube_cluster_plan.settings.controlPlaneEndpoint.rsplit(':', 1)[1] | int }}
+---
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: ClusterConfiguration
+clusterName: {{ kube_cluster_plan.name | to_json }}
+kubernetesVersion: {{ ('v' ~ kube_cluster_plan.settings.kubernetesVersion) | to_json }}
+controlPlaneEndpoint: {{ kube_cluster_plan.settings.controlPlaneEndpoint | to_json }}
+networking:
+  podSubnet: {{ kube_cluster_plan.settings.podCIDR | to_json }}
+  serviceSubnet: {{ kube_cluster_plan.settings.serviceCIDR | to_json }}
+---
+apiVersion: kubelet.config.k8s.io/v1beta1
+kind: KubeletConfiguration
+cgroupDriver: systemd
+failSwapOn: true

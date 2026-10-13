@@ -1,0 +1,12 @@
+---
+# Syntax checks only: no addresses or credentials, and no remote tasks execute.
+all:
+  children:
+    configuration_kube_members:
+      children:
+        configuration_kube_control_plane:
+          hosts:
+            fixture-control: {}
+        configuration_kube_workers:
+          hosts:
+            fixture-worker: {}

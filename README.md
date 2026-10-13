@@ -7,7 +7,10 @@ Ansible playbooks and reusable tasks for the homelab.
 The standalone [containerd role](roles/containerd/README.md) installs the runtime
 on an explicitly selected installed Debian/Arch host. Its entry point is
 `plays/containerd.yml`; it is not automatically applied during OS provisioning.
-Cluster resource lookup and kubeadm init/join remain planned external-operator work.
+`plays/configure_kube.yml` composes containerd and kube for an installed,
+label-selected cluster through the shared Configuration operator. Kubernetes
+setup remains separate from OS provisioning; see `roles/kube/README.md` and
+Stigmergy's Kubernetes rollout guide.
 
 ## Operator development
 

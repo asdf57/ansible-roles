@@ -1,0 +1,27 @@
+---
+- name: Resolve cluster settings and labeled capture members
+  ansible.builtin.set_fact:
+    kube_plan: "{{ configuration_target | kube_cluster_plan(configuration_nodes) }}"
+
+- name: Require all selected members to be within the captured inventory
+  ansible.builtin.assert:
+    quiet: true
+    that:
+      - kube_plan.members | map(attribute='name') | difference(groups['all']) | length == 0
+      - groups.get('configuration_kube_members', []) | length == 0
+      - groups.get('configuration_kube_control_plane', []) | length == 0
+      - groups.get('configuration_kube_workers', []) | length == 0
+    fail_msg: Kubernetes membership must remain inside the capture and use uncontaminated execution groups.
+
+- name: Group the selected Kubernetes nodes without changing their SSH transport
+  ansible.builtin.add_host:
+    name: "{{ item.name }}"
+    groups:
+      - configuration_kube_members
+      - "{{ 'configuration_kube_control_plane' if item.role == 'control-plane' else 'configuration_kube_workers' }}"
+    kube_cluster_plan: "{{ kube_plan }}"
+    kube_node_name: "{{ item.nodeName }}"
+    kube_node_role: "{{ item.role }}"
+  loop: "{{ kube_plan.members }}"
+  loop_control:
+    label: "{{ item.name }}: {{ item.role }}"

@@ -1,0 +1,17 @@
+[Unit]
+Description=Managed containerd runtime
+After=network.target
+
+[Service]
+Type=notify
+ExecStart=/usr/local/bin/containerd
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
+Delegate=yes
+KillMode=process
+Restart=always
+RestartSec=5
+LimitNOFILE=infinity
+TasksMax=infinity
+
+[Install]
+WantedBy=multi-user.target

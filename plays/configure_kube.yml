@@ -1,0 +1,133 @@
+---
+- name: Resolve the Kubernetes setup and select captured members
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  any_errors_fatal: true
+  tasks:
+    - name: Plan the selected cluster through the Kubernetes role
+      ansible.builtin.import_role:
+        name: kube
+        tasks_from: plan
+
+- name: Preflight every selected installed node before any mutation
+  hosts: configuration_kube_members
+  gather_facts: true
+  become: true
+  any_errors_fatal: true
+  tasks:
+    - name: Validate installed hosts, networks and endpoint DNS
+      ansible.builtin.include_role:
+        name: kube
+        tasks_from: preflight
+
+    - name: Validate protected installation identity and bootstrap state
+      ansible.builtin.include_role:
+        name: kube
+        tasks_from: identity
+
+- name: Resolve and verify pinned artifacts on the unprivileged runner
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  any_errors_fatal: true
+  pre_tasks:
+    - name: Refuse rebuilding a lost control plane under the same cluster identity
+      ansible.builtin.assert:
+        quiet: true
+        that:
+          - >-
+            hostvars[kube_plan.controlPlane.name].kube_admin_config_exists or
+            configuration_observed.get('clusterUID', '') != kube_plan.uid or
+            configuration_observed.get('clusterNamespaceUID', '') == ''
+          - >-
+            hostvars[kube_plan.controlPlane.name].kube_admin_config_exists or
+            groups['configuration_kube_members'] | map('extract', hostvars, 'kube_identity') | selectattr('clusterNamespaceUID', 'defined') | map(attribute='clusterNamespaceUID') | reject('equalto', '') | list | length == 0
+        fail_msg: This cluster previously existed. Restore its control plane or explicitly establish a new cluster lifetime; do not silently recreate etcd.
+
+    - name: Decide whether all selected members already have verified current artifacts
+      ansible.builtin.set_fact:
+        kube_reuse_artifacts: "{{ groups['configuration_kube_members'] | map('extract', hostvars, 'kube_reuse_artifacts') | select('equalto', false) | list | length == 0 }}"
+        kube_sandbox_image: "{{ hostvars[kube_plan.controlPlane.name].kube_identity.get('sandboxImage', '') }}"
+  tasks:
+    - name: Stage exact artifacts only when installed identities cannot be reused
+      ansible.builtin.import_role:
+        name: kube
+        tasks_from: artifacts
+      when: not kube_reuse_artifacts
+
+- name: Preflight all binary and service changes before node installation
+  hosts: configuration_kube_members
+  gather_facts: false
+  become: true
+  any_errors_fatal: true
+  tasks:
+    - name: Refuse changes that would disrupt existing workloads
+      ansible.builtin.include_role:
+        name: containerd
+        tasks_from: artifact_preflight
+
+- name: Prepare the selected node runtimes and host prerequisites
+  hosts: configuration_kube_members
+  gather_facts: false
+  become: true
+  any_errors_fatal: true
+  tasks:
+    - name: Reconcile the pinned containerd runtime
+      ansible.builtin.include_role:
+        name: containerd
+        tasks_from: artifacts
+
+    - name: Reconcile the pinned kubelet and host configuration
+      ansible.builtin.include_role:
+        name: kube
+        tasks_from: prepare
+
+- name: Initialize or verify the owned control plane and reconcile Flannel
+  hosts: configuration_kube_control_plane
+  gather_facts: false
+  become: true
+  any_errors_fatal: true
+  tasks:
+    - name: Reconcile the owned control plane
+      ansible.builtin.include_role:
+        name: kube
+        tasks_from: control_plane
+
+- name: Join only uninitialized owned worker nodes
+  hosts: configuration_kube_workers
+  gather_facts: false
+  become: true
+  any_errors_fatal: true
+  tasks:
+    - name: Reconcile membership with short-lived join credentials
+      ansible.builtin.include_role:
+        name: kube
+        tasks_from: join
+
+- name: Verify the actual cluster and cross-node workload networking
+  hosts: configuration_kube_control_plane
+  gather_facts: false
+  become: true
+  any_errors_fatal: true
+  tasks:
+    - name: Verify Kubernetes readiness rather than task completion alone
+      ansible.builtin.include_role:
+        name: kube
+        tasks_from: verify
+
+- name: Record verified cluster identity on every member
+  hosts: configuration_kube_members
+  gather_facts: false
+  become: true
+  any_errors_fatal: true
+  tasks:
+    - name: Persist successful identity only after cluster verification
+      ansible.builtin.copy:
+        dest: /var/lib/homelab/kube-cluster.json
+        content: "{{ {'identity': kube_expected_identity, 'phase': 'Ready', 'files': kube_installed_checksums, 'sandboxImage': containerd_sandbox_image, 'clusterNamespaceUID': hostvars[kube_cluster_plan.controlPlane.name].kube_namespace_uid, 'controllerRevision': configuration_playbook_revision, 'flannelManifestSHA': hostvars[kube_cluster_plan.controlPlane.name].kube_verified_flannel_file.stat.checksum} | to_nice_json }}\n"
+        owner: root
+        group: root
+        mode: '0600'

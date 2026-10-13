@@ -1,0 +1,157 @@
+---
+- name: Announce the pinned host preparation stage
+  ansible.builtin.debug:
+    msg: "{{ inventory_hostname }}: prepare host prerequisites and kubelet {{ kube_cluster_plan.settings.kubernetesVersion }}"
+
+- name: Install distro host prerequisites without changing component version pins
+  ansible.builtin.package:
+    name: "{{ ['iptables', 'socat', 'conntrack', 'iproute2', 'openssl', 'libseccomp2'] if ansible_facts.distribution == 'Debian' else ['iptables', 'socat', 'conntrack-tools', 'iproute2', 'openssl', 'libseccomp'] }}"
+    state: present
+
+- name: Persist required Kubernetes kernel modules
+  ansible.builtin.copy:
+    dest: /etc/modules-load.d/kubernetes.conf
+    content: |
+      overlay
+      br_netfilter
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Inspect required kernel modules
+  ansible.builtin.stat:
+    path: "/sys/module/{{ item }}"
+  loop: [overlay, br_netfilter]
+  register: kube_kernel_modules
+
+- name: Load only missing kernel modules
+  ansible.builtin.command:
+    argv: [modprobe, "{{ item.item }}"]
+  loop: "{{ kube_kernel_modules.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: not item.stat.exists
+  changed_when: true
+
+- name: Configure Kubernetes forwarding and bridge filtering
+  ansible.posix.sysctl:
+    name: "{{ item }}"
+    value: '1'
+    state: present
+    sysctl_set: true
+    reload: true
+    sysctl_file: /etc/sysctl.d/90-kubernetes.conf
+  loop: [net.ipv4.ip_forward, net.bridge.bridge-nf-call-iptables, net.bridge.bridge-nf-call-ip6tables]
+
+- name: Keep NetworkManager away from CNI-created interfaces
+  ansible.builtin.copy:
+    dest: /etc/NetworkManager/conf.d/90-kubernetes.conf
+    content: |
+      [keyfile]
+      unmanaged-devices=interface-name:cni*;interface-name:flannel*;interface-name:veth*
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload NetworkManager's Kubernetes interface exclusions
+
+- name: Disable persistent fstab swap while preserving its disk partitions
+  ansible.builtin.replace:
+    path: /etc/fstab
+    regexp: '^(?!#)(\S+\s+\S+\s+swap\s+.*)$'
+    replace: '# Kubernetes disabled swap: \1'
+
+- name: Inspect native and generated swap units
+  ansible.builtin.command:
+    argv: [systemctl, list-units, --type=swap, --all, --no-legend, --plain]
+  register: kube_swap_units
+  changed_when: false
+
+- name: Stop and mask explicitly discovered swap units
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    state: stopped
+    masked: true
+  loop: "{{ kube_swap_units.stdout_lines | map('split') | map('first') | list }}"
+
+- name: Inspect active swap after persistent configuration
+  ansible.builtin.command:
+    argv: [swapon, --show, --noheadings]
+  register: kube_active_swap
+  changed_when: false
+
+- name: Disable remaining active swap for the selected NoSwap kubelet policy
+  ansible.builtin.command:
+    argv: [swapoff, --all]
+  when: kube_active_swap.stdout | trim != ''
+  changed_when: true
+
+- name: Create the managed Kubernetes installation directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  loop: [/usr/local/bin, /opt/cni/bin, /etc/kubernetes, /var/lib/kubelet, /var/lib/homelab]
+
+- name: Install verified Kubernetes binaries and base CNI plugins
+  ansible.builtin.copy:
+    src: "{{ item.item.src }}"
+    dest: "{{ item.item.dest }}"
+    owner: root
+    group: root
+    mode: '0755'
+  loop: "{{ containerd_node_artifacts | rejectattr('item.component', 'equalto', 'runtime') | list }}"
+  loop_control:
+    label: "{{ item.item.dest }}"
+  notify: Restart the changed managed kubelet service
+  when: not hostvars['localhost'].kube_reuse_artifacts
+
+- name: Reconcile Kubernetes and CNI binary permissions without restarting workloads
+  ansible.builtin.file:
+    path: "{{ item.item.dest }}"
+    state: file
+    owner: root
+    group: root
+    mode: '0755'
+    follow: false
+  loop: "{{ containerd_node_artifacts | rejectattr('item.component', 'equalto', 'runtime') | list }}"
+  loop_control:
+    label: "{{ item.item.dest }}"
+
+- name: Install the native kubeadm-compatible kubelet unit
+  ansible.builtin.template:
+    src: kubelet.service.j2
+    dest: /etc/systemd/system/kubelet.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart the changed managed kubelet service
+
+- name: Apply changed host configuration before bootstrap
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable kubelet without restarting an unchanged instance
+  ansible.builtin.systemd_service:
+    name: kubelet
+    enabled: true
+    state: started
+
+- name: Record the installed pinned file checksums
+  ansible.builtin.set_fact:
+    kube_installed_checksums: {}
+
+- name: Build the protected installation manifest
+  ansible.builtin.set_fact:
+    kube_installed_checksums: "{{ kube_installed_checksums | combine({item.item.dest: item.stat.checksum}) }}"
+  loop: "{{ containerd_node_artifacts }}"
+  loop_control:
+    label: "{{ item.item.dest }}"
+
+- name: Persist identity before any cluster bootstrap work
+  ansible.builtin.copy:
+    dest: /var/lib/homelab/kube-cluster.json
+    content: "{{ {'identity': kube_expected_identity, 'phase': kube_identity.get('phase', 'Prepared'), 'files': kube_installed_checksums, 'sandboxImage': containerd_sandbox_image, 'clusterNamespaceUID': kube_identity.get('clusterNamespaceUID', ''), 'controllerRevision': kube_identity.get('controllerRevision', ''), 'flannelManifestSHA': kube_identity.get('flannelManifestSHA', '')} | to_nice_json }}\n"
+    owner: root
+    group: root
+    mode: '0600'

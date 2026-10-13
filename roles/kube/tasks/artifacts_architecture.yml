@@ -1,0 +1,89 @@
+---
+- name: Create architecture-specific verified release staging
+  ansible.builtin.file:
+    path: "{{ kube_artifact_root }}/{{ kube_artifact_arch }}/{{ item }}"
+    state: directory
+    mode: '0700'
+  loop: [containerd, cni]
+
+- name: Download the exact containerd release with its upstream checksum
+  ansible.builtin.get_url:
+    url: "https://github.com/containerd/containerd/releases/download/v{{ kube_plan.settings.containerdVersion }}/containerd-{{ kube_plan.settings.containerdVersion }}-linux-{{ kube_artifact_arch }}.tar.gz"
+    checksum: "sha256:https://github.com/containerd/containerd/releases/download/v{{ kube_plan.settings.containerdVersion }}/containerd-{{ kube_plan.settings.containerdVersion }}-linux-{{ kube_artifact_arch }}.tar.gz.sha256sum"
+    dest: "{{ kube_artifact_root }}/{{ kube_artifact_arch }}/containerd.tar.gz"
+    mode: '0600'
+
+- name: Extract the verified containerd archive on the runner
+  ansible.builtin.unarchive:
+    src: "{{ kube_artifact_root }}/{{ kube_artifact_arch }}/containerd.tar.gz"
+    dest: "{{ kube_artifact_root }}/{{ kube_artifact_arch }}/containerd"
+    remote_src: true
+
+- name: Download the pinned OCI runtime with its upstream checksum
+  ansible.builtin.get_url:
+    url: "https://github.com/opencontainers/runc/releases/download/v{{ kube_plan.settings.runcVersion }}/runc.{{ kube_artifact_arch }}"
+    checksum: "sha256:https://github.com/opencontainers/runc/releases/download/v{{ kube_plan.settings.runcVersion }}/runc.sha256sum"
+    dest: "{{ kube_artifact_root }}/{{ kube_artifact_arch }}/runc"
+    mode: '0755'
+
+- name: Download the exact CNI plugins release with its upstream checksum
+  ansible.builtin.get_url:
+    url: "https://github.com/containernetworking/plugins/releases/download/v{{ kube_plan.settings.cniPluginsVersion }}/cni-plugins-linux-{{ kube_artifact_arch }}-v{{ kube_plan.settings.cniPluginsVersion }}.tgz"
+    checksum: "sha256:https://github.com/containernetworking/plugins/releases/download/v{{ kube_plan.settings.cniPluginsVersion }}/cni-plugins-linux-{{ kube_artifact_arch }}-v{{ kube_plan.settings.cniPluginsVersion }}.tgz.sha256"
+    dest: "{{ kube_artifact_root }}/{{ kube_artifact_arch }}/cni.tgz"
+    mode: '0600'
+
+- name: Extract the verified CNI plugins on the runner
+  ansible.builtin.unarchive:
+    src: "{{ kube_artifact_root }}/{{ kube_artifact_arch }}/cni.tgz"
+    dest: "{{ kube_artifact_root }}/{{ kube_artifact_arch }}/cni"
+    remote_src: true
+
+- name: Download kubeadm, kubelet and kubectl at the exact selected version
+  ansible.builtin.get_url:
+    url: "https://dl.k8s.io/release/v{{ kube_plan.settings.kubernetesVersion }}/bin/linux/{{ kube_artifact_arch }}/{{ item }}"
+    checksum: "sha256:https://dl.k8s.io/release/v{{ kube_plan.settings.kubernetesVersion }}/bin/linux/{{ kube_artifact_arch }}/{{ item }}.sha256"
+    dest: "{{ kube_artifact_root }}/{{ kube_artifact_arch }}/{{ item }}"
+    mode: '0755'
+  loop: [kubeadm, kubelet, kubectl]
+
+- name: Enumerate the reviewed node installation files
+  ansible.builtin.set_fact:
+    kube_arch_files:
+      - {src: "{{ kube_artifact_root }}/{{ kube_artifact_arch }}/containerd/bin/containerd", dest: /usr/local/bin/containerd, component: runtime}
+      - {src: "{{ kube_artifact_root }}/{{ kube_artifact_arch }}/containerd/bin/ctr", dest: /usr/local/bin/ctr, component: runtime}
+      - {src: "{{ kube_artifact_root }}/{{ kube_artifact_arch }}/containerd/bin/containerd-shim-runc-v2", dest: /usr/local/bin/containerd-shim-runc-v2, component: runtime}
+      - {src: "{{ kube_artifact_root }}/{{ kube_artifact_arch }}/runc", dest: /usr/local/bin/runc, component: runtime}
+      - {src: "{{ kube_artifact_root }}/{{ kube_artifact_arch }}/kubeadm", dest: /usr/local/bin/kubeadm, component: kubernetes}
+      - {src: "{{ kube_artifact_root }}/{{ kube_artifact_arch }}/kubelet", dest: /usr/local/bin/kubelet, component: kubernetes}
+      - {src: "{{ kube_artifact_root }}/{{ kube_artifact_arch }}/kubectl", dest: /usr/local/bin/kubectl, component: kubernetes}
+      - {src: "{{ kube_artifact_root }}/{{ kube_artifact_arch }}/cni/bridge", dest: /opt/cni/bin/bridge, component: cni}
+      - {src: "{{ kube_artifact_root }}/{{ kube_artifact_arch }}/cni/host-local", dest: /opt/cni/bin/host-local, component: cni}
+      - {src: "{{ kube_artifact_root }}/{{ kube_artifact_arch }}/cni/loopback", dest: /opt/cni/bin/loopback, component: cni}
+      - {src: "{{ kube_artifact_root }}/{{ kube_artifact_arch }}/cni/portmap", dest: /opt/cni/bin/portmap, component: cni}
+
+- name: Verify staged files are regular binaries and compute installation identities
+  ansible.builtin.stat:
+    path: "{{ item.src }}"
+    checksum_algorithm: sha256
+    follow: false
+  loop: "{{ kube_arch_files }}"
+  loop_control:
+    label: "{{ item.dest }}"
+  register: kube_arch_file_stats
+
+- name: Require every expected release binary
+  ansible.builtin.assert:
+    quiet: true
+    that:
+      - item.stat.exists
+      - item.stat.isreg
+      - not item.stat.islnk
+      - item.stat.checksum is match('^[0-9a-f]{64}$')
+  loop: "{{ kube_arch_file_stats.results }}"
+  loop_control:
+    label: "{{ item.item.dest }}"
+
+- name: Record verified artifacts for this architecture
+  ansible.builtin.set_fact:
+    kube_artifacts_by_arch: "{{ kube_artifacts_by_arch | combine({kube_artifact_arch: kube_arch_file_stats.results}) }}"

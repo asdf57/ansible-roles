@@ -2,7 +2,7 @@
 
 UV ?= uv
 RUN = $(UV) run --frozen
-OPERATOR_MODULES = $(wildcard operators/*.py)
+OPERATOR_MODULES = $(wildcard operators/*.py filter_plugins/*.py)
 # Enforce maintainability and correctness, not an arbitrary aggregate score.
 LINT_CHECKS = E,missing-module-docstring,missing-class-docstring,missing-function-docstring,invalid-name,unused-import,unused-variable,redefined-outer-name,too-many-branches,too-many-statements,too-many-boolean-expressions,too-many-locals,line-too-long,unspecified-encoding,subprocess-run-check
 
@@ -10,15 +10,15 @@ sync:
 	$(UV) sync --locked
 
 format:
-	$(RUN) yapf -i -r operators
+	$(RUN) yapf -i -r operators filter_plugins
 
 check: check-format typecheck lint test
 
 check-format:
-	$(RUN) yapf --quiet -r operators
+	$(RUN) yapf --quiet -r operators filter_plugins
 
 typecheck:
-	$(RUN) ty check operators
+	$(RUN) ty check operators filter_plugins
 
 lint:
 	$(RUN) pylint --persistent=n --score=no --disable=all --enable=$(LINT_CHECKS) $(OPERATOR_MODULES)

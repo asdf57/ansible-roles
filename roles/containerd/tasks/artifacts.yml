@@ -1,0 +1,103 @@
+---
+# The platform preflights every member before entering this mutating stage.
+- name: Create the managed runtime and CNI installation directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  loop: [/usr/local/bin, /opt/cni/bin, /etc/containerd]
+
+- name: Install only the verified containerd and OCI release binaries
+  ansible.builtin.copy:
+    src: "{{ item.item.src }}"
+    dest: "{{ item.item.dest }}"
+    owner: root
+    group: root
+    mode: '0755'
+  loop: "{{ containerd_node_artifacts | selectattr('item.component', 'equalto', 'runtime') | list }}"
+  loop_control:
+    label: "{{ item.item.dest }}"
+  notify: Restart managed containerd
+  when: not hostvars['localhost'].kube_reuse_artifacts
+
+- name: Reconcile runtime binary permissions without restarting processes
+  ansible.builtin.file:
+    path: "{{ item.item.dest }}"
+    state: file
+    owner: root
+    group: root
+    mode: '0755'
+    follow: false
+  loop: "{{ containerd_node_artifacts | selectattr('item.component', 'equalto', 'runtime') | list }}"
+  loop_control:
+    label: "{{ item.item.dest }}"
+
+- name: Install validated native CRI configuration
+  ansible.builtin.template:
+    src: config.toml.j2
+    dest: /etc/containerd/config.toml
+    owner: root
+    group: root
+    mode: '0644'
+    validate: /usr/local/bin/containerd --config %s config dump
+  notify: Restart managed containerd
+
+- name: Install the managed containerd service
+  ansible.builtin.template:
+    src: containerd.service.j2
+    dest: /etc/systemd/system/containerd.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart managed containerd
+
+- name: Load the reviewed service definition
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+
+- name: Apply changed runtime configuration before bootstrap
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable and start the managed runtime without restarting unchanged instances
+  ansible.builtin.systemd_service:
+    name: containerd
+    enabled: true
+    state: started
+
+- name: Establish the loaded runtime configuration on a host without initialized consumers
+  ansible.builtin.systemd_service:
+    name: containerd
+    state: restarted
+  when:
+    - not kube_consumers_active
+    - not kube_kubelet_config_exists
+    - not (containerd_restart_result | default({})).get('changed', false)
+
+- name: Verify the exact running containerd version
+  ansible.builtin.command:
+    argv: [/usr/local/bin/containerd, --version]
+  register: containerd_verified_version
+  changed_when: false
+
+- name: Require the selected runtime version
+  ansible.builtin.assert:
+    quiet: true
+    that:
+      - containerd_verified_version.stdout.split()[2] | regex_replace('^v', '') == kube_cluster_plan.settings.containerdVersion
+
+- name: Verify the native CRI plugins are healthy
+  ansible.builtin.command:
+    argv: [/usr/local/bin/ctr, --timeout, 10s, plugins, ls]
+  register: containerd_verified_plugins
+  changed_when: false
+  retries: 12
+  delay: 2
+  until: >-
+    containerd_verified_plugins.rc == 0 and
+    ((containerd_major_version | int == 1 and
+      containerd_verified_plugins.stdout is search('(?m)^io\.containerd\.grpc\.v1\s+cri\s+.*\s+ok\s*$')) or
+     (containerd_major_version | int == 2 and
+      containerd_verified_plugins.stdout is search('(?m)^io\.containerd\.cri\.v1\s+images\s+.*\s+ok\s*$') and
+      containerd_verified_plugins.stdout is search('(?m)^io\.containerd\.cri\.v1\s+runtime\s+.*\s+ok\s*$')))

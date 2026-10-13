@@ -1,0 +1,115 @@
+---
+- name: Record concrete node identity and software pins
+  ansible.builtin.set_fact:
+    kube_arch: "{{ ({'x86_64': 'amd64', 'aarch64': 'arm64'})[ansible_facts.architecture] }}"
+    kube_expected_identity:
+      clusterUID: "{{ kube_cluster_plan.uid }}"
+      serverUID: "{{ configuration_server_uid }}"
+      nodeName: "{{ kube_node_name }}"
+      role: "{{ kube_node_role }}"
+      settings: "{{ kube_cluster_plan.settings }}"
+
+- name: Inspect the protected Kubernetes identity marker
+  ansible.builtin.stat:
+    path: /var/lib/homelab/kube-cluster.json
+    follow: false
+  register: kube_identity_file
+
+- name: Require a protected regular identity marker when present
+  ansible.builtin.assert:
+    quiet: true
+    that:
+      - not kube_identity_file.stat.exists or (kube_identity_file.stat.isreg and not kube_identity_file.stat.islnk and kube_identity_file.stat.uid == 0 and kube_identity_file.stat.mode == '0600')
+
+- name: Read the protected Kubernetes identity
+  ansible.builtin.slurp:
+    src: /var/lib/homelab/kube-cluster.json
+  register: kube_identity_content
+  when: kube_identity_file.stat.exists
+
+- name: Resolve this node's existing bootstrap phase
+  ansible.builtin.set_fact:
+    kube_identity: "{{ (kube_identity_content.content | b64decode | from_json) if kube_identity_file.stat.exists else {} }}"
+    kube_kubelet_config_exists: "{{ kube_existing_installation.results[0].stat.exists }}"
+    kube_admin_config_exists: "{{ kube_existing_installation.results[1].stat.exists }}"
+
+- name: Refuse unowned, conflicting or incomplete bootstrap state
+  ansible.builtin.assert:
+    quiet: true
+    that:
+      - kube_identity_file.stat.exists or kube_existing_installation.results | selectattr('stat.exists') | list | length == 0
+      - not kube_identity_file.stat.exists or kube_identity.identity == kube_expected_identity
+      - not kube_identity_file.stat.exists or kube_identity.phase in ['Prepared', 'Initialising', 'Joining', 'Ready']
+      - kube_identity.get('phase', '') != 'Prepared' or kube_existing_installation.results[:3] | selectattr('stat.exists') | list | length == 0
+      - kube_identity.get('phase', '') != 'Initialising' or kube_admin_config_exists
+      - kube_identity.get('phase', '') != 'Joining' or kube_kubelet_config_exists
+      - kube_identity.get('phase', '') != 'Ready' or kube_kubelet_config_exists
+      - kube_node_role != 'control-plane' or kube_identity.get('phase', '') != 'Ready' or kube_admin_config_exists
+      - not kube_existing_installation.results[4].stat.exists
+      - not kube_existing_installation.results[5].stat.exists
+    fail_msg: Existing Kubernetes state conflicts with this setup or bootstrap was interrupted. Inspect it; no automatic reset, init replay, adoption or upgrade is allowed.
+
+- name: Validate connected networks after proving ownership of any existing CNI interfaces
+  ansible.builtin.set_fact:
+    kube_cluster_plan: "{{ (kube_cluster_plan | combine({'allowManagedCNI': kube_identity_file.stat.exists})) | kube_validate_host_network(ansible_facts) }}"
+
+- name: Inspect any still-running kubeadm work
+  ansible.builtin.command:
+    argv: [pgrep, -x, kubeadm]
+  register: kube_running_bootstrap
+  changed_when: false
+  failed_when: kube_running_bootstrap.rc not in [0, 1]
+
+- name: Refuse concurrent or stranded kubeadm execution
+  ansible.builtin.assert:
+    quiet: true
+    that:
+      - kube_running_bootstrap.rc == 1
+    fail_msg: Inspect existing kubeadm work before allowing another configuration pass.
+
+- name: Require enough capacity before disabling swap for kubelet
+  ansible.builtin.assert:
+    quiet: true
+    that:
+      - ansible_facts.memtotal_mb >= 1800
+      - kube_node_role != 'control-plane' or ansible_facts.processor_vcpus >= 2
+      - (ansible_facts.swaptotal_mb - ansible_facts.swapfree_mb) < ansible_facts.memory_mb.real.free
+    fail_msg: Insufficient node capacity or occupied swap exceeds free memory; resolve host capacity before setup.
+
+- name: Select a completed installation from the same reviewed playbook commit
+  ansible.builtin.set_fact:
+    kube_reuse_artifacts: "{{ kube_identity.get('phase', '') == 'Ready' and kube_identity.get('controllerRevision', '') == configuration_playbook_revision }}"
+
+- name: Resolve the previous verified binary identities
+  ansible.builtin.set_fact:
+    kube_existing_artifacts: "{{ (kube_identity | kube_installed_artifacts).files }}"
+  when: kube_reuse_artifacts
+
+- name: Inspect installed bytes before reusing artifact identities
+  ansible.builtin.stat:
+    path: "{{ item.item.dest }}"
+    checksum_algorithm: sha256
+    follow: false
+  loop: "{{ kube_existing_artifacts | default([]) }}"
+  loop_control:
+    label: "{{ item.item.dest }}"
+  register: kube_existing_binary_stats
+  when: kube_reuse_artifacts
+
+- name: Require unchanged installed bytes before skipping release downloads
+  ansible.builtin.set_fact:
+    kube_reuse_artifacts: "{{ kube_reuse_artifacts and (kube_existing_binary_stats.results | kube_changed_binaries).paths | length == 0 }}"
+  when: kube_reuse_artifacts
+
+- name: Inspect the previous verified control-plane network manifest
+  ansible.builtin.stat:
+    path: /etc/kubernetes/homelab-flannel.json
+    checksum_algorithm: sha256
+    follow: false
+  register: kube_previous_flannel_manifest
+  when: kube_reuse_artifacts and kube_node_role == 'control-plane'
+
+- name: Require the previous network manifest identity before reuse
+  ansible.builtin.set_fact:
+    kube_reuse_artifacts: "{{ kube_previous_flannel_manifest.stat.exists and kube_previous_flannel_manifest.stat.isreg and not kube_previous_flannel_manifest.stat.islnk and kube_previous_flannel_manifest.stat.uid == 0 and kube_previous_flannel_manifest.stat.mode == '0600' and kube_previous_flannel_manifest.stat.checksum == kube_identity.get('flannelManifestSHA', '') }}"
+  when: kube_reuse_artifacts and kube_node_role == 'control-plane'

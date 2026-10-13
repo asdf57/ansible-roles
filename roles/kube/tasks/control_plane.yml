@@ -1,0 +1,162 @@
+---
+- name: Announce the owned control-plane stage
+  ansible.builtin.debug:
+    msg: "{{ inventory_hostname }}: initialize only if uninitialized; otherwise verify the owned API"
+
+- name: Render concrete kubeadm init configuration
+  ansible.builtin.template:
+    src: kubeadm-init.yml.j2
+    dest: /etc/kubernetes/homelab-init.yml
+    owner: root
+    group: root
+    mode: '0600'
+
+- name: Validate configuration with the pinned kubeadm before bootstrap
+  ansible.builtin.command:
+    argv: [/usr/local/bin/kubeadm, config, validate, --config, /etc/kubernetes/homelab-init.yml]
+  changed_when: false
+
+- name: Mark initialization intent before invoking kubeadm
+  ansible.builtin.copy:
+    dest: /var/lib/homelab/kube-cluster.json
+    content: "{{ {'identity': kube_expected_identity, 'phase': 'Initialising', 'files': kube_installed_checksums, 'sandboxImage': containerd_sandbox_image, 'clusterNamespaceUID': ''} | to_nice_json }}\n"
+    owner: root
+    group: root
+    mode: '0600'
+  when: not kube_admin_config_exists
+
+- name: Initialize the new owned control plane without reset or replay
+  ansible.builtin.command:
+    argv: [/usr/local/bin/kubeadm, init, --config, /etc/kubernetes/homelab-init.yml]
+  when: not kube_admin_config_exists
+  changed_when: true
+  # kubeadm prints bootstrap credentials. Only this credential-bearing task is hidden.
+  no_log: true
+
+- name: Wait for authenticated API readiness
+  ansible.builtin.command:
+    argv: [/usr/local/bin/kubectl, --kubeconfig, /etc/kubernetes/admin.conf, --request-timeout=10s, get, --raw=/readyz]
+  register: kube_api_ready
+  changed_when: false
+  retries: 60
+  delay: 5
+  until: kube_api_ready.rc == 0 and kube_api_ready.stdout | trim == 'ok'
+
+- name: Read the actual kubeadm cluster configuration
+  ansible.builtin.command:
+    argv: [/usr/local/bin/kubectl, --kubeconfig, /etc/kubernetes/admin.conf, --request-timeout=10s, --namespace, kube-system, get, configmap, kubeadm-config, -o, json]
+  register: kube_actual_config
+  changed_when: false
+
+- name: Parse actual control-plane settings
+  ansible.builtin.set_fact:
+    kube_actual_settings: "{{ (kube_actual_config.stdout | from_json).data.ClusterConfiguration | from_yaml }}"
+
+- name: Refuse mismatching cluster configuration instead of upgrading or adopting
+  ansible.builtin.assert:
+    quiet: true
+    that:
+      - kube_actual_settings.clusterName == kube_cluster_plan.name
+      - kube_actual_settings.kubernetesVersion == 'v' ~ kube_cluster_plan.settings.kubernetesVersion
+      - kube_actual_settings.controlPlaneEndpoint == kube_cluster_plan.settings.controlPlaneEndpoint
+      - kube_actual_settings.networking.podSubnet == kube_cluster_plan.settings.podCIDR
+      - kube_actual_settings.networking.serviceSubnet == kube_cluster_plan.settings.serviceCIDR
+
+- name: Read the protected API-side cluster binding
+  ansible.builtin.command:
+    argv: [/usr/local/bin/kubectl, --kubeconfig, /etc/kubernetes/admin.conf, --namespace, kube-system, get, configmap, homelab-identity, --ignore-not-found, -o, json]
+  register: kube_api_identity
+  changed_when: false
+
+- name: Require the existing API identity to match the resolved cluster
+  ansible.builtin.assert:
+    quiet: true
+    that:
+      - kube_api_identity.stdout | trim == '' or (kube_api_identity.stdout | from_json).data.clusterUID == kube_cluster_plan.uid
+
+- name: Bind the newly initialized API to this cluster lifetime
+  ansible.builtin.command:
+    argv: [/usr/local/bin/kubectl, --kubeconfig, /etc/kubernetes/admin.conf, --namespace, kube-system, create, configmap, homelab-identity, "--from-literal=clusterUID={{ kube_cluster_plan.uid }}"]
+  when: kube_api_identity.stdout | trim == ''
+  changed_when: true
+
+- name: Read the actual cluster namespace identity
+  ansible.builtin.command:
+    argv: [/usr/local/bin/kubectl, --kubeconfig, /etc/kubernetes/admin.conf, get, namespace, kube-system, -o, json]
+  register: kube_namespace
+  changed_when: false
+
+- name: Record and check the immutable installed cluster identity
+  ansible.builtin.set_fact:
+    kube_namespace_uid: "{{ (kube_namespace.stdout | from_json).metadata.uid }}"
+
+- name: Refuse a replaced installed cluster
+  ansible.builtin.assert:
+    quiet: true
+    that:
+      - kube_identity.get('clusterNamespaceUID', '') in ['', kube_namespace_uid]
+      - configuration_observed.get('clusterUID', '') != kube_cluster_plan.uid or configuration_observed.get('clusterNamespaceUID', '') in ['', kube_namespace_uid]
+      - kube_namespace_uid is string and kube_namespace_uid | length > 0
+
+- name: Inspect default Kubernetes networking addons without replacing custom settings
+  ansible.builtin.command:
+    argv: [/usr/local/bin/kubectl, --kubeconfig, /etc/kubernetes/admin.conf, --namespace, kube-system, get, "{{ item.kind }}", "{{ item.name }}", --ignore-not-found, -o, name]
+  loop:
+    - {kind: deployment, name: coredns, phase: coredns}
+    - {kind: daemonset, name: kube-proxy, phase: kube-proxy}
+  register: kube_network_addons
+  changed_when: false
+
+- name: Restore only missing kubeadm-owned networking addons
+  ansible.builtin.command:
+    argv: [/usr/local/bin/kubeadm, init, phase, addon, "{{ item.item.phase }}", --config, /etc/kubernetes/homelab-init.yml]
+  loop: "{{ kube_network_addons.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  when: item.stdout | trim == ''
+  changed_when: true
+
+- name: Inspect ownership of any existing Flannel namespace
+  ansible.builtin.command:
+    argv: [/usr/local/bin/kubectl, --kubeconfig, /etc/kubernetes/admin.conf, get, namespace, kube-flannel, --ignore-not-found, -o, json]
+  register: kube_flannel_namespace
+  changed_when: false
+
+- name: Refuse to overwrite an unowned network installation
+  ansible.builtin.assert:
+    quiet: true
+    that:
+      - kube_flannel_namespace.stdout | trim == '' or (kube_flannel_namespace.stdout | from_json).metadata.get('labels', {}).get('homelab.io/kube-cluster-uid') == kube_cluster_plan.uid
+
+- name: Render the checksum-verified Flannel release with the selected pod CIDR
+  ansible.builtin.copy:
+    dest: /etc/kubernetes/homelab-flannel.json
+    content: "{{ (lookup('file', hostvars['localhost'].kube_artifact_root ~ '/flannel.yml') | from_yaml_all | list) | kube_flannel_objects(kube_cluster_plan) | to_nice_json }}\n"
+    owner: root
+    group: root
+    mode: '0600'
+  when: not hostvars['localhost'].kube_reuse_artifacts
+
+- name: Record the verified network manifest checksum
+  ansible.builtin.stat:
+    path: /etc/kubernetes/homelab-flannel.json
+    checksum_algorithm: sha256
+  register: kube_verified_flannel_file
+
+- name: Inspect differences in the owned Flannel resources
+  ansible.builtin.command:
+    argv: [/usr/local/bin/kubectl, --kubeconfig, /etc/kubernetes/admin.conf, diff, --server-side, --field-manager=homelab-kube, -f, /etc/kubernetes/homelab-flannel.json]
+  register: kube_flannel_diff
+  changed_when: false
+  failed_when: kube_flannel_diff.rc not in [0, 1]
+
+- name: Apply only changed pinned Flannel resources
+  ansible.builtin.command:
+    argv: [/usr/local/bin/kubectl, --kubeconfig, /etc/kubernetes/admin.conf, apply, --server-side, --field-manager=homelab-kube, -f, /etc/kubernetes/homelab-flannel.json]
+  when: kube_flannel_diff.rc == 1
+  changed_when: true
+
+- name: Wait for Flannel on currently joined nodes
+  ansible.builtin.command:
+    argv: [/usr/local/bin/kubectl, --kubeconfig, /etc/kubernetes/admin.conf, --namespace, kube-flannel, rollout, status, daemonset/kube-flannel-ds, --timeout=300s]
+  changed_when: false

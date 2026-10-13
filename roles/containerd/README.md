@@ -1,14 +1,22 @@
 # containerd
 
-Installs distro-packaged containerd and runc on installed Debian and Arch Linux
+The package entrypoint installs distro-packaged containerd and runc on installed Debian and Arch Linux
 systemd hosts. Owns `/etc/containerd/config.toml`, enables CRI, selects native
 containerd 1.x/2.x configuration and uses runc with systemd cgroups. Validates
 configuration with the installed containerd before replacing it, restarts only
 when packages/configuration change, enables the service and verifies CRI plugins.
-There are no runtime downloads or external package repositories.
+The package entrypoint uses no runtime downloads or external package repositories.
+
+The Kubernetes platform uses tasks/artifact_preflight.yml and tasks/artifacts.yml:
+exact upstream releases are verified/staged by the kube role on the unprivileged
+runner, then installed through this role under Server operation claims. The
+preflight checks all existing runtime namespaces and refuses disruptive binary,
+configuration or unit changes with active consumers. Unchanged installed runtimes
+are not restarted. Native CRI configuration, sandbox image and systemd service
+are verified. See the kube role README and Stigmergy's Kubernetes rollout guide.
 
 This is the runtime role, not cluster installation. The separate `kube` role is
-intended to own kubeadm/kubelet installation and init/join. This role does not
+owns kubeadm/kubelet installation and init/join. This role does not
 install Kubernetes or CNI, disable swap, change sysctls, join a cluster or reboot.
 CRI plugin readiness is not Kubernetes node or pod-network readiness.
 

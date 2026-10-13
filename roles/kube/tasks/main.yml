@@ -1,6 +1,9 @@
 ---
-# tasks file for kube
+- name: Require an explicit bounded Kubernetes stage
+  ansible.builtin.assert:
+    quiet: true
+    that:
+      - kube_stage in ['preflight', 'prepare', 'control_plane', 'join', 'verify']
 
-- name: Install Kubernetes on Debian
-  include_tasks: install_debian.yml
-  when: ansible_facts.os_family == 'Debian'
+- name: Run the selected kubeadm reconciliation stage
+  ansible.builtin.include_tasks: "{{ kube_stage }}.yml"

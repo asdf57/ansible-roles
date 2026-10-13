@@ -1,0 +1,86 @@
+---
+- name: Require any existing worker to belong to the verified cluster lifetime
+  ansible.builtin.assert:
+    quiet: true
+    that:
+      - kube_identity.get('clusterNamespaceUID', '') in ['', hostvars[kube_cluster_plan.controlPlane.name].kube_namespace_uid]
+
+- name: Reconcile workers with an owned short-lived token and cleanup
+  block:
+    - name: Create a short-lived join credential only when workers need joining
+      ansible.builtin.command:
+        argv: [/usr/local/bin/kubeadm, token, create, --ttl=10m, --print-join-command, --kubeconfig, /etc/kubernetes/admin.conf]
+      delegate_to: "{{ kube_cluster_plan.controlPlane.name }}"
+      run_once: true
+      register: kube_generated_join_command
+      when: groups['configuration_kube_workers'] | map('extract', hostvars, 'kube_kubelet_config_exists') | select('equalto', false) | list | length > 0
+      changed_when: true
+      no_log: true
+
+    - name: Narrow the generated credential and pinned CA hash
+      ansible.builtin.set_fact:
+        kube_join_token: "{{ kube_generated_join_command.stdout | regex_search('--token ([a-z0-9]{6}\\.[a-z0-9]{16})', '\\1') | first }}"
+        kube_join_ca_hash: "{{ kube_generated_join_command.stdout | regex_search('--discovery-token-ca-cert-hash (sha256:[a-f0-9]{64})', '\\1') | first }}"
+      when: not kube_kubelet_config_exists
+      no_log: true
+
+    - name: Record join intent before invoking kubeadm
+      ansible.builtin.copy:
+        dest: /var/lib/homelab/kube-cluster.json
+        content: "{{ {'identity': kube_expected_identity, 'phase': 'Joining', 'files': kube_installed_checksums, 'sandboxImage': containerd_sandbox_image, 'clusterNamespaceUID': hostvars[kube_cluster_plan.controlPlane.name].kube_namespace_uid} | to_nice_json }}\n"
+        owner: root
+        group: root
+        mode: '0600'
+      when: not kube_kubelet_config_exists
+
+    - name: Write a root-only worker join configuration
+      ansible.builtin.template:
+        src: kubeadm-join.yml.j2
+        dest: /etc/kubernetes/homelab-join.yml
+        owner: root
+        group: root
+        mode: '0600'
+      when: not kube_kubelet_config_exists
+      no_log: true
+
+    - name: Join only the uninitialized owned worker
+      ansible.builtin.command:
+        argv: [/usr/local/bin/kubeadm, join, --config, /etc/kubernetes/homelab-join.yml]
+      when: not kube_kubelet_config_exists
+      changed_when: true
+      no_log: true
+
+  always:
+    - name: Remove this workflow's root-only join credential file
+      ansible.builtin.file:
+        path: /etc/kubernetes/homelab-join.yml
+        state: absent
+      no_log: true
+
+    - name: Revoke only the token created by this pass
+      ansible.builtin.command:
+        argv: [/usr/local/bin/kubeadm, token, delete, "{{ (kube_generated_join_command.stdout | regex_search('--token ([a-z0-9]{6})\\.', '\\1') | first) }}", --kubeconfig, /etc/kubernetes/admin.conf]
+      delegate_to: "{{ kube_cluster_plan.controlPlane.name }}"
+      run_once: true
+      when: kube_generated_join_command is defined and kube_generated_join_command.get('stdout', '') is search('--token [a-z0-9]{6}\\.')
+      changed_when: true
+      no_log: true
+
+- name: Read the worker's installed CA fingerprint
+  ansible.builtin.command:
+    argv: [openssl, x509, -in, /etc/kubernetes/pki/ca.crt, -noout, -fingerprint, -sha256]
+  register: kube_worker_ca
+  changed_when: false
+
+- name: Read the verified control plane's public CA fingerprint
+  ansible.builtin.command:
+    argv: [openssl, x509, -in, /etc/kubernetes/pki/ca.crt, -noout, -fingerprint, -sha256]
+  delegate_to: "{{ kube_cluster_plan.controlPlane.name }}"
+  register: kube_control_ca
+  changed_when: false
+
+- name: Refuse worker trust in another cluster CA
+  ansible.builtin.assert:
+    quiet: true
+    that:
+      - kube_worker_ca.stdout == kube_control_ca.stdout

@@ -1,0 +1,74 @@
+---
+- name: Inspect the runner architecture
+  ansible.builtin.command:
+    argv: [uname, -m]
+  register: kube_runner_architecture
+  changed_when: false
+
+- name: Require a supported artifact runner
+  ansible.builtin.assert:
+    quiet: true
+    that:
+      - kube_runner_architecture.stdout in ['x86_64', 'aarch64']
+      - configuration_workspace is defined
+
+- name: Select exact release artifacts for all participating architectures
+  ansible.builtin.set_fact:
+    kube_artifact_root: "{{ configuration_workspace }}/kube-artifacts"
+    kube_artifacts_by_arch: {}
+    kube_artifact_architectures: "{{ (groups['configuration_kube_members'] | map('extract', hostvars, 'kube_arch') | list + [({'x86_64': 'amd64', 'aarch64': 'arm64'})[kube_runner_architecture.stdout]]) | unique | list }}"
+
+- name: Create private staging for verified public artifacts
+  ansible.builtin.file:
+    path: "{{ kube_artifact_root }}"
+    state: directory
+    mode: '0700'
+
+- name: Fetch and verify each exact architecture's artifacts
+  ansible.builtin.include_tasks: artifacts_architecture.yml
+  loop: "{{ kube_artifact_architectures }}"
+  loop_control:
+    loop_var: kube_artifact_arch
+
+- name: Derive the sandbox image from the pinned kubeadm binary
+  ansible.builtin.command:
+    argv:
+      - "{{ kube_artifact_root }}/{{ ({'x86_64': 'amd64', 'aarch64': 'arm64'})[kube_runner_architecture.stdout] }}/kubeadm"
+      - config
+      - images
+      - list
+      - "--kubernetes-version=v{{ kube_plan.settings.kubernetesVersion }}"
+  register: kube_required_images
+  changed_when: false
+
+- name: Require one kubeadm-selected sandbox image
+  ansible.builtin.assert:
+    quiet: true
+    that:
+      - kube_required_images.stdout_lines | select('match', '^registry.k8s.io/pause:') | list | length == 1
+
+- name: Record the concrete sandbox image
+  ansible.builtin.set_fact:
+    kube_sandbox_image: "{{ kube_required_images.stdout_lines | select('match', '^registry.k8s.io/pause:') | first }}"
+
+- name: Inspect the pinned Flannel release metadata
+  ansible.builtin.uri:
+    url: "https://api.github.com/repos/flannel-io/flannel/releases/tags/v{{ kube_plan.settings.network.version }}"
+    return_content: true
+    headers:
+      Accept: application/vnd.github+json
+  register: kube_flannel_release
+
+- name: Require an authenticated checksum for the release manifest
+  ansible.builtin.assert:
+    quiet: true
+    that:
+      - kube_flannel_release.json.assets | selectattr('name', 'equalto', 'kube-flannel.yml') | list | length == 1
+      - (kube_flannel_release.json.assets | selectattr('name', 'equalto', 'kube-flannel.yml') | first).digest is match('^sha256:[0-9a-f]{64}$')
+
+- name: Stage the exact Flannel manifest with its release checksum
+  ansible.builtin.get_url:
+    url: "https://github.com/flannel-io/flannel/releases/download/v{{ kube_plan.settings.network.version }}/kube-flannel.yml"
+    dest: "{{ kube_artifact_root }}/flannel.yml"
+    checksum: "{{ (kube_flannel_release.json.assets | selectattr('name', 'equalto', 'kube-flannel.yml') | first).digest }}"
+    mode: '0600'

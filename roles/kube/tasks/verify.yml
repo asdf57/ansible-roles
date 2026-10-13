@@ -1,0 +1,184 @@
+---
+- name: Announce actual cluster verification
+  ansible.builtin.debug:
+    msg: Verify exact API/runtime versions, owned Nodes, Flannel, CoreDNS and cross-node pod DNS/HTTP.
+
+- name: Wait for every selected Node to become Ready
+  ansible.builtin.command:
+    argv: "{{ ['/usr/local/bin/kubectl', '--kubeconfig', '/etc/kubernetes/admin.conf', 'wait', '--for=condition=Ready', '--timeout=300s'] + (kube_cluster_plan.members | map(attribute='nodeName') | map('regex_replace', '^', 'node/') | list) }}"
+  changed_when: false
+
+- name: Read actual Kubernetes Nodes
+  ansible.builtin.command:
+    argv: [/usr/local/bin/kubectl, --kubeconfig, /etc/kubernetes/admin.conf, get, nodes, -o, json]
+  register: kube_actual_nodes
+  changed_when: false
+
+- name: Verify actual Node ownership, roles, versions and non-overlapping pod subnets
+  ansible.builtin.set_fact:
+    kube_cluster_plan: "{{ kube_cluster_plan | kube_verify_nodes(kube_actual_nodes.stdout | from_json) }}"
+
+- name: Verify each Node uses its managed Server address
+  ansible.builtin.assert:
+    quiet: true
+    that:
+      - (kube_actual_nodes.stdout | from_json)['items'] | selectattr('metadata.name', 'equalto', item.nodeName) | map(attribute='status.addresses') | flatten | selectattr('type', 'equalto', 'InternalIP') | map(attribute='address') | list == [hostvars[item.name].ansible_host]
+  loop: "{{ kube_cluster_plan.members }}"
+  loop_control:
+    label: "{{ item.nodeName }}"
+
+- name: Mark the already verified workers with their ordinary Kubernetes role label
+  ansible.builtin.command:
+    argv: [/usr/local/bin/kubectl, --kubeconfig, /etc/kubernetes/admin.conf, label, node, "{{ item.nodeName }}", node-role.kubernetes.io/worker=]
+  loop: "{{ kube_cluster_plan.members | selectattr('role', 'equalto', 'worker') | list }}"
+  loop_control:
+    label: "{{ item.nodeName }}"
+  register: kube_worker_labels
+  changed_when: "' not labeled' not in kube_worker_labels.stdout"
+
+- name: Read the running Kubernetes API version
+  ansible.builtin.command:
+    argv: [/usr/local/bin/kubectl, --kubeconfig, /etc/kubernetes/admin.conf, version, -o, json]
+  register: kube_actual_versions
+  changed_when: false
+
+- name: Require the exact selected API server version
+  ansible.builtin.assert:
+    quiet: true
+    that:
+      - (kube_actual_versions.stdout | from_json).serverVersion.gitVersion == 'v' ~ kube_cluster_plan.settings.kubernetesVersion
+
+- name: Wait for Flannel on all selected nodes
+  ansible.builtin.command:
+    argv: [/usr/local/bin/kubectl, --kubeconfig, /etc/kubernetes/admin.conf, --namespace, kube-flannel, rollout, status, daemonset/kube-flannel-ds, --timeout=300s]
+  changed_when: false
+
+- name: Wait for CoreDNS deployment readiness
+  ansible.builtin.command:
+    argv: [/usr/local/bin/kubectl, --kubeconfig, /etc/kubernetes/admin.conf, --namespace, kube-system, rollout, status, deployment/coredns, --timeout=300s]
+  changed_when: false
+
+- name: Build bounded unprivileged network probes from the verified members
+  ansible.builtin.set_fact:
+    kube_probe_manifest: "{{ kube_cluster_plan | kube_probe_objects(kube_verification_image) }}"
+
+- name: Inspect ownership of the dedicated probe namespace
+  ansible.builtin.command:
+    argv: [/usr/local/bin/kubectl, --kubeconfig, /etc/kubernetes/admin.conf, get, namespace, homelab-verify, --ignore-not-found, -o, json]
+  register: kube_probe_namespace
+  changed_when: false
+
+- name: Refuse to adopt an unrelated namespace for verification
+  ansible.builtin.assert:
+    quiet: true
+    that:
+      - kube_probe_namespace.stdout | trim == '' or (kube_probe_namespace.stdout | from_json).metadata.get('labels', {}).get('homelab.io/kube-cluster-uid') == kube_cluster_plan.uid
+
+- name: Stage the public verification namespace declaration
+  ansible.builtin.copy:
+    dest: /etc/kubernetes/homelab-verify-namespace.json
+    content: "{{ kube_probe_manifest['items'][0] | to_nice_json }}\n"
+    owner: root
+    group: root
+    mode: '0600'
+
+- name: Create the owned verification namespace only when missing
+  ansible.builtin.command:
+    argv: [/usr/local/bin/kubectl, --kubeconfig, /etc/kubernetes/admin.conf, apply, -f, /etc/kubernetes/homelab-verify-namespace.json]
+  when: kube_probe_namespace.stdout | trim == ''
+  changed_when: true
+
+- name: Inspect existing exact probe pod identities before cleanup
+  ansible.builtin.command:
+    argv: [/usr/local/bin/kubectl, --kubeconfig, /etc/kubernetes/admin.conf, --namespace, homelab-verify, get, pod, "{{ item.metadata.name }}", --ignore-not-found, -o, json]
+  loop: "{{ kube_probe_manifest['items'][1:] }}"
+  loop_control:
+    label: "{{ item.metadata.name }}"
+  register: kube_prior_probes
+  changed_when: false
+
+- name: Require matching cluster and Server identity for any leftover probe
+  ansible.builtin.assert:
+    quiet: true
+    that:
+      - item.stdout | trim == '' or (item.stdout | from_json).metadata.labels == item.item.metadata.labels
+  loop: "{{ kube_prior_probes.results }}"
+  loop_control:
+    label: "{{ item.item.metadata.name }}"
+
+- name: Remove only previously owned exact probes before creating fresh ones
+  ansible.builtin.command:
+    argv: [/usr/local/bin/kubectl, --kubeconfig, /etc/kubernetes/admin.conf, --namespace, homelab-verify, delete, pod, "{{ item.item.metadata.name }}", --ignore-not-found, --timeout=60s]
+  loop: "{{ kube_prior_probes.results }}"
+  loop_control:
+    label: "{{ item.item.metadata.name }}"
+  when: item.stdout | trim != ''
+  changed_when: true
+
+- name: Run the bounded workload verification and always clean up its exact probes
+  block:
+    - name: Stage the public probe pod declarations
+      ansible.builtin.copy:
+        dest: /etc/kubernetes/homelab-verify-pods.json
+        content: "{{ {'apiVersion': 'v1', 'kind': 'List', 'items': kube_probe_manifest['items'][1:]} | to_nice_json }}\n"
+        owner: root
+        group: root
+        mode: '0600'
+
+    - name: Create the temporary managed probes
+      ansible.builtin.command:
+        argv: [/usr/local/bin/kubectl, --kubeconfig, /etc/kubernetes/admin.conf, apply, -f, /etc/kubernetes/homelab-verify-pods.json]
+      changed_when: true
+
+    - name: Wait for each probe on its explicitly selected node
+      ansible.builtin.command:
+        argv: [/usr/local/bin/kubectl, --kubeconfig, /etc/kubernetes/admin.conf, --namespace, homelab-verify, wait, --for=condition=Ready, "pod/{{ item.metadata.name }}", --timeout=180s]
+      loop: "{{ kube_probe_manifest['items'][1:] }}"
+      loop_control:
+        label: "{{ item.spec.nodeName }}"
+      changed_when: false
+
+    - name: Read the exact running probe endpoints
+      ansible.builtin.command:
+        argv: [/usr/local/bin/kubectl, --kubeconfig, /etc/kubernetes/admin.conf, --namespace, homelab-verify, get, pod, "{{ item.metadata.name }}", -o, json]
+      loop: "{{ kube_probe_manifest['items'][1:] }}"
+      loop_control:
+        label: "{{ item.spec.nodeName }}"
+      register: kube_probe_endpoints
+      changed_when: false
+
+    - name: Verify Kubernetes service DNS from every selected node's pod
+      ansible.builtin.command:
+        argv: [/usr/local/bin/kubectl, --kubeconfig, /etc/kubernetes/admin.conf, --namespace, homelab-verify, exec, "{{ item.metadata.name }}", --, nslookup, kubernetes.default.svc.cluster.local]
+      loop: "{{ kube_probe_manifest['items'][1:] }}"
+      loop_control:
+        label: "{{ item.spec.nodeName }}"
+      changed_when: false
+
+    - name: Verify HTTP connectivity between every ordered pair of pod endpoints
+      ansible.builtin.command:
+        argv: [/usr/local/bin/kubectl, --kubeconfig, /etc/kubernetes/admin.conf, --namespace, homelab-verify, exec, "{{ item.0.item.metadata.name }}", --, wget, -q, -T, '15', -O, '-', "http://{{ (item.1.stdout | from_json).status.podIP }}:8080/"]
+      loop: "{{ kube_probe_endpoints.results | product(kube_probe_endpoints.results) | list }}"
+      loop_control:
+        label: "{{ item.0.item.spec.nodeName }} -> {{ item.1.item.spec.nodeName }}"
+      register: kube_probe_http
+      changed_when: false
+      failed_when: kube_probe_http.rc != 0 or kube_probe_http.stdout | trim != 'homelab networking ok'
+
+  always:
+    - name: Delete only this workflow's exact owned probe pods
+      ansible.builtin.command:
+        argv: [/usr/local/bin/kubectl, --kubeconfig, /etc/kubernetes/admin.conf, --namespace, homelab-verify, delete, pod, "{{ item.metadata.name }}", --ignore-not-found, --timeout=60s]
+      loop: "{{ kube_probe_manifest['items'][1:] }}"
+      loop_control:
+        label: "{{ item.metadata.name }}"
+      register: kube_probe_cleanup
+      changed_when: "' deleted' in kube_probe_cleanup.stdout"
+
+- name: Publish only verified public cluster observations to the operator workspace
+  ansible.builtin.copy:
+    dest: "{{ configuration_workspace }}/result.json"
+    content: "{{ {'clusterUID': kube_cluster_plan.uid, 'clusterNamespaceUID': kube_namespace_uid, 'kubernetesVersion': kube_cluster_plan.settings.kubernetesVersion, 'containerdVersion': kube_cluster_plan.settings.containerdVersion, 'network': kube_cluster_plan.settings.network, 'nodes': kube_cluster_plan.members} | to_nice_json }}\n"
+    mode: '0600'
+  delegate_to: localhost
+  become: false

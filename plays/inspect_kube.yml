@@ -1,0 +1,30 @@
+---
+# Deliberately separate from configure_kube.yml: successful inspection is not
+# a successfully installed cluster. No node installation is implemented here.
+- name: Plan the Kubernetes cluster from Configuration context and captured labels
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  tasks:
+    - name: Plan the selected cluster through the Kubernetes role
+      ansible.builtin.import_role:
+        name: kube
+        tasks_from: plan
+
+- name: Inspect selected installed nodes without changing their configuration
+  hosts: configuration_kube_members
+  gather_facts: true
+  become: false
+  tasks:
+    - name: Run the Kubernetes host preflight
+      ansible.builtin.include_role:
+        name: kube
+        tasks_from: preflight
+
+    - name: Inspect installation ownership and connected networks
+      ansible.builtin.include_role:
+        name: kube
+        tasks_from: identity
+        apply:
+          become: true

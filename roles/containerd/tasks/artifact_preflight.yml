@@ -1,0 +1,90 @@
+---
+- name: Select the already verified runtime artifact identities
+  ansible.builtin.set_fact:
+    containerd_major_version: "{{ kube_cluster_plan.settings.containerdVersion.split('.')[0] | int }}"
+    containerd_sandbox_image: "{{ hostvars['localhost'].kube_sandbox_image }}"
+    containerd_node_artifacts: "{{ kube_existing_artifacts if hostvars['localhost'].kube_reuse_artifacts else hostvars['localhost'].kube_artifacts_by_arch[kube_arch] }}"
+
+- name: Inspect runtime consumers before any installation
+  ansible.builtin.service_facts:
+
+- name: Inspect every destination binary without following links
+  ansible.builtin.stat:
+    path: "{{ item.item.dest }}"
+    checksum_algorithm: sha256
+    follow: false
+  loop: "{{ containerd_node_artifacts }}"
+  loop_control:
+    label: "{{ item.item.dest }}"
+  register: kube_destination_binaries
+
+- name: Require regular root-owned existing binaries
+  ansible.builtin.assert:
+    quiet: true
+    that:
+      - not item.stat.exists or (item.stat.isreg and not item.stat.islnk and item.stat.uid == 0)
+  loop: "{{ kube_destination_binaries.results }}"
+  loop_control:
+    label: "{{ item.item.item.dest }}"
+
+- name: Compute changes to pinned binaries
+  ansible.builtin.set_fact:
+    kube_binary_changes: "{{ (kube_destination_binaries.results | kube_changed_binaries).paths }}"
+
+- name: Inspect all existing runtime namespaces before deciding whether changes are safe
+  ansible.builtin.command:
+    argv: [ctr, namespaces, list, --quiet]
+  register: kube_existing_runtime_namespaces
+  changed_when: false
+  when: ansible_facts.services.get('containerd.service', {}).get('state', '') == 'running'
+
+- name: Inspect running tasks in every existing namespace
+  ansible.builtin.command:
+    argv: [ctr, --namespace, "{{ item }}", tasks, list, --quiet]
+  loop: "{{ kube_existing_runtime_namespaces.get('stdout_lines', []) }}"
+  register: kube_existing_runtime_tasks
+  changed_when: false
+
+- name: Record whether any runtime workloads are active
+  ansible.builtin.set_fact:
+    kube_runtime_has_tasks: "{{ kube_existing_runtime_tasks.results | default([]) | map(attribute='stdout') | map('trim') | reject('equalto', '') | list | length > 0 }}"
+
+- name: Inspect the runtime and kubelet service configuration identities
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    checksum_algorithm: sha256
+    follow: false
+  loop:
+    - /etc/containerd/config.toml
+    - /etc/systemd/system/containerd.service
+    - /etc/systemd/system/kubelet.service
+  register: kube_service_files
+
+- name: Require regular root-owned service configuration
+  ansible.builtin.assert:
+    quiet: true
+    that:
+      - not item.stat.exists or (item.stat.isreg and not item.stat.islnk and item.stat.uid == 0)
+  loop: "{{ kube_service_files.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Compare desired service settings without changing them
+  ansible.builtin.set_fact:
+    kube_runtime_configuration_matches: "{{ kube_service_files.results[0].stat.get('checksum', '') == (lookup('template', 'config.toml.j2') | hash('sha256')) }}"
+    kube_service_units_match: >-
+      {{ kube_service_files.results[1].stat.get('checksum', '') == (lookup('template', 'containerd.service.j2') | hash('sha256')) and
+         kube_service_files.results[2].stat.get('checksum', '') == (lookup('template', role_path ~ '/../kube/templates/kubelet.service.j2') | hash('sha256')) }}
+    kube_consumers_active: "{{ (kube_kubelet_config_exists and ansible_facts.services.get('kubelet.service', {}).get('state', '') == 'running') or kube_runtime_has_tasks }}"
+
+- name: Refuse disruptive runtime or kubelet changes with active consumers
+  ansible.builtin.assert:
+    quiet: true
+    that:
+      - ansible_facts.services.get('docker.service', {}).get('state', '') != 'running'
+      - ansible_facts.services.get('kubelet.service', {}).get('state', '') != 'running' or ansible_facts.swaptotal_mb == 0
+      - not kube_runtime_has_tasks or ansible_facts.swaptotal_mb == 0
+      - >-
+        not kube_consumers_active or
+        (kube_binary_changes | length == 0 and kube_runtime_configuration_matches and kube_service_units_match)
+    fail_msg: Running workloads would require binary/configuration changes. Use a reviewed maintenance/upgrade workflow, not periodic reconciliation.
