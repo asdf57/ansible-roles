@@ -380,6 +380,69 @@ class KubernetesPlanTests(unittest.TestCase):
                                         timeout=60)
                 self.assertEqual(result.returncode == 0, valid, result.stdout + result.stderr)
 
+    def test_runner_tasks_override_captured_node_escalation(self):
+        root = Path(__file__).resolve().parents[2]
+        with tempfile.TemporaryDirectory() as directory:
+            inventory = Path(directory) / 'inventory.json'
+            inventory.write_text(
+                json.dumps({
+                    'all': {
+                        'vars': {
+                            'ansible_become': True
+                        },
+                        'hosts': {
+                            'localhost': {
+                                'ansible_connection': 'local'
+                            }
+                        }
+                    }
+                }), encoding='utf-8')
+            local_plays = []
+            for filename in ('configure_kube.yml', 'inspect_kube.yml'):
+                source = yaml.safe_load((root / 'plays' / filename).read_text(encoding='utf-8'))
+                for source_play in source:
+                    if source_play['hosts'] != 'localhost':
+                        continue
+                    local_plays.append({
+                        'hosts':
+                        'localhost',
+                        'gather_facts':
+                        False,
+                        'vars':
+                        source_play['vars'],
+                        'tasks': [{
+                            'ansible.builtin.command': {
+                                'argv': ['id', '-u']
+                            },
+                            'register': 'runner_uid',
+                            'changed_when': False
+                        }, {
+                            'ansible.builtin.assert': {
+                                'quiet': True,
+                                'that': [f'runner_uid.stdout | int == {os.getuid()}']
+                            }
+                        }]
+                    })
+            result_task = yaml.safe_load(
+                (root / 'roles/kube/tasks/verify.yml').read_text(encoding='utf-8'))[-1]
+            local_plays.append({
+                'hosts': 'localhost',
+                'gather_facts': False,
+                'vars': {
+                    'configuration_workspace': directory,
+                    'kube_namespace_uid': 'fixture',
+                    'kube_cluster_plan': self.plan()
+                },
+                'tasks': [result_task]
+            })
+            play = Path(directory) / 'local.json'
+            play.write_text(json.dumps(local_plays), encoding='utf-8')
+            result = subprocess.run(
+                ['ansible-playbook', '-i', str(inventory),
+                 str(play)], capture_output=True, text=True, check=False, timeout=60)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual((Path(directory) / 'result.json').stat().st_uid, os.getuid())
+
     def test_all_role_stages_compile_without_executing_remote_tasks(self):
         root = Path(__file__).resolve().parents[2]
         stages = [('kube', name)

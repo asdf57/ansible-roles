@@ -4,6 +4,12 @@
   connection: local
   gather_facts: false
   become: false
+  vars:
+    # Connection variables outrank play keywords; captured all.vars enables
+    # become for nodes, but must never escalate the artifact controller.
+    ansible_become: false
+    ansible_connection: local
+    ansible_python_interpreter: "{{ ansible_playbook_python }}"
   any_errors_fatal: true
   tasks:
     - name: Plan the selected cluster through the Kubernetes role
@@ -32,6 +38,10 @@
   connection: local
   gather_facts: false
   become: false
+  vars:
+    ansible_become: false
+    ansible_connection: local
+    ansible_python_interpreter: "{{ ansible_playbook_python }}"
   any_errors_fatal: true
   pre_tasks:
     - name: Refuse rebuilding a lost control plane under the same cluster identity
