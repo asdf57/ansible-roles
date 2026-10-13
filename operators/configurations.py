@@ -427,6 +427,18 @@ def run_plays(api: API, resolved: Plan, source: Path, play: Path, directory: Pat
                 os.environ[name] = value
 
 
+def refresh_claim_target(api: API, server: Resource) -> None:
+    """Refresh heartbeat-only revisions without accepting changed execution inputs."""
+    latest = api.get('servers', server['metadata']['name'])
+    if (latest['metadata'].get('deletionTimestamp')
+            or member_inputs(latest) != member_inputs(server)
+            or latest['status'].get('hostSSH') != server['status'].get('hostSSH')):
+        raise OperatorError('InputsChanged', 'Server inputs changed before operation acquisition')
+    # Checkout/inventory preparation can outlive several agent reports. The CAS
+    # must use a fresh revision; reservation still refuses actual held ownership.
+    server.update(latest)
+
+
 def execute(api: API, resolved: Plan, source: Path, directory: Path) -> None:
     """Claim all selected hosts, verify installed sessions, execute and recheck inputs."""
     configuration = resolved.configuration
@@ -434,6 +446,7 @@ def execute(api: API, resolved: Plan, source: Path, directory: Path) -> None:
     prepare_execution(api, resolved, directory)
     with ExitStack() as owners:
         for server in resolved.servers:
+            refresh_claim_target(api, server)
             owners.enter_context(reservation(api, server))
         refreshed = plan(api, configuration)
         if refreshed.input_revision != resolved.input_revision:

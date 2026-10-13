@@ -131,6 +131,27 @@ class ConfigurationTests(unittest.TestCase):
         patch.object(executor, 'capture_inventory', return_value=(self.group, {})).start()
         patch.object(executor, 'resolved_inventory_hosts', return_value={'node': {}}).start()
 
+    def test_claim_refresh_accepts_heartbeat_revision_only(self):
+        snapshot = copy.deepcopy(self.server)
+        self.server['metadata']['resourceVersion'] = '2'
+        self.server['status']['agent'] = {'lastSeenTime': '2026-10-13T00:00:00Z'}
+        executor.refresh_claim_target(self.api, snapshot)
+        self.assertEqual(snapshot['metadata']['resourceVersion'], '2')
+
+    def test_claim_refresh_refuses_changed_identity_or_transport(self):
+        snapshot = copy.deepcopy(self.server)
+        self.server['metadata']['uid'] = 'changed'
+        with self.assertRaises(OperatorError):
+            executor.refresh_claim_target(self.api, snapshot)
+        self.server['metadata']['uid'] = snapshot['metadata']['uid']
+        self.server['metadata']['generation'] = 2
+        with self.assertRaises(OperatorError):
+            executor.refresh_claim_target(self.api, snapshot)
+        self.server['metadata']['generation'] = 1
+        executor.mapping(self.server['status'], 'hostSSH')['phase'] = 'Pending'
+        with self.assertRaises(OperatorError):
+            executor.refresh_claim_target(self.api, snapshot)
+
     def test_ordering_and_cycles(self):
         dependent = copy.deepcopy(self.configuration)
         dependent['metadata']['name'] = 'dependent'
