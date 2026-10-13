@@ -29,15 +29,15 @@
       ansible.builtin.assert:
         quiet: true
         that:
-          - reservation_before.message | length == 1
-          - reservation_before.message[0]['mac-address'] | lower == reservation_mac | lower
-          - reservation_before.message[0].status == 'bound'
+          - reservation_before.msg | length == 1
+          - reservation_before.msg[0]['mac-address'] | lower == reservation_mac | lower
+          - reservation_before.msg[0].status == 'bound'
         fail_msg: The address is not uniquely bound to the approved MAC; inspect DHCP rather than changing another lease.
 
     - name: Make only the validated dynamic lease static
       community.routeros.api:
-        cmd: "make-static .id={{ reservation_before.message[0]['.id'] }}"
-      when: reservation_before.message[0].dynamic | bool
+        cmd: "make-static .id={{ reservation_before.msg[0]['.id'] }}"
+      when: reservation_before.msg[0].dynamic | bool
       changed_when: true
       no_log: true
 
@@ -52,7 +52,7 @@
       ansible.builtin.assert:
         quiet: true
         that:
-          - reservation_after.message | length == 1
-          - reservation_after.message[0]['mac-address'] | lower == reservation_mac | lower
-          - not reservation_after.message[0].dynamic | bool
+          - reservation_after.msg | length == 1
+          - reservation_after.msg[0]['mac-address'] | lower == reservation_mac | lower
+          - not reservation_after.msg[0].dynamic | bool
         success_msg: The approved address is statically reserved without changing the node's current connectivity.
