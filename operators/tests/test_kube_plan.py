@@ -380,6 +380,22 @@ class KubernetesPlanTests(unittest.TestCase):
                                         timeout=60)
                 self.assertEqual(result.returncode == 0, valid, result.stdout + result.stderr)
 
+    def test_swap_policy_manages_definitions_not_active_device_aliases(self):
+        root = Path(__file__).resolve().parents[2]
+        tasks = yaml.safe_load((root / 'roles/kube/tasks/swap.yml').read_text(encoding='utf-8'))
+        commands = [
+            task['ansible.builtin.command']['argv'] for task in tasks
+            if 'ansible.builtin.command' in task
+        ]
+        self.assertTrue(any('list-unit-files' in command for command in commands))
+        self.assertFalse(any('list-units' in command for command in commands))
+        self.assertEqual(commands.count(['swapoff', '--all']), 1)
+        self.assertEqual(commands[-1], ['swapon', '--show', '--noheadings'])
+        for task in tasks:
+            if 'ansible.builtin.systemd_service' in task:
+                self.assertNotIn('state', task['ansible.builtin.systemd_service'])
+        self.assertIn('ansible.builtin.assert', tasks[-1])
+
     def test_runner_tasks_override_captured_node_escalation(self):
         root = Path(__file__).resolve().parents[2]
         with tempfile.TemporaryDirectory() as directory:
@@ -447,7 +463,7 @@ class KubernetesPlanTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[2]
         stages = [('kube', name)
                   for name in ('plan', 'artifacts', 'artifacts_architecture', 'preflight',
-                               'identity', 'prepare', 'control_plane', 'join', 'verify')]
+                               'identity', 'prepare', 'swap', 'control_plane', 'join', 'verify')]
         stages += [('containerd', 'artifact_preflight'), ('containerd', 'artifacts')]
         tasks = [{
             'name': 'Parse ' + role + '/' + stage,

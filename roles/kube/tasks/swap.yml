@@ -1,0 +1,49 @@
+---
+- name: Disable persistent fstab swap while preserving its disk partitions
+  ansible.builtin.replace:
+    path: /etc/fstab
+    regexp: '^(?!#)(\S+\s+\S+\s+swap\s+.*)$'
+    replace: '# Kubernetes disabled swap: \1'
+
+- name: Regenerate systemd units from the desired fstab configuration
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+
+- name: Inspect only remaining file-backed swap unit definitions
+  ansible.builtin.command:
+    argv: [systemctl, list-unit-files, --type=swap, '--state=enabled,enabled-runtime,disabled,static,generated', --no-legend, --no-pager]
+  register: kube_persistent_swap_units
+  changed_when: false
+
+- name: Prevent remaining native or generated swap definitions from reactivating
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    masked: true
+  # list-units reports every device alias for active swap. Mask definitions only;
+  # never stop each alias or try to manage ephemeral diskseq names separately.
+  loop: "{{ kube_persistent_swap_units.stdout_lines | map('split') | map('first') | unique | list }}"
+
+- name: Inspect actual active swap devices and files
+  ansible.builtin.command:
+    argv: [swapon, --show, --noheadings]
+  register: kube_active_swap
+  changed_when: false
+
+- name: Disable active swap once through the kernel swap interface
+  ansible.builtin.command:
+    argv: [swapoff, --all]
+  when: kube_active_swap.stdout | trim != ''
+  changed_when: true
+
+- name: Read back active swap after applying the NoSwap policy
+  ansible.builtin.command:
+    argv: [swapon, --show, --noheadings]
+  register: kube_verified_swap
+  changed_when: false
+
+- name: Require the node to have no active swap before kubelet installation
+  ansible.builtin.assert:
+    quiet: true
+    that:
+      - kube_verified_swap.stdout | trim == ''
+    fail_msg: Swap is still active; resolve its manager before running the NoSwap kubelet.

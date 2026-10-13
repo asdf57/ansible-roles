@@ -143,6 +143,21 @@
     checksum_algorithm: sha256
   register: kube_verified_flannel_file
 
+- name: Read the verified public network declaration for initial namespace creation
+  ansible.builtin.slurp:
+    src: /etc/kubernetes/homelab-flannel.json
+  register: kube_verified_flannel_content
+  when: kube_flannel_namespace.stdout | trim == ''
+
+- name: Create the owned Flannel namespace before dry-running namespaced resources
+  ansible.builtin.command:
+    argv: [/usr/local/bin/kubectl, --kubeconfig, /etc/kubernetes/admin.conf, create, --field-manager=homelab-kube, -f, '-']
+    stdin: "{{ (kube_verified_flannel_content.content | b64decode | from_json)['items'] | selectattr('kind', 'equalto', 'Namespace') | first | to_json }}"
+  # Server-side dry-run cannot persist a new namespace for later requests in
+  # the List. Create its checksum-verified, UID-labelled declaration first.
+  when: kube_flannel_namespace.stdout | trim == ''
+  changed_when: true
+
 - name: Inspect differences in the owned Flannel resources
   ansible.builtin.command:
     argv: [/usr/local/bin/kubectl, --kubeconfig, /etc/kubernetes/admin.conf, diff, --server-side, --field-manager=homelab-kube, -f, /etc/kubernetes/homelab-flannel.json]
