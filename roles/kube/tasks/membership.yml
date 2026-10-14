@@ -123,9 +123,17 @@
   ansible.builtin.set_fact:
     kube_membership_action: "{{ kube_cluster_plan | kube_registration_action({'serverUID': configuration_server_uid, 'nodeName': kube_node_name, 'role': kube_node_role, 'address': ansible_host, 'node': kube_member_registered.stdout | from_json}) }}"
 
-- name: Restore only the managed identity and role labels on this Node revision
+- name: Reconcile managed labels atomically against Node lifetime and label ownership
   ansible.builtin.command:
-    argv: "{{ ['/usr/local/bin/kubectl', '--kubeconfig=/etc/kubernetes/admin.conf', '--request-timeout=15s', 'label', 'node', kube_node_name, '--overwrite', '--resource-version=' ~ (kube_member_registered.stdout | from_json).metadata.resourceVersion] + kube_membership_action.labelArguments }}"
+    argv:
+      - /usr/local/bin/kubectl
+      - --kubeconfig=/etc/kubernetes/admin.conf
+      - --request-timeout=15s
+      - patch
+      - node
+      - "{{ kube_node_name }}"
+      - --type=json
+      - "--patch={{ kube_membership_action.labelPatch | to_json }}"
   delegate_to: "{{ kube_cluster_plan.controlPlane.name }}"
   when: kube_membership_action.labelsChanged
   changed_when: true

@@ -134,10 +134,21 @@
   become: true
   any_errors_fatal: true
   tasks:
-    - name: Restore missing registration without reset or kubeadm join replay
-      ansible.builtin.include_role:
-        name: kube
-        tasks_from: membership
+    - name: Reconcile membership and observe the actual outcome on failure as well
+      block:
+        - name: Restore missing registration without reset or kubeadm join replay
+          ansible.builtin.include_role:
+            name: kube
+            tasks_from: membership
+
+      always:
+        - name: Observe actual membership after any registration or label changes
+          ansible.builtin.include_role:
+            name: kube
+            tasks_from: observe
+            apply:
+              delegate_to: "{{ kube_cluster_plan.controlPlane.name }}"
+          run_once: true
 
 - name: Verify the actual cluster and cross-node workload networking
   hosts: configuration_kube_control_plane

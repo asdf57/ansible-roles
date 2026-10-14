@@ -348,10 +348,20 @@ class KubernetesPlanTests(unittest.TestCase):
         result = self.registration(worker)
         self.assertFalse(result['missing'])
         self.assertTrue(result['labelsChanged'])
-        arguments = result['labelArguments']
-        if not isinstance(arguments, list):
-            self.fail('Expected managed label arguments')
-        self.assertIn('node-role.kubernetes.io/control-plane-', arguments)
+        patch = result['labelPatch']
+        if not isinstance(patch, list):
+            self.fail('Expected managed label patch')
+        self.assertIn(
+            {
+                'op': 'remove',
+                'path': '/metadata/labels/node-role.kubernetes.io~1control-plane'
+            }, patch)
+        self.assertEqual(patch[0], {'op': 'test', 'path': '/metadata/uid', 'value': 'node-beelink'})
+        self.assertEqual(mapping(patch[1], 'label test')['path'], '/metadata/labels')
+        self.assertFalse(
+            any(
+                mapping(operation, 'patch')['path'] == '/metadata/resourceVersion'
+                for operation in patch))
 
     def test_foreign_node_and_wrong_address_are_never_adopted(self):
         worker = self.worker_node()

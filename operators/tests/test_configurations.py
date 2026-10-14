@@ -334,7 +334,7 @@ class ConfigurationTests(unittest.TestCase):
             self.assertEqual(request.call_args.args[3]['metadata'], {'uid': 'lab-uid'})
             self.assertEqual(request.call_args.args[4]['If-Match'], '"1"')
 
-    def test_failed_work_never_publishes_target_observations(self):
+    def test_failed_work_never_publishes_verified_target_status(self):
         resolved = executor.plan(self.api, self.configuration)
         with tempfile.TemporaryDirectory() as directory, \
                 patch.object(executor, 'checkout', return_value=Path('/fixture/plays/setup.yml')), \

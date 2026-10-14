@@ -400,7 +400,7 @@ def registration_action(raw_plan: JSONValue, raw_request: JSONValue) -> JSONObje
         raise ValueError('Host is not the selected cluster member')
     node = mapping(request.get('node'), 'actual Node')
     if not node:
-        return {'missing': True, 'labelsChanged': False, 'labelArguments': []}
+        return {'missing': True, 'labelsChanged': False, 'labelPatch': []}
     metadata = mapping(node.get('metadata'), 'Node metadata')
     if metadata.get('name') != request.get('nodeName') or not metadata.get('uid'):
         raise ValueError('Actual Node identity does not match the selected member')
@@ -420,17 +420,47 @@ def registration_action(raw_plan: JSONValue, raw_request: JSONValue) -> JSONObje
         raise ValueError('Node address does not match the managed Server')
     opposite_role = 'worker' if member.get('role') == 'control-plane' else 'control-plane'
     opposite_label = 'node-role.kubernetes.io/' + opposite_role
-    arguments: list[JSONValue] = [key + '=' + value for key, value in desired.items()]
-    if opposite_label in labels:
-        arguments.append(opposite_label + '-')
     return {
         'missing':
         False,
         'labelsChanged':
         any(labels.get(key) != value for key, value in desired.items()) or opposite_label in labels,
-        'labelArguments':
-        arguments,
+        'labelPatch':
+        managed_label_patch(metadata, desired, opposite_label),
     }
+
+
+def managed_label_patch(metadata: JSONObject, desired: dict[str, str],
+                        opposite: str) -> list[JSONValue]:
+    """Guard Node lifetime and label ownership without racing status heartbeats.
+
+    JSON Patch tests and updates are atomic. Preserve unrelated labels and
+    refuse concurrent label changes. A completely absent map needs an RV test
+    before creating it, so that we never replace labels added after our read.
+    """
+    patch: list[JSONValue] = [{'op': 'test', 'path': '/metadata/uid', 'value': metadata['uid']}]
+    labels = mapping(metadata.get('labels', {}), 'Node labels')
+    if 'labels' in metadata:
+        patch.append({'op': 'test', 'path': '/metadata/labels', 'value': labels})
+    else:
+        patch.extend([
+            {
+                'op': 'test',
+                'path': '/metadata/resourceVersion',
+                'value': text(metadata.get('resourceVersion'), 'Node resource version')
+            },
+            {
+                'op': 'add',
+                'path': '/metadata/labels',
+                'value': {}
+            },
+        ])
+    for key, value in desired.items():
+        path = '/metadata/labels/' + key.replace('~', '~0').replace('/', '~1')
+        patch.append({'op': 'add', 'path': path, 'value': value})
+    if opposite in labels:
+        patch.append({'op': 'remove', 'path': '/metadata/labels/' + opposite.replace('/', '~1')})
+    return patch
 
 
 def membership_observation(raw_plan: JSONValue, raw_response: JSONValue) -> JSONObject:
