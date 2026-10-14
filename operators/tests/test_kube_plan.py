@@ -297,6 +297,49 @@ class KubernetesPlanTests(unittest.TestCase):
         self.assertFalse(self.registration(self.worker_node())['missing'])
         self.assertFalse(self.registration(self.worker_node())['labelsChanged'])
 
+    def test_real_endpoint_guard_requires_the_single_declared_cluster_endpoint(self):
+        root = Path(__file__).resolve().parents[2]
+        tasks = yaml.safe_load(
+            (root / 'roles/kube/tasks/membership.yml').read_text(encoding='utf-8'))
+        guard = next(task for task in tasks
+                     if task['name'] == 'Refuse registration against another API endpoint')
+        with tempfile.TemporaryDirectory() as directory:
+            play = Path(directory) / 'endpoint.json'
+            for endpoint, succeeds in (
+                ('https://kube-api.lab.example.test:6443', True),
+                ('https://192.0.2.1:6443', False),
+                ('https://192.0.2.99:6443', False),
+                ('https://192.0.2.1:443', False),
+            ):
+                play.write_text(
+                    json.dumps([{
+                        'hosts':
+                        'localhost',
+                        'connection':
+                        'local',
+                        'gather_facts':
+                        False,
+                        'vars': {
+                            'ansible_become': False,
+                            'kube_cluster_plan': self.plan(),
+                            'kube_member_endpoint': {
+                                'stdout': endpoint
+                            }
+                        },
+                        'tasks': [{
+                            'ansible.builtin.add_host': {
+                                'name': 'zima',
+                                'ansible_host': '192.0.2.1'
+                            }
+                        }, guard]
+                    }]), encoding='utf-8')
+                result = subprocess.run(['ansible-playbook', '-i', 'localhost,',
+                                         str(play)], capture_output=True, text=True, timeout=30,
+                                        check=False)
+                with self.subTest(endpoint=endpoint):
+                    self.assertEqual(result.returncode == 0, succeeds,
+                                     result.stdout + result.stderr)
+
     def test_owned_label_drift_is_repaired_without_restart(self):
         worker = self.worker_node()
         labels = mapping(mapping(worker['metadata'], 'metadata')['labels'], 'labels')

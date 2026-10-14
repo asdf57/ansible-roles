@@ -26,8 +26,10 @@ Neither role queries Stigmergy or creates a separate reconciliation controller.
    Then reconcile actual registration for every initialized member: authenticate
    its existing kubelet identity against the intended endpoint, check installed
    ownership and actual Node identity/address, and restore managed labels with a
-   resourceVersion precondition. Only a missing Node permits one kubelet restart
-   to re-register itself. A healthy or merely NotReady member is not restarted;
+   resourceVersion precondition. Every kubelet config is standardized on exactly
+   KubeCluster.spec.controlPlaneEndpoint. A corrected endpoint or missing Node
+   permits one kubelet restart to apply config/re-register itself. A healthy,
+   already canonical or merely NotReady member is not restarted;
    no bootstrap replay, reset, certificate deletion or manual Node fabrication.
 8. Verify versions, managed Node identities/roles/addresses/pod CIDRs, Ready,
    Flannel and CoreDNS. Run unprivileged temporary pods on each node to check

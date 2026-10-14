@@ -37,6 +37,37 @@
   register: kube_member_endpoint
   changed_when: false
 
+- name: Read the existing kubelet cluster entry name without exposing credentials
+  ansible.builtin.command:
+    argv: [/usr/local/bin/kubectl, --kubeconfig=/etc/kubernetes/kubelet.conf, config, view, --minify, '-o=jsonpath={.contexts[0].context.cluster}']
+  register: kube_member_cluster_entry
+  changed_when: false
+
+- name: Require a concrete kubelet cluster entry before reconciling its endpoint
+  ansible.builtin.assert:
+    quiet: true
+    that:
+      - kube_member_cluster_entry.stdout is match('^[a-zA-Z0-9][a-zA-Z0-9._-]*$')
+
+- name: Standardize the owned kubelet config on the single declared API endpoint
+  ansible.builtin.command:
+    argv:
+      - /usr/local/bin/kubectl
+      - --kubeconfig=/etc/kubernetes/kubelet.conf
+      - config
+      - set-cluster
+      - "{{ kube_member_cluster_entry.stdout }}"
+      - "--server=https://{{ kube_cluster_plan.settings.controlPlaneEndpoint }}"
+  when: kube_member_endpoint.stdout != 'https://' ~ kube_cluster_plan.settings.controlPlaneEndpoint
+  register: kube_member_endpoint_reconciled
+  changed_when: true
+
+- name: Read back the canonical kubelet API endpoint
+  ansible.builtin.command:
+    argv: [/usr/local/bin/kubectl, --kubeconfig=/etc/kubernetes/kubelet.conf, config, view, --minify, '-o=jsonpath={.clusters[0].cluster.server}']
+  register: kube_member_endpoint
+  changed_when: false
+
 - name: Refuse registration against another API endpoint
   ansible.builtin.assert:
     quiet: true
@@ -67,11 +98,11 @@
   ansible.builtin.set_fact:
     kube_membership_action: "{{ kube_cluster_plan | kube_registration_action({'serverUID': configuration_server_uid, 'nodeName': kube_node_name, 'role': kube_node_role, 'address': ansible_host, 'node': (kube_member_node.stdout | from_json) if kube_member_node.stdout | trim else {}}) }}"
 
-- name: Restart only a configured kubelet whose Node registration was deleted
+- name: Restart kubelet only for a corrected endpoint or missing registration
   ansible.builtin.systemd_service:
     name: kubelet
     state: restarted
-  when: kube_membership_action.missing
+  when: kube_membership_action.missing or kube_member_endpoint_reconciled.changed
   # A running kubelet remembers completed registration even after Node deletion.
   # Keep its identity and workload state; restarting registration is not a rejoin.
 
