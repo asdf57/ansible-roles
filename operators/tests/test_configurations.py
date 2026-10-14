@@ -1,6 +1,7 @@
 """Configuration safety tests never connect to or mutate managed nodes."""
 import copy
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -45,7 +46,11 @@ class FixtureAPI(API):
         ]
 
     def patch_status(self, server: Resource, status: JSONObject) -> Resource:
-        collection = {'Configuration': 'configurations', 'Server': 'servers'}[server['kind']]
+        collection = {
+            'Configuration': 'configurations',
+            'Server': 'servers',
+            'KubeCluster': 'kube-clusters'
+        }[server['kind']]
         value = self.values[(collection, server['metadata']['name'])]
         value['status'].update(status)
         return copy.deepcopy(value)
@@ -301,6 +306,42 @@ class ConfigurationTests(unittest.TestCase):
         resolved = executor.plan(self.api, self.configuration)
         self.assertEqual([server['metadata']['name'] for server in resolved.servers], ['node'])
         self.assertEqual(resolved.target['metadata']['name'], 'lab')
+
+    def test_target_observation_is_bound_to_resolved_lifetime_and_generation(self):
+        cluster = resource('KubeCluster', 'lab', {})
+        self.api.values[('kube-clusters', 'lab')] = cluster
+        self.configuration['spec']['targetRef'] = {'kind': 'KubeCluster', 'name': 'lab'}
+        resolved = executor.plan(self.api, self.configuration)
+        executor.publish_target_status(self.api, resolved, {'clusterNamespaceUID': 'namespace'})
+        self.assertEqual(cluster['status']['observedGeneration'], 1)
+        cluster['metadata']['uid'] = 'replacement'
+        with self.assertRaisesRegex(OperatorError, 'Target changed'):
+            executor.publish_target_status(self.api, resolved, {'clusterNamespaceUID': 'wrong'})
+        self.assertEqual(cluster['status']['clusterNamespaceUID'], 'namespace')
+
+    def test_real_client_routes_cluster_observations_to_generic_status(self):
+        cluster = resource('KubeCluster', 'lab', {})
+        with patch.dict(os.environ, {'STIGMERGY_API_URL': 'https://api.example',
+                                     'STIGMERGY_API_TOKEN': 'fixture'}), \
+                patch('common.request_json', return_value=cluster) as request:
+            API().patch_status(cluster, {'observedGeneration': 1})
+            self.assertEqual(request.call_args.args[0],
+                             'https://api.example/api/v1alpha1/kube-clusters/lab/status')
+            self.assertEqual(request.call_args.args[2], 'PATCH')
+            self.assertEqual(request.call_args.args[3]['metadata'], {'uid': 'lab-uid'})
+            self.assertEqual(request.call_args.args[4]['If-Match'], '"1"')
+
+    def test_failed_work_never_publishes_target_observations(self):
+        resolved = executor.plan(self.api, self.configuration)
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(executor, 'checkout', return_value=Path('/fixture/plays/setup.yml')), \
+                patch.object(executor, 'prepare_execution'), \
+                patch.object(executor, 'run_plays', side_effect=OperatorError('PlaybookFailed', 'fixture')), \
+                patch.object(executor, 'publish_target_status') as publish:
+            (Path(directory) / 'target-status.json').write_text('{}', encoding='utf-8')
+            with self.assertRaises(OperatorError):
+                executor.execute(self.api, resolved, Path('/fixture'), Path(directory))
+            publish.assert_not_called()
 
     def test_recreated_target_invalidates_old_success(self):
         cluster = resource('KubeCluster', 'lab', {})

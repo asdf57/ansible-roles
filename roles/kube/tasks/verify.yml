@@ -184,3 +184,32 @@
   become: false
   vars:
     ansible_become: false
+
+- name: Assemble the public cluster domain snapshot after successful workload checks
+  ansible.builtin.set_fact:
+    kube_cluster_observations: >-
+      {{ (kube_cluster_plan | kube_node_observations(kube_actual_nodes.stdout | from_json)) | combine({
+        'lastVerifiedAt': now(utc=true, fmt='%Y-%m-%dT%H:%M:%SZ'),
+        'configurationRef': configuration_ref,
+        'configurationGeneration': configuration_generation,
+        'inputRevision': configuration_input_revision,
+        'playbookRevision': configuration_playbook_revision,
+        'clusterNamespaceUID': kube_namespace_uid,
+        'controlPlaneEndpoint': kube_actual_settings.controlPlaneEndpoint,
+        'kubernetesVersion': kube_actual_settings.kubernetesVersion | regex_replace('^v', ''),
+        'containerdVersion': kube_cluster_plan.settings.containerdVersion,
+        'podCIDR': kube_actual_settings.networking.podSubnet,
+        'serviceCIDR': kube_actual_settings.networking.serviceSubnet,
+        'network': kube_cluster_plan.settings.network,
+        'checks': {'serviceDNS': true, 'podConnectivity': true}
+      }) }}
+
+- name: Publish the verified snapshot for the generic target status writer
+  ansible.builtin.copy:
+    dest: "{{ configuration_workspace }}/target-status.json"
+    content: "{{ kube_cluster_observations | to_nice_json }}\n"
+    mode: '0600'
+  delegate_to: localhost
+  become: false
+  vars:
+    ansible_become: false

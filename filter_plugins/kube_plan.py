@@ -318,6 +318,51 @@ def validate_node(member: JSONObject, node: JSONObject, settings: JSONObject,
         raise ValueError('Node is not Ready')
 
 
+def node_observations(raw_plan: JSONValue, raw_response: JSONValue) -> JSONObject:
+    """Expose only verified public Node observations, never kubeconfigs or pod inputs."""
+    plan = verify_nodes(raw_plan, raw_response)
+    members = plan.get('members')
+    nodes = mapping(raw_response, 'Node response').get('items')
+    if not isinstance(members, list) or not isinstance(nodes, list):
+        raise ValueError('Verified members and Nodes must be arrays')
+    # Narrow nested wire values explicitly before selecting observations.
+    indexed: dict[str, JSONObject] = {}
+    for raw_node in nodes:
+        node = mapping(raw_node, 'Node')
+        indexed[text(mapping(node.get('metadata'), 'metadata').get('name'), 'name')] = node
+    observed: list[JSONValue] = []
+    for raw_member in members:
+        member = mapping(raw_member, 'member')
+        node = indexed[text(member.get('nodeName'), 'Node name')]
+        status = mapping(node.get('status'), 'Node status')
+        information = mapping(status.get('nodeInfo'), 'Node info')
+        addresses = status.get('addresses')
+        if not isinstance(addresses, list):
+            raise ValueError('Node addresses must be an array')
+        internal = [
+            text(mapping(address, 'address').get('address'), 'InternalIP') for address in addresses
+            if mapping(address, 'address').get('type') == 'InternalIP'
+        ]
+        if len(internal) != 1:
+            raise ValueError('V1 requires one actual Node InternalIP')
+        observed.append(
+            dict(
+                serverRef={
+                    'name': member['name'],
+                    'uid': member['uid']
+                }, nodeName=member['nodeName'],
+                nodeUID=text(mapping(node.get('metadata'), 'metadata').get('uid'),
+                             'Node UID'), role=member['role'], ready=True, internalIP=internal[0],
+                podCIDR=text(mapping(node.get('spec'), 'Node spec').get('podCIDR'),
+                             'pod CIDR'), kubeletVersion=text(information.get('kubeletVersion'),
+                                                              'kubelet version'),
+                containerdVersion=text(information.get('containerRuntimeVersion'),
+                                       'runtime').removeprefix('containerd://'),
+                operatingSystem=text(information.get('osImage'), 'OS image'),
+                kernelVersion=text(information.get('kernelVersion'), 'kernel version')))
+    return {'nodes': observed}
+
+
 def probe_objects(raw_plan: JSONValue, raw_image: JSONValue) -> JSONObject:
     """Build bounded, unprivileged, token-free pods for cross-node DNS/HTTP probes."""
     plan = mapping(raw_plan, 'cluster plan')
@@ -426,5 +471,6 @@ class FilterModule:
             'kube_installed_artifacts': installed_artifacts,
             'kube_flannel_objects': flannel_objects,
             'kube_verify_nodes': verify_nodes,
+            'kube_node_observations': node_observations,
             'kube_probe_objects': probe_objects,
         }

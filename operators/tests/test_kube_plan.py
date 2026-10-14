@@ -11,7 +11,7 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'filter_plugins'))
 from kube_plan import JSONObject, JSONValue, cluster_plan, mapping, validate_host_network
-from kube_plan import changed_binaries, flannel_objects, installed_artifacts, probe_objects, verify_nodes
+from kube_plan import changed_binaries, flannel_objects, installed_artifacts, node_observations, probe_objects, verify_nodes
 
 
 class KubernetesPlanTests(unittest.TestCase):
@@ -213,6 +213,7 @@ class KubernetesPlanTests(unittest.TestCase):
             items.append({
                 'metadata': {
                     'name': name,
+                    'uid': 'node-' + str(name),
                     'labels': labels
                 },
                 'spec': {
@@ -221,8 +222,14 @@ class KubernetesPlanTests(unittest.TestCase):
                 'status': {
                     'nodeInfo': {
                         'kubeletVersion': 'v1.37.1',
+                        'osImage': 'Debian GNU/Linux 13',
+                        'kernelVersion': '6.12',
                         'containerRuntimeVersion': 'containerd://2.4.1'
                     },
+                    'addresses': [{
+                        'type': 'InternalIP',
+                        'address': f'192.0.2.{index + 1}'
+                    }],
                     'conditions': [{
                         'type': 'Ready',
                         'status': 'True'
@@ -230,6 +237,18 @@ class KubernetesPlanTests(unittest.TestCase):
                 }
             })
         return {'items': items}
+
+    def test_public_node_observations_come_from_verified_actual_nodes(self):
+        observation = node_observations(self.plan(), self.actual_nodes())
+        nodes = observation['nodes']
+        if not isinstance(nodes, list):
+            self.fail('Expected public Node array')
+        first = mapping(nodes[0], 'Node observation')
+        self.assertEqual(first['nodeUID'], 'node-beelink')
+        self.assertEqual(first['serverRef'], {'name': 'beelink', 'uid': 'beelink-uid'})
+        self.assertEqual(first['ready'], True)
+        self.assertEqual(first['containerdVersion'], '2.4.1')
+        self.assertEqual(first['operatingSystem'], 'Debian GNU/Linux 13')
 
     def test_actual_node_verification_rejects_identity_version_and_readiness_drift(self):
         verify_nodes(self.plan(), self.actual_nodes())
@@ -477,17 +496,24 @@ class KubernetesPlanTests(unittest.TestCase):
                             }
                         }]
                     })
-            result_task = yaml.safe_load(
-                (root / 'roles/kube/tasks/verify.yml').read_text(encoding='utf-8'))[-1]
+            verification_tasks = yaml.safe_load(
+                (root / 'roles/kube/tasks/verify.yml').read_text(encoding='utf-8'))
+            result_tasks = [
+                task for task in verification_tasks
+                if 'ansible.builtin.copy' in task and task.get('delegate_to') == 'localhost'
+            ]
             local_plays.append({
                 'hosts': 'localhost',
                 'gather_facts': False,
                 'vars': {
                     'configuration_workspace': directory,
                     'kube_namespace_uid': 'fixture',
+                    'kube_cluster_observations': {
+                        'clusterNamespaceUID': 'fixture'
+                    },
                     'kube_cluster_plan': self.plan()
                 },
-                'tasks': [result_task]
+                'tasks': result_tasks
             })
             play = Path(directory) / 'local.json'
             play.write_text(json.dumps(local_plays), encoding='utf-8')
@@ -496,6 +522,7 @@ class KubernetesPlanTests(unittest.TestCase):
                  str(play)], capture_output=True, text=True, check=False, timeout=60)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertEqual((Path(directory) / 'result.json').stat().st_uid, os.getuid())
+            self.assertEqual((Path(directory) / 'target-status.json').stat().st_uid, os.getuid())
 
     def test_all_role_stages_compile_without_executing_remote_tasks(self):
         root = Path(__file__).resolve().parents[2]

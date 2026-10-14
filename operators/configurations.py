@@ -362,6 +362,14 @@ def prepare_execution(api: API, resolved: Plan, directory: Path) -> None:
             str(directory),
             'configuration_playbook_revision':
             resolved.playbook_revision,
+            'configuration_ref': {
+                'name': configuration['metadata']['name'],
+                'uid': configuration['metadata']['uid']
+            },
+            'configuration_generation':
+            configuration['metadata'].get('generation', 0),
+            'configuration_input_revision':
+            resolved.input_revision,
             'configuration_observed':
             configuration['status'].get('outputs', {}),
             'configuration_target': {
@@ -439,6 +447,40 @@ def refresh_claim_target(api: API, server: Resource) -> None:
     server.update(latest)
 
 
+def read_public_result(path: Path) -> JSONObject | None:
+    """Read one optional bounded public object, refusing links and special files."""
+    if not path.exists() and not path.is_symlink():
+        return None
+    if path.is_symlink() or not path.is_file() or path.stat().st_size > 65536:
+        raise OperatorError('InvalidResult', 'Playbook result must be a small regular JSON file')
+    try:
+        return json_object(json.loads(path.read_text(encoding='utf-8')), 'public playbook result')
+    except (ValueError, UnicodeError) as error:
+        raise OperatorError('InvalidResult',
+                            'Playbook result must be a public JSON object') from error
+
+
+def publish_target_status(api: API, resolved: Plan, status: JSONObject) -> None:
+    """Publish verified target observations under its original lifetime/generation."""
+    target = resolved.target
+    collection = {'Server': 'servers', 'KubeCluster': 'kube-clusters'}[target['kind']]
+    observations = dict(status, observedGeneration=target['metadata'].get('generation', 0))
+    for _ in range(5):
+        latest = api.get(collection, target['metadata']['name'])
+        if (latest['metadata']['uid'] != target['metadata']['uid']
+                or latest['metadata'].get('generation') != target['metadata'].get('generation')
+                or latest['metadata'].get('deletionTimestamp')):
+            raise OperatorError('InputsChanged', 'Target changed before reporting observations')
+        try:
+            api.patch_status(latest, observations)
+            return
+        except HTTPError as error:
+            if error.code != 409:
+                raise
+    raise OperatorError('InputsChanged',
+                        'Target status conflicted; observations were not published')
+
+
 def execute(api: API, resolved: Plan, source: Path, directory: Path) -> None:
     """Claim all selected hosts, verify installed sessions, execute and recheck inputs."""
     configuration = resolved.configuration
@@ -457,14 +499,10 @@ def execute(api: API, resolved: Plan, source: Path, directory: Path) -> None:
         verify_claims(api, resolved.servers)
         if plan(api, configuration).input_revision != resolved.input_revision:
             raise OperatorError('InputsChanged', 'Configuration inputs changed during execution')
-    outputs: JSONObject = {}
-    result = directory / 'result.json'
-    if result.exists():
-        if result.is_symlink() or not result.is_file() or result.stat().st_size > 65536:
-            raise OperatorError('InvalidResult',
-                                'Playbook result must be a small regular JSON file')
-        outputs = json_object(json.loads(result.read_text(encoding='utf-8')),
-                              'public playbook result')
+        outputs = read_public_result(directory / 'result.json') or {}
+        target_status = read_public_result(directory / 'target-status.json')
+        if target_status is not None:
+            publish_target_status(api, resolved, target_status)
     report(api, configuration, 'Ready', 'PlaybookVerified', resolved.input_revision, resolved,
            outputs)
 

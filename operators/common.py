@@ -78,7 +78,8 @@ class API:
         collection = {
             'Server': 'servers',
             'ProvisioningRun': 'provisioning-runs',
-            'Configuration': 'configurations'
+            'Configuration': 'configurations',
+            'KubeCluster': 'kube-clusters'
         }[server['kind']]
         return resource(
             request_json(
