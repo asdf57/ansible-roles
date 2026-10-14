@@ -1,0 +1,28 @@
+---
+- name: Observe actual cluster membership independently of setup success
+  ansible.builtin.command:
+    argv: [/usr/local/bin/kubectl, --kubeconfig=/etc/kubernetes/admin.conf, --request-timeout=15s, get, nodes, -o=json]
+  register: kube_observed_membership
+  changed_when: false
+
+- name: Assemble the current public membership observation
+  ansible.builtin.set_fact:
+    kube_membership_observation:
+      observation:
+        observedAt: "{{ now(utc=true, fmt='%Y-%m-%dT%H:%M:%SZ') }}"
+        observedGeneration: "{{ configuration_target.metadata.generation }}"
+        configurationRef: "{{ configuration_ref }}"
+        configurationGeneration: "{{ configuration_generation }}"
+        inputRevision: "{{ configuration_input_revision }}"
+        playbookRevision: "{{ configuration_playbook_revision }}"
+        membership: "{{ kube_cluster_plan | kube_membership_observation(kube_observed_membership.stdout | from_json) }}"
+
+- name: Publish observations without claiming successful configuration or workload checks
+  ansible.builtin.copy:
+    dest: "{{ configuration_workspace }}/target-observation.json"
+    content: "{{ kube_membership_observation | to_nice_json }}\n"
+    mode: '0600'
+  delegate_to: localhost
+  become: false
+  vars:
+    ansible_become: false

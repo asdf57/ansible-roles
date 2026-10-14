@@ -12,6 +12,7 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'filter_plugins'))
 from kube_plan import JSONObject, JSONValue, cluster_plan, mapping, validate_host_network
 from kube_plan import changed_binaries, flannel_objects, installed_artifacts, node_observations, probe_objects, verify_nodes
+from kube_plan import registration_action, membership_observation
 
 
 class KubernetesPlanTests(unittest.TestCase):
@@ -269,6 +270,80 @@ class KubernetesPlanTests(unittest.TestCase):
         mapping(mapping(items[0], 'Node')['status'], 'status')['conditions'] = []
         with self.assertRaisesRegex(ValueError, 'not Ready'):
             verify_nodes(self.plan(), actual)
+
+    def registration(self, actual: JSONObject) -> JSONObject:
+        """Plan for the selected worker with synthetic Node data only."""
+        return registration_action(
+            self.plan(), {
+                'serverUID': 'beelink-uid',
+                'nodeName': 'beelink',
+                'role': 'worker',
+                'address': '192.0.2.2',
+                'node': actual
+            })
+
+    def worker_node(self) -> JSONObject:
+        """Return one current, correctly labeled synthetic worker."""
+        items = self.actual_nodes()['items']
+        if not isinstance(items, list):
+            self.fail('Expected Node array')
+        worker = mapping(items[1], 'worker')
+        mapping(mapping(worker['metadata'], 'metadata')['labels'],
+                'labels')['node-role.kubernetes.io/worker'] = ''
+        return worker
+
+    def test_missing_registration_is_not_confused_with_initial_join(self):
+        self.assertTrue(self.registration({})['missing'])
+        self.assertFalse(self.registration(self.worker_node())['missing'])
+        self.assertFalse(self.registration(self.worker_node())['labelsChanged'])
+
+    def test_owned_label_drift_is_repaired_without_restart(self):
+        worker = self.worker_node()
+        labels = mapping(mapping(worker['metadata'], 'metadata')['labels'], 'labels')
+        del labels['homelab.io/server-uid']
+        labels['node-role.kubernetes.io/control-plane'] = ''
+        result = self.registration(worker)
+        self.assertFalse(result['missing'])
+        self.assertTrue(result['labelsChanged'])
+        arguments = result['labelArguments']
+        if not isinstance(arguments, list):
+            self.fail('Expected managed label arguments')
+        self.assertIn('node-role.kubernetes.io/control-plane-', arguments)
+
+    def test_foreign_node_and_wrong_address_are_never_adopted(self):
+        worker = self.worker_node()
+        labels = mapping(mapping(worker['metadata'], 'metadata')['labels'], 'labels')
+        labels['homelab.io/server-uid'] = 'another-server'
+        with self.assertRaisesRegex(ValueError, 'Refusing to adopt'):
+            self.registration(worker)
+        worker = self.worker_node()
+        mapping(worker['status'], 'status')['addresses'] = [{
+            'type': 'InternalIP',
+            'address': '192.0.2.99'
+        }]
+        with self.assertRaisesRegex(ValueError, 'address'):
+            self.registration(worker)
+
+    def test_not_ready_is_reported_but_does_not_authorize_a_restart(self):
+        worker = self.worker_node()
+        mapping(worker['status'], 'status')['conditions'] = [{'type': 'Ready', 'status': 'False'}]
+        self.assertFalse(self.registration(worker)['missing'])
+        response = self.actual_nodes()
+        response['items'] = [worker]
+        observed = membership_observation(self.plan(), response)
+        self.assertFalse(observed['ready'])
+        self.assertEqual(observed['missingMembers'], ['zima'])
+        self.assertEqual(observed['notReadyMembers'], ['beelink'])
+
+    def test_observation_distinguishes_absent_unexpected_and_conflicting_nodes(self):
+        worker = self.worker_node()
+        mapping(mapping(worker['metadata'], 'metadata')['labels'],
+                'labels')['homelab.io/kube-cluster-uid'] = 'other-cluster'
+        response: JSONObject = {'items': [worker, {'metadata': {'name': 'unexpected'}}]}
+        observed = membership_observation(self.plan(), response)
+        self.assertEqual(observed['missingMembers'], ['zima'])
+        self.assertEqual(observed['unexpectedNodes'], ['unexpected'])
+        self.assertEqual(observed['identityConflicts'], ['beelink'])
 
     def test_flannel_manifest_preserves_source_and_uses_selected_pod_network(self):
         documents: list[JSONObject] = [{
@@ -528,7 +603,8 @@ class KubernetesPlanTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[2]
         stages = [('kube', name)
                   for name in ('plan', 'artifacts', 'artifacts_architecture', 'preflight',
-                               'identity', 'prepare', 'swap', 'control_plane', 'join', 'verify')]
+                               'identity', 'prepare', 'swap', 'control_plane', 'join', 'membership',
+                               'observe', 'verify')]
         stages += [('containerd', 'artifact_preflight'), ('containerd', 'artifacts')]
         tasks = [{
             'name': 'Parse ' + role + '/' + stage,

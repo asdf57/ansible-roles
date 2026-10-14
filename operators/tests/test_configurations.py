@@ -312,7 +312,10 @@ class ConfigurationTests(unittest.TestCase):
         self.api.values[('kube-clusters', 'lab')] = cluster
         self.configuration['spec']['targetRef'] = {'kind': 'KubeCluster', 'name': 'lab'}
         resolved = executor.plan(self.api, self.configuration)
-        executor.publish_target_status(self.api, resolved, {'clusterNamespaceUID': 'namespace'})
+        executor.publish_target_status(self.api, resolved, {
+            'observedGeneration': 1,
+            'clusterNamespaceUID': 'namespace'
+        })
         self.assertEqual(cluster['status']['observedGeneration'], 1)
         cluster['metadata']['uid'] = 'replacement'
         with self.assertRaisesRegex(OperatorError, 'Target changed'):
@@ -339,6 +342,39 @@ class ConfigurationTests(unittest.TestCase):
                 patch.object(executor, 'run_plays', side_effect=OperatorError('PlaybookFailed', 'fixture')), \
                 patch.object(executor, 'publish_target_status') as publish:
             (Path(directory) / 'target-status.json').write_text('{}', encoding='utf-8')
+            with self.assertRaises(OperatorError):
+                executor.execute(self.api, resolved, Path('/fixture'), Path(directory))
+            publish.assert_not_called()
+
+    def test_failed_play_can_report_negative_observations_but_not_verified_status(self):
+        resolved = executor.plan(self.api, self.configuration)
+        self.server['status']['lastVerifiedAt'] = 'previous-success'
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(executor, 'checkout', return_value=Path('/fixture/plays/setup.yml')), \
+                patch.object(executor, 'prepare_execution'), \
+                patch.object(executor, 'run_plays', side_effect=OperatorError('PlaybookFailed', 'fixture')):
+            (Path(directory) / 'target-observation.json').write_text(
+                '{"observation":{"membership":{"missingMembers":["node"]}}}', encoding='utf-8')
+            (Path(directory) / 'target-status.json').write_text(
+                '{"lastVerifiedAt":"must-not-publish"}', encoding='utf-8')
+            with self.assertRaises(OperatorError):
+                executor.execute(self.api, resolved, Path('/fixture'), Path(directory))
+        self.assertEqual(self.server['status']['lastVerifiedAt'], 'previous-success')
+        self.assertNotIn('observedGeneration', self.server['status'])
+        self.assertEqual(self.server['status']['observation'],
+                         {'membership': {
+                             'missingMembers': ['node']
+                         }})
+        self.assertNotEqual(self.configuration['status']['phase'], 'Ready')
+
+    def test_uncertain_work_does_not_publish_observation_output(self):
+        resolved = executor.plan(self.api, self.configuration)
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(executor, 'checkout', return_value=Path('/fixture/plays/setup.yml')), \
+                patch.object(executor, 'prepare_execution'), \
+                patch.object(executor, 'run_plays', side_effect=OperatorError('RemoteWorkUncertain', 'fixture')), \
+                patch.object(executor, 'publish_target_status') as publish:
+            (Path(directory) / 'target-observation.json').write_text('{}', encoding='utf-8')
             with self.assertRaises(OperatorError):
                 executor.execute(self.api, resolved, Path('/fixture'), Path(directory))
             publish.assert_not_called()

@@ -464,7 +464,6 @@ def publish_target_status(api: API, resolved: Plan, status: JSONObject) -> None:
     """Publish verified target observations under its original lifetime/generation."""
     target = resolved.target
     collection = {'Server': 'servers', 'KubeCluster': 'kube-clusters'}[target['kind']]
-    observations = dict(status, observedGeneration=target['metadata'].get('generation', 0))
     for _ in range(5):
         latest = api.get(collection, target['metadata']['name'])
         if (latest['metadata']['uid'] != target['metadata']['uid']
@@ -472,7 +471,7 @@ def publish_target_status(api: API, resolved: Plan, status: JSONObject) -> None:
                 or latest['metadata'].get('deletionTimestamp')):
             raise OperatorError('InputsChanged', 'Target changed before reporting observations')
         try:
-            api.patch_status(latest, observations)
+            api.patch_status(latest, status)
             return
         except HTTPError as error:
             if error.code != 409:
@@ -495,16 +494,36 @@ def execute(api: API, resolved: Plan, source: Path, directory: Path) -> None:
             raise OperatorError('InputsChanged', 'Configuration inputs changed before execution')
         report(api, configuration, 'Reconciling', 'ExecutingPlaybook', resolved.input_revision,
                resolved)
-        run_plays(api, resolved, source, play, directory)
+        try:
+            run_plays(api, resolved, source, play, directory)
+        except OperatorError as error:
+            # A completed failed play may still have useful public observations.
+            # Never publish its success file, nor report after uncertain remote
+            # work, ownership loss or changed inputs. Domain roles own payloads.
+            if error.reason == 'PlaybookFailed':
+                publish_observations(api, resolved, directory)
+            raise
         verify_claims(api, resolved.servers)
         if plan(api, configuration).input_revision != resolved.input_revision:
             raise OperatorError('InputsChanged', 'Configuration inputs changed during execution')
         outputs = read_public_result(directory / 'result.json') or {}
+        publish_observations(api, resolved, directory)
         target_status = read_public_result(directory / 'target-status.json')
         if target_status is not None:
             publish_target_status(api, resolved, target_status)
     report(api, configuration, 'Ready', 'PlaybookVerified', resolved.input_revision, resolved,
            outputs)
+
+
+def publish_observations(api: API, resolved: Plan, directory: Path) -> None:
+    """Publish optional observation-only output without claiming a successful setup."""
+    observations = read_public_result(directory / 'target-observation.json')
+    if observations is None:
+        return
+    verify_claims(api, resolved.servers)
+    if plan(api, resolved.configuration).input_revision != resolved.input_revision:
+        raise OperatorError('InputsChanged', 'Inputs changed before reporting observations')
+    publish_target_status(api, resolved, observations)
 
 
 def main() -> int:

@@ -23,6 +23,12 @@ Neither role queries Stigmergy or creates a separate reconciliation controller.
    Flannel resources with the selected pod CIDR.
 7. Join only new owned workers using a ten-minute token and pinned CA discovery.
    Always remove join files and revoke the token created by this pass.
+   Then reconcile actual registration for every initialized member: authenticate
+   its existing kubelet identity against the intended endpoint, check installed
+   ownership and actual Node identity/address, and restore managed labels with a
+   resourceVersion precondition. Only a missing Node permits one kubelet restart
+   to re-register itself. A healthy or merely NotReady member is not restarted;
+   no bootstrap replay, reset, certificate deletion or manual Node fabrication.
 8. Verify versions, managed Node identities/roles/addresses/pod CIDRs, Ready,
    Flannel and CoreDNS. Run unprivileged temporary pods on each node to check
    Kubernetes service DNS and HTTP between every pair; clean up only owned probes.
@@ -32,6 +38,16 @@ Neither role queries Stigmergy or creates a separate reconciliation controller.
 The operator performs installed-host guards before/after the playbook, holds
 Server operation claims and reports Configuration Ready only for unchanged
 resource identities and desired inputs. Timeouts retain claims for inspection.
+
+`KubeCluster.status.observation` records current timestamped membership separately
+from the last successful verification: missing/not-ready members, unexpected
+Nodes and managed identity/label conflicts. The role writes public
+`target-observation.json` before repair and after verification, including failed
+verification. The generic executor can publish that observation after a completed
+failed play while claims and inputs still match; it never publishes the success
+file on failure or reports after uncertain remote work. Each domain role supplies
+its own status payload and observed generation; the generic executor adds no
+domain fields. The UI marks old or changed-input observations stale.
 
 ## Inputs and safety
 

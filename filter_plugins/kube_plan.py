@@ -363,6 +363,118 @@ def node_observations(raw_plan: JSONValue, raw_response: JSONValue) -> JSONObjec
     return {'nodes': observed}
 
 
+def members_by_name(raw_plan: JSONValue) -> dict[str, JSONObject]:
+    """Index only members already selected by the validated cluster plan."""
+    plan = mapping(raw_plan, 'cluster plan')
+    members = plan.get('members')
+    if not isinstance(members, list):
+        raise ValueError('Cluster members must be an array')
+    indexed = {}
+    for value in members:
+        member = mapping(value, 'cluster member')
+        indexed[text(member.get('nodeName'), 'Node name')] = member
+    return indexed
+
+
+def desired_labels(plan: JSONObject, member: JSONObject) -> dict[str, str]:
+    """Own identity and conventional role metadata, not arbitrary user labels."""
+    return {
+        'homelab.io/server-uid': text(member.get('uid'), 'Server UID'),
+        'homelab.io/kube-cluster-uid': text(plan.get('uid'), 'cluster UID'),
+        'node-role.kubernetes.io/' + text(member.get('role'), 'Node role'): '',
+    }
+
+
+def registration_action(raw_plan: JSONValue, raw_request: JSONValue) -> JSONObject:
+    """Plan repair only after the play authenticates this installed kubelet identity.
+
+    A missing Node needs a registration restart, not bootstrap. Present Nodes
+    may lose managed labels, but conflicting identity values never get adopted.
+    Readiness failures are not permission to restart arbitrary healthy services.
+    """
+    plan = mapping(raw_plan, 'cluster plan')
+    request = mapping(raw_request, 'registration request')
+    member = members_by_name(plan).get(text(request.get('nodeName'), 'Node name'))
+    if (member is None or member.get('uid') != request.get('serverUID')
+            or member.get('role') != request.get('role')):
+        raise ValueError('Host is not the selected cluster member')
+    node = mapping(request.get('node'), 'actual Node')
+    if not node:
+        return {'missing': True, 'labelsChanged': False, 'labelArguments': []}
+    metadata = mapping(node.get('metadata'), 'Node metadata')
+    if metadata.get('name') != request.get('nodeName') or not metadata.get('uid'):
+        raise ValueError('Actual Node identity does not match the selected member')
+    labels = mapping(metadata.get('labels', {}), 'Node labels')
+    desired = desired_labels(plan, member)
+    for key in ('homelab.io/server-uid', 'homelab.io/kube-cluster-uid'):
+        if labels.get(key) not in (None, desired[key]):
+            raise ValueError('Refusing to adopt a Node owned by another Server or cluster')
+    addresses = mapping(node.get('status', {}), 'Node status').get('addresses', [])
+    if not isinstance(addresses, list):
+        raise ValueError('Node addresses must be an array')
+    internal = [
+        mapping(value, 'Node address').get('address') for value in addresses
+        if mapping(value, 'Node address').get('type') == 'InternalIP'
+    ]
+    if internal != [request.get('address')]:
+        raise ValueError('Node address does not match the managed Server')
+    opposite_role = 'worker' if member.get('role') == 'control-plane' else 'control-plane'
+    opposite_label = 'node-role.kubernetes.io/' + opposite_role
+    arguments: list[JSONValue] = [key + '=' + value for key, value in desired.items()]
+    if opposite_label in labels:
+        arguments.append(opposite_label + '-')
+    return {
+        'missing':
+        False,
+        'labelsChanged':
+        any(labels.get(key) != value for key, value in desired.items()) or opposite_label in labels,
+        'labelArguments':
+        arguments,
+    }
+
+
+def membership_observation(raw_plan: JSONValue, raw_response: JSONValue) -> JSONObject:
+    """Report actual membership, including missing members, without asserting setup success."""
+    expected = members_by_name(raw_plan)
+    items = mapping(raw_response, 'Node list').get('items')
+    if not isinstance(items, list):
+        raise ValueError('Actual Nodes must be an array')
+    actual: dict[str, JSONObject] = {}
+    for item in items:
+        node = mapping(item, 'Node')
+        name = text(mapping(node.get('metadata'), 'Node metadata').get('name'), 'name')
+        if name in actual:
+            raise ValueError('Duplicate Node identity')
+        actual[name] = node
+    missing = sorted(set(expected) - set(actual))
+    unexpected = sorted(set(actual) - set(expected))
+    not_ready: list[JSONValue] = []
+    conflicts: list[JSONValue] = []
+    for name in sorted(set(expected) & set(actual)):
+        node = actual[name]
+        metadata = mapping(node.get('metadata'), 'Node metadata')
+        labels = mapping(metadata.get('labels', {}), 'Node labels')
+        if any(
+                labels.get(key) != value for key, value in desired_labels(
+                    mapping(raw_plan, 'cluster plan'), expected[name]).items()):
+            conflicts.append(name)
+        conditions = mapping(node.get('status', {}), 'Node status').get('conditions', [])
+        if not isinstance(conditions, list):
+            raise ValueError('Node conditions must be an array')
+        if not any(
+                mapping(value, 'Node condition').get('type') == 'Ready'
+                and mapping(value, 'Node condition').get('status') == 'True'
+                for value in conditions):
+            not_ready.append(name)
+    return {
+        'ready': not (missing or unexpected or not_ready or conflicts),
+        'missingMembers': [name for name in missing],
+        'notReadyMembers': not_ready,
+        'unexpectedNodes': [name for name in unexpected],
+        'identityConflicts': conflicts,
+    }
+
+
 def probe_objects(raw_plan: JSONValue, raw_image: JSONValue) -> JSONObject:
     """Build bounded, unprivileged, token-free pods for cross-node DNS/HTTP probes."""
     plan = mapping(raw_plan, 'cluster plan')
@@ -472,5 +584,7 @@ class FilterModule:
             'kube_flannel_objects': flannel_objects,
             'kube_verify_nodes': verify_nodes,
             'kube_node_observations': node_observations,
+            'kube_registration_action': registration_action,
+            'kube_membership_observation': membership_observation,
             'kube_probe_objects': probe_objects,
         }

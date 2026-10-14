@@ -106,7 +106,18 @@
         name: kube
         tasks_from: control_plane
 
-- name: Join only uninitialized owned worker nodes
+- name: Observe actual membership before reconciling desired members
+  hosts: configuration_kube_control_plane
+  gather_facts: false
+  become: true
+  any_errors_fatal: true
+  tasks:
+    - name: Record current membership without reporting setup success
+      ansible.builtin.include_role:
+        name: kube
+        tasks_from: observe
+
+- name: Join uninitialized owned worker nodes
   hosts: configuration_kube_workers
   gather_facts: false
   become: true
@@ -117,16 +128,35 @@
         name: kube
         tasks_from: join
 
+- name: Reconcile registration and managed labels on every initialized member
+  hosts: configuration_kube_members
+  gather_facts: false
+  become: true
+  any_errors_fatal: true
+  tasks:
+    - name: Restore missing registration without reset or kubeadm join replay
+      ansible.builtin.include_role:
+        name: kube
+        tasks_from: membership
+
 - name: Verify the actual cluster and cross-node workload networking
   hosts: configuration_kube_control_plane
   gather_facts: false
   become: true
   any_errors_fatal: true
   tasks:
-    - name: Verify Kubernetes readiness rather than task completion alone
-      ansible.builtin.include_role:
-        name: kube
-        tasks_from: verify
+    - name: Verify readiness and retain actual observations even on failure
+      block:
+        - name: Verify Kubernetes readiness rather than task completion alone
+          ansible.builtin.include_role:
+            name: kube
+            tasks_from: verify
+
+      always:
+        - name: Refresh actual membership separately from successful verification
+          ansible.builtin.include_role:
+            name: kube
+            tasks_from: observe
 
 - name: Record verified cluster identity on every member
   hosts: configuration_kube_members

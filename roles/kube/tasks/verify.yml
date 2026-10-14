@@ -189,6 +189,7 @@
   ansible.builtin.set_fact:
     kube_cluster_observations: >-
       {{ (kube_cluster_plan | kube_node_observations(kube_actual_nodes.stdout | from_json)) | combine({
+        'observedGeneration': configuration_target.metadata.generation,
         'lastVerifiedAt': now(utc=true, fmt='%Y-%m-%dT%H:%M:%SZ'),
         'configurationRef': configuration_ref,
         'configurationGeneration': configuration_generation,

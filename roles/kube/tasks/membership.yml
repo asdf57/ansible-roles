@@ -1,0 +1,100 @@
+---
+- name: Inspect the protected kubelet credential configuration
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    follow: false
+  loop: [/etc/kubernetes/kubelet.conf, /var/lib/homelab/kube-cluster.json]
+  register: kube_member_credentials
+
+- name: Require an owned initialized member before registration reconciliation
+  ansible.builtin.assert:
+    quiet: true
+    that:
+      - item.stat.isreg | default(false)
+      - not (item.stat.islnk | default(false))
+      - item.stat.uid == 0
+      - item.stat.mode == '0600'
+  loop: "{{ kube_member_credentials.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Read the current member identity after any initial join
+  ansible.builtin.slurp:
+    src: /var/lib/homelab/kube-cluster.json
+  register: kube_member_marker
+
+- name: Refuse stale or conflicting installed member ownership
+  ansible.builtin.assert:
+    quiet: true
+    that:
+      - (kube_member_marker.content | b64decode | from_json).identity == kube_expected_identity
+      - (kube_member_marker.content | b64decode | from_json).phase in ['Initialising', 'Joining', 'Ready']
+      - (kube_member_marker.content | b64decode | from_json).get('clusterNamespaceUID', '') in ['', hostvars[kube_cluster_plan.controlPlane.name].kube_namespace_uid]
+
+- name: Read the installed kubelet API endpoint without exposing credential material
+  ansible.builtin.command:
+    argv: [/usr/local/bin/kubectl, --kubeconfig=/etc/kubernetes/kubelet.conf, config, view, --minify, '-o=jsonpath={.clusters[0].cluster.server}']
+  register: kube_member_endpoint
+  changed_when: false
+
+- name: Refuse registration against another API endpoint
+  ansible.builtin.assert:
+    quiet: true
+    that:
+      - kube_member_endpoint.stdout == 'https://' ~ kube_cluster_plan.settings.controlPlaneEndpoint
+
+- name: Authenticate the existing kubelet identity through its configured API
+  ansible.builtin.command:
+    argv: [/usr/local/bin/kubectl, --kubeconfig=/etc/kubernetes/kubelet.conf, --request-timeout=15s, auth, whoami, -o=json]
+  register: kube_member_identity
+  changed_when: false
+
+- name: Require credentials for this node rather than another identity
+  ansible.builtin.assert:
+    quiet: true
+    that:
+      - (kube_member_identity.stdout | from_json).status.userInfo.username == 'system:node:' ~ kube_node_name
+      - "'system:nodes' in (kube_member_identity.stdout | from_json).status.userInfo.groups"
+
+- name: Read the actual Node from the verified control plane
+  ansible.builtin.command:
+    argv: [/usr/local/bin/kubectl, --kubeconfig=/etc/kubernetes/admin.conf, --request-timeout=15s, get, node, "{{ kube_node_name }}", --ignore-not-found, -o=json]
+  delegate_to: "{{ kube_cluster_plan.controlPlane.name }}"
+  register: kube_member_node
+  changed_when: false
+
+- name: Plan registration and labels from actual state without adopting another Node
+  ansible.builtin.set_fact:
+    kube_membership_action: "{{ kube_cluster_plan | kube_registration_action({'serverUID': configuration_server_uid, 'nodeName': kube_node_name, 'role': kube_node_role, 'address': ansible_host, 'node': (kube_member_node.stdout | from_json) if kube_member_node.stdout | trim else {}}) }}"
+
+- name: Restart only a configured kubelet whose Node registration was deleted
+  ansible.builtin.systemd_service:
+    name: kubelet
+    state: restarted
+  when: kube_membership_action.missing
+  # A running kubelet remembers completed registration even after Node deletion.
+  # Keep its identity and workload state; restarting registration is not a rejoin.
+
+- name: Wait for the member to register its own Node with its managed address
+  ansible.builtin.command:
+    argv: [/usr/local/bin/kubectl, --kubeconfig=/etc/kubernetes/admin.conf, --request-timeout=15s, get, node, "{{ kube_node_name }}", --ignore-not-found, -o=json]
+  delegate_to: "{{ kube_cluster_plan.controlPlane.name }}"
+  register: kube_member_registered
+  changed_when: false
+  retries: 30
+  delay: 2
+  until:
+    - kube_member_registered.rc == 0
+    - kube_member_registered.stdout | trim | length > 0
+    - ((kube_member_registered.stdout | from_json).status.addresses | default([]) | selectattr('type', 'equalto', 'InternalIP') | map(attribute='address') | list) == [ansible_host]
+
+- name: Recheck ownership after registration before changing any labels
+  ansible.builtin.set_fact:
+    kube_membership_action: "{{ kube_cluster_plan | kube_registration_action({'serverUID': configuration_server_uid, 'nodeName': kube_node_name, 'role': kube_node_role, 'address': ansible_host, 'node': kube_member_registered.stdout | from_json}) }}"
+
+- name: Restore only the managed identity and role labels on this Node revision
+  ansible.builtin.command:
+    argv: "{{ ['/usr/local/bin/kubectl', '--kubeconfig=/etc/kubernetes/admin.conf', '--request-timeout=15s', 'label', 'node', kube_node_name, '--overwrite', '--resource-version=' ~ (kube_member_registered.stdout | from_json).metadata.resourceVersion] + kube_membership_action.labelArguments }}"
+  delegate_to: "{{ kube_cluster_plan.controlPlane.name }}"
+  when: kube_membership_action.labelsChanged
+  changed_when: true
