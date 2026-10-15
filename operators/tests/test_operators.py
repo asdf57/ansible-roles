@@ -25,6 +25,8 @@ def key(byte):
 
 def server():
     return {
+        'kind': 'Server',
+        'spec': {},
         "metadata": {
             "name": "node",
             "uid": "server-uid",
@@ -56,20 +58,52 @@ def server():
     }
 
 
-class API:
+class API(common.API):
 
     def __init__(self):
         self.server = server()
         self.writes = []
         self.conflict = False
+        self.operations = {}
 
     def get(self, collection, name):
+        if collection == 'operations':
+            return copy.deepcopy(self.operations[name])
         return copy.deepcopy(self.server)
+
+    def create(self, collection, kind, name, spec):
+        if self.conflict or self.server['status'].get('operationRef'):
+            raise HTTPError('', 409, 'Conflict', Message(), io.BytesIO())
+        operation = {
+            'kind': kind,
+            'metadata': {
+                'name': name,
+                'uid': name + '-uid',
+                'resourceVersion': '1'
+            },
+            'spec': spec,
+            'status': {
+                'phase': 'Running'
+            }
+        }
+        self.operations[name] = operation
+        self.server['status']['operationRef'] = {'name': name, 'uid': name + '-uid'}
+        return copy.deepcopy(operation)
 
     def list(self, collection):
         return [copy.deepcopy(self.server)] if collection == 'servers' else []
 
-    def patch_status(self, value, status):
+    def patch_status(self, server, status):
+        value = server
+        if value['kind'] == 'Operation':
+            operation = self.operations[value['metadata']['name']]
+            operation['status'].update(status)
+            if status.get('phase') in ('Succeeded', 'Failed'):
+                reference = self.server['status'].get('operationRef', {})
+                if reference.get('uid') != operation['metadata']['uid']:
+                    raise RuntimeError('Operation ownership changed')
+                self.server['status'].pop('operationRef')
+            return copy.deepcopy(operation)
         if self.conflict or value["metadata"]["resourceVersion"] != self.server["metadata"][
                 "resourceVersion"]:
             error = HTTPError("", 409, "Conflict", Message(), io.BytesIO())
@@ -98,7 +132,8 @@ class OperatorTests(unittest.TestCase):
                         STIGMERGY_API_TOKEN='test-token'):
             api = common.API()
         for kind, collection in [('Server', 'servers'), ('ProvisioningRun', 'provisioning-runs'),
-                                 ('Configuration', 'configurations')]:
+                                 ('Configuration', 'configurations'),
+                                 ('KubeCluster', 'kube-clusters'), ('Operation', 'operations')]:
             resource: Resource = {
                 'kind': kind,
                 'metadata': {

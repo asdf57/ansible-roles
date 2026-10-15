@@ -10,7 +10,7 @@ import tempfile
 from common import (API, OperatorError, address, capture_inventory, resolved_inventory_hosts,
                     run_ansible, ssh_args, write_private)
 from runner_trust import prepare
-from server_operation import reservation
+from server_operation import reservation, operation_progress
 
 
 def selected_server(api, name, uid, machine_uid):
@@ -23,7 +23,7 @@ def selected_server(api, name, uid, machine_uid):
         raise RuntimeError('Server or Machine identity changed; create a newly reviewed Command')
     if provisioning.get('maintenance') or provisioning.get('activeRunRef') is not None:
         raise RuntimeError('Provisioning owns the Server; system operation refused')
-    if status.get('operation', {}).get('phase') == 'Held':
+    if status.get('operationRef'):
         raise RuntimeError('Another operation owns the Server')
     if server.get('spec', {}).get('reconciliation', {}).get('paused'):
         raise RuntimeError('Server reconciliation is paused')
@@ -87,14 +87,22 @@ def main():
         if inventory['all']['hosts'][args.server]['ansible_host'] != address(
                 snapshot['status']['networking']['management']['address']['address']):
             raise RuntimeError('Management address changed before the operation claim')
-        with reservation(API(), snapshot):
+        with reservation(API(), snapshot, args.operation, 'system-operations'):
+            if inventory['all']['hosts'][args.server]['ansible_host'] != address(
+                    snapshot['status']['networking']['management']['address']['address']):
+                raise OperatorError('InputsChanged',
+                                    'Management address changed during acquisition')
+            operation_progress(API(), snapshot, 'Execute ' + play_name)
             result = run_ansible([
                 'ansible-playbook', '-i',
                 str(directory / 'inventory.json'),
                 str(play), '-e', '@' + str(directory / 'variables.json')
             ], directory / (play_name + '.log'), 660)
             if result.returncode:
-                raise RuntimeError('System operation failed; inspect Command logs')
+                raise OperatorError(
+                    'RemoteWorkUncertain' if result.returncode in (4,
+                                                                   6) else 'SystemOperationFailed',
+                    'System operation failed; inspect Command logs')
     print(args.operation + ' complete', flush=True)
 
 

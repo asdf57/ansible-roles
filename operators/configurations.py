@@ -24,7 +24,7 @@ from common import (API, OperatorError, capture_inventory, resolved_inventory_ho
                     ssh_args, write_private, management_address)
 from models import JSONObject, Resource, json_object, json_string
 from runner_trust import prepare
-from server_operation import reservation
+from server_operation import reservation, operation_progress, verify_operation
 
 
 @dataclass
@@ -391,9 +391,10 @@ def verify_claims(api: API, servers: list[Resource]) -> None:
     for server in servers:
         latest = api.get('servers', server['metadata']['name'])
         if (latest['metadata']['uid'] != server['metadata']['uid']
-                or latest['status'].get('operation') != server['status'].get('operation')
-                or mapping(latest['status'], 'operation').get('phase') != 'Held'):
+                or not server['status'].get('operationRef')
+                or latest['status'].get('operationRef') != server['status'].get('operationRef')):
             raise OperatorError('OwnershipChanged', 'Server operation ownership changed')
+        verify_operation(api, latest)
 
 
 def run_plays(api: API, resolved: Plan, source: Path, play: Path, directory: Path) -> None:
@@ -408,6 +409,8 @@ def run_plays(api: API, resolved: Plan, source: Path, play: Path, directory: Pat
         for selected_play in (source / 'plays/configuration_guard.yml', play,
                               source / 'plays/configuration_guard.yml'):
             verify_claims(api, resolved.servers)
+            for server in resolved.servers:
+                operation_progress(api, server, 'Execute ' + selected_play.name)
             result = run_ansible([
                 'ansible-playbook', '-i',
                 str(directory / 'inventory.json'),
@@ -488,7 +491,13 @@ def execute(api: API, resolved: Plan, source: Path, directory: Path) -> None:
     with ExitStack() as owners:
         for server in resolved.servers:
             refresh_claim_target(api, server)
-            owners.enter_context(reservation(api, server))
+            owners.enter_context(
+                reservation(
+                    api, server, 'configure', 'configurations', {
+                        'kind': 'Configuration',
+                        'name': configuration['metadata']['name'],
+                        'uid': configuration['metadata']['uid']
+                    }))
         refreshed = plan(api, configuration)
         if refreshed.input_revision != resolved.input_revision:
             raise OperatorError('InputsChanged', 'Configuration inputs changed before execution')

@@ -9,7 +9,7 @@ import sys
 import tempfile
 from urllib.error import HTTPError
 from models import json_object, json_string
-from server_operation import reservation
+from server_operation import reservation, operation_progress
 
 from common import (API, OperatorError, alias, address, capture_inventory, fingerprint,
                     inventory_hosts, public_key, request_json, ssh_args, ssh_probe, write_private,
@@ -30,7 +30,7 @@ def current(api, snapshot):
     for field in ("uid", "generation"):
         if metadata[field] != expected_metadata[field]:
             raise RuntimeError("Server " + field + " changed; retry next pass")
-    for field in ("operation", "machineRef", "desiredSSHTrustBundleDigest"):
+    for field in ("operationRef", "machineRef", "desiredSSHTrustBundleDigest"):
         if status.get(field) != expected_status.get(field):
             raise RuntimeError("Server " + field + " changed; retry next pass")
     if status.get("networking", {}).get("management") != expected_status.get("networking",
@@ -159,6 +159,8 @@ def run_play(server, host, directory, known, play, variables=None):
         "@" + str(directory / "variables.json")
     ], diagnostic, timeout=300)
     if result.returncode:
+        if result.returncode in (4, 6):
+            raise OperatorError('RemoteWorkUncertain', 'SSH transport failed; inspect remote work')
         tasks = re.findall(r'TASK \[([^\]\r\n]+)\]', result.stdout)
         last = tasks[-1] if tasks else 'initialization'
         raise OperatorError(
@@ -169,7 +171,7 @@ def run_play(server, host, directory, known, play, variables=None):
 def reconcile(api, server, host, directory):
     """Acquire short-operation ownership; defer busy Servers to the next pass."""
     try:
-        with reservation(api, server):
+        with reservation(api, server, 'reconcile-ssh', 'ssh-host-keys'):
             reconcile_owned(api, server, host, directory)
     except OperatorError as exc:
         if exc.reason != 'OperationBusy':
@@ -221,6 +223,7 @@ def reconcile_owned(api, server, host, directory):
         raise RuntimeError("Host private key does not match desired public identity")
     # Reread immediately before privileged mutation, after secret retrieval.
     current(api, server)
+    operation_progress(api, server, 'Reconcile managed SSH host identity')
     run_play(
         server, host, directory, known, "ssh_host_keys.yml", {
             "managed_host_private_key_file": str(directory / "host_key"),
@@ -230,6 +233,7 @@ def reconcile_owned(api, server, host, directory):
     ssh_probe(server, host, known)
     # This also reconciles the user-CA trust bundle, replacing the scheduled
     # ssh-trust CommandsPipeline without losing that existing behavior.
+    operation_progress(api, server, 'Reconcile SSH user certificate trust')
     run_play(
         server, host, directory, known, "ssh_trust.yml", {
             "ssh_ca_bundle": server["status"]["sshTrust"]["publicBundle"],

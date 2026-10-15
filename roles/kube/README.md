@@ -43,7 +43,7 @@ Neither role queries Stigmergy or creates a separate reconciliation controller.
    through the operator's result.json contract. No credential appears in status.
 
 The operator performs installed-host guards before/after the playbook, holds
-Server operation claims and reports Configuration Ready only for unchanged
+one generic Operation per Server and reports Configuration Ready only for unchanged
 resource identities and desired inputs. Timeouts retain claims for inspection.
 
 `KubeCluster.status.observation` records current timestamped membership separately

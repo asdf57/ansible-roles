@@ -79,7 +79,8 @@ class API:
             'Server': 'servers',
             'ProvisioningRun': 'provisioning-runs',
             'Configuration': 'configurations',
-            'KubeCluster': 'kube-clusters'
+            'KubeCluster': 'kube-clusters',
+            'Operation': 'operations'
         }[server['kind']]
         return resource(
             request_json(
@@ -92,6 +93,19 @@ class API:
                 }, {
                     "If-Match": '"' + server["metadata"]["resourceVersion"] + '"',
                     "Content-Type": "application/merge-patch+json"
+                }))
+
+    def create(self, collection: str, kind: str, name: str, spec: JSONObject) -> Resource:
+        """Create one explicit resource; never retry an uncertain POST."""
+        return resource(
+            request_json(
+                self.url + '/' + collection, self.token, 'POST', {
+                    'apiVersion': 'homelab.io/v1alpha1',
+                    'kind': kind,
+                    'metadata': {
+                        'name': name
+                    },
+                    'spec': spec
                 }))
 
 

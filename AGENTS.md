@@ -65,9 +65,9 @@ heartbeat after the Command succeeds; an active service alone is insufficient.
 4. The `provision-ssh-managed/provision` job polls the
    `ssh-managed` capture group. Triggering the job only polls desired state;
    it does not create runs. SSH runs in its own pipeline. Short mutations acquire
-   `Server.status.operation` by UID/If-Match CAS; ProvisioningRun reservation
-   excludes them. A stranded Held claim requires inspecting/stopping remote work
-   before matching-ID release; it must never automatically expire.
+   generic Operation resources; target.status.operationRef is API-owned and
+   excludes ProvisioningRun reservation. Uncertain work requires inspection before
+   terminal resolution; ownership never automatically expires.
 5. Installation must verify the pinned live build, boot ID, stable disk identity,
    unmounted target, protected agent enrollment and managed SSH identity before
    erasure. A completed build or an SSH port opening is not this verification.

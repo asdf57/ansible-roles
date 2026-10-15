@@ -45,14 +45,26 @@ class FixtureAPI(API):
             if kind == collection
         ]
 
+    def create(self, collection: str, kind: str, name: str, spec: JSONObject) -> Resource:
+        value = resource(kind, name, copy.deepcopy(spec), {'phase': 'Running'})
+        self.values[(collection, name)] = value
+        target = executor.mapping(spec, 'targetRef')
+        server = self.values[('servers', str(target['name']))]
+        server['status']['operationRef'] = {'name': name, 'uid': value['metadata']['uid']}
+        return copy.deepcopy(value)
+
     def patch_status(self, server: Resource, status: JSONObject) -> Resource:
         collection = {
             'Configuration': 'configurations',
             'Server': 'servers',
-            'KubeCluster': 'kube-clusters'
+            'KubeCluster': 'kube-clusters',
+            'Operation': 'operations'
         }[server['kind']]
         value = self.values[(collection, server['metadata']['name'])]
         value['status'].update(status)
+        if server['kind'] == 'Operation' and status.get('phase') in ('Succeeded', 'Failed'):
+            target = executor.mapping(value['spec'], 'targetRef')
+            self.values[('servers', str(target['name']))]['status'].pop('operationRef')
         return copy.deepcopy(value)
 
 
@@ -226,7 +238,7 @@ class ConfigurationTests(unittest.TestCase):
         resolved = executor.plan(self.api, self.configuration)
 
         def verify_during_work(*_args):
-            self.assertEqual(executor.mapping(self.server['status'], 'operation')['phase'], 'Held')
+            self.assertTrue(self.server['status'].get('operationRef'))
 
         with tempfile.TemporaryDirectory() as directory, \
                 patch.object(executor, 'checkout', return_value=Path('/fixture/plays/setup.yml')), \
@@ -234,7 +246,7 @@ class ConfigurationTests(unittest.TestCase):
                 patch.object(executor, 'run_plays', side_effect=verify_during_work):
             executor.execute(self.api, resolved, Path('/fixture'), Path(directory))
         self.assertEqual(self.configuration['status']['phase'], 'Ready')
-        self.assertEqual(executor.mapping(self.server['status'], 'operation')['phase'], 'Released')
+        self.assertNotIn('operationRef', self.server['status'])
 
     def test_failed_play_never_reports_ready_and_releases_known_stopped_work(self):
         resolved = executor.plan(self.api, self.configuration)
@@ -245,7 +257,7 @@ class ConfigurationTests(unittest.TestCase):
             with self.assertRaises(OperatorError):
                 executor.execute(self.api, resolved, Path('/fixture'), Path(directory))
         self.assertNotEqual(self.configuration['status']['phase'], 'Ready')
-        self.assertEqual(executor.mapping(self.server['status'], 'operation')['phase'], 'Released')
+        self.assertNotIn('operationRef', self.server['status'])
 
     def test_uncertain_timeout_retains_claim_and_never_reports_ready(self):
         resolved = executor.plan(self.api, self.configuration)
@@ -256,7 +268,9 @@ class ConfigurationTests(unittest.TestCase):
             with self.assertRaises(OperatorError):
                 executor.execute(self.api, resolved, Path('/fixture'), Path(directory))
         self.assertNotEqual(self.configuration['status']['phase'], 'Ready')
-        self.assertEqual(executor.mapping(self.server['status'], 'operation')['phase'], 'Held')
+        reference = executor.mapping(self.server['status'], 'operationRef')
+        self.assertEqual(
+            self.api.get('operations', str(reference['name']))['status']['phase'], 'Uncertain')
 
     def test_inputs_changed_during_play_cannot_become_ready(self):
         resolved = executor.plan(self.api, self.configuration)
@@ -439,6 +453,7 @@ class ConfigurationTests(unittest.TestCase):
         resolved = executor.plan(self.api, self.configuration)
         with tempfile.TemporaryDirectory() as directory, \
                 patch.object(executor, 'verify_claims'), \
+                patch.object(executor, 'operation_progress'), \
                 patch.object(executor, 'run_ansible', return_value=subprocess.CompletedProcess([], 4)):
             with self.assertRaisesRegex(OperatorError, 'SSH became unreachable'):
                 executor.run_plays(self.api, resolved, Path('/fixture'),
