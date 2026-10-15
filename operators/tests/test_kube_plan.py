@@ -399,14 +399,29 @@ class KubernetesPlanTests(unittest.TestCase):
         self.assertEqual(observed['identityConflicts'], ['beelink'])
 
     def test_flannel_manifest_preserves_source_and_uses_selected_pod_network(self):
-        documents: list[JSONObject] = [{
+        documents: list[JSONValue] = [{
             'kind': 'ConfigMap',
             'metadata': {
                 'name': 'kube-flannel-cfg',
                 'namespace': 'kube-flannel'
             },
             'data': {
-                'net-conf.json': '{"Network":"10.244.0.0/16","Backend":{"Type":"vxlan"}}'
+                'net-conf.json':
+                '{"Network":"10.244.0.0/16","Backend":{"Type":"vxlan"}}',
+                'cni-conf.json':
+                json.dumps({
+                    'plugins': [{
+                        'type': 'flannel',
+                        'delegate': {
+                            'hairpinMode': True
+                        }
+                    }, {
+                        'type': 'portmap',
+                        'capabilities': {
+                            'portMappings': True
+                        }
+                    }]
+                })
             },
         }, {
             'kind': 'DaemonSet',
@@ -434,6 +449,30 @@ class KubernetesPlanTests(unittest.TestCase):
             self.fail('Network config must be JSON text')
         self.assertEqual(json.loads(config)['Network'], '172.28.0.0/16')
         self.assertEqual(documents, original)
+        data = mapping(mapping(items[0], 'ConfigMap')['data'], 'data')
+        cni = json.loads(str(data['cni-conf.json']))
+        self.assertTrue(cni['plugins'][0]['delegate']['forceAddress'])
+        self.assertTrue(cni['plugins'][0]['delegate']['hairpinMode'])
+        self.assertEqual(cni['plugins'][1]['type'], 'portmap')
+        self.assertEqual(result, flannel_objects(documents, self.plan()))
+        daemon = mapping(items[1], 'DaemonSet')
+        template = mapping(mapping(daemon['spec'], 'spec')['template'], 'template')
+        annotations = mapping(
+            mapping(template['metadata'], 'metadata')['annotations'], 'annotations')
+        digest = annotations['homelab.io/cni-config-sha256']
+        self.assertEqual(len(str(digest)), 64)
+        source_data = mapping(mapping(documents[0], 'ConfigMap')['data'], 'data')
+        source_data['cni-conf.json'] = json.dumps(
+            {'plugins': [{
+                'type': 'flannel',
+                'delegate': {
+                    'hairpinMode': False
+                }
+            }]})
+        self.assertNotEqual(result, flannel_objects(documents, self.plan()))
+        source_data['cni-conf.json'] = '{"plugins": []}'
+        with self.assertRaisesRegex(ValueError, 'exactly one'):
+            flannel_objects(documents, self.plan())
 
     def test_probe_pods_are_bounded_token_free_and_nonprivileged(self):
         manifest = probe_objects(self.plan(), 'registry.k8s.io/e2e-test-images/busybox:1.36.1-1')

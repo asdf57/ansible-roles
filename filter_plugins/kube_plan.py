@@ -217,15 +217,45 @@ def flannel_daemon_matches(document: JSONObject, version: str) -> bool:
             ':v' + version) for container in containers)
 
 
+def configure_flannel_cni(data: JSONObject) -> str:
+    """Allow the bridge to follow a newly allocated Node subnet; return its digest."""
+    config = mapping(json.loads(text(data.get('cni-conf.json'), 'Flannel CNI config')),
+                     'Flannel CNI config')
+    plugins = config.get('plugins')
+    if not isinstance(plugins, list):
+        raise ValueError('Flannel CNI plugins must be an array')
+    delegates = [
+        mapping(plugin, 'CNI plugin') for plugin in plugins
+        if mapping(plugin, 'CNI plugin').get('type') == 'flannel'
+    ]
+    if len(delegates) != 1:
+        raise ValueError('Expected exactly one Flannel CNI plugin')
+    delegate = mapping(delegates[0].setdefault('delegate', {}), 'Flannel bridge delegate')
+    # Kubernetes may allocate a different pod CIDR when a Node is re-registered.
+    # The bridge plugin, not an out-of-band cleanup script, owns its gateway IP.
+    delegate['forceAddress'] = True
+    data['cni-conf.json'] = json.dumps(config, sort_keys=True)
+    return hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()
+
+
+def annotate_cni_rollout(document: JSONObject, config_digest: str) -> None:
+    """Restart the CNI installer through an ordinary DaemonSet template change."""
+    template = mapping(mapping(document['spec'], 'daemon spec')['template'], 'pod template')
+    metadata = mapping(template.setdefault('metadata', {}), 'pod metadata')
+    annotations = mapping(metadata.setdefault('annotations', {}), 'pod annotations')
+    # The init container installs host CNI files only when its Pod starts.
+    annotations['homelab.io/cni-config-sha256'] = config_digest
+
+
 def flannel_objects(raw_documents: JSONValue, raw_plan: JSONValue) -> JSONObject:
-    """Modify only the pod CIDR/ownership in the checksum-verified release manifest."""
+    """Adapt the verified release and roll its init containers when CNI data changes."""
     plan = mapping(raw_plan, 'cluster plan')
     settings = mapping(plan.get('settings'), 'settings')
     version = text(mapping(settings.get('network'), 'network').get('version'), 'Flannel version')
     if not isinstance(raw_documents, list):
         raise ValueError('Flannel documents must be an array')
     documents: list[JSONValue] = []
-    found_config = False
+    config_digest = ''
     found_daemon = False
     for raw_document in raw_documents:
         document = deepcopy(mapping(raw_document, 'Flannel resource'))
@@ -246,12 +276,16 @@ def flannel_objects(raw_documents: JSONValue, raw_plan: JSONValue) -> JSONObject
                              'Flannel network config')
             config['Network'] = settings['podCIDR']
             data['net-conf.json'] = json.dumps(config, sort_keys=True)
-            found_config = True
+            config_digest = configure_flannel_cni(data)
         if document['kind'] == 'DaemonSet':
             found_daemon = flannel_daemon_matches(document, version)
         documents.append(document)
-    if not found_config or not found_daemon:
+    if not config_digest or not found_daemon:
         raise ValueError('Release manifest does not contain the selected Flannel version/config')
+    for raw_document in documents:
+        document = mapping(raw_document, 'Flannel resource')
+        if document['kind'] == 'DaemonSet':
+            annotate_cni_rollout(document, config_digest)
     return {'apiVersion': 'v1', 'kind': 'List', 'items': documents}
 
 

@@ -32,6 +32,10 @@ Neither role queries Stigmergy or creates a separate reconciliation controller.
    permits one kubelet restart to apply config/re-register itself. A healthy,
    already canonical or merely NotReady member is not restarted;
    no bootstrap replay, reset, certificate deletion or manual Node fabrication.
+   Re-registration can allocate a new pod subnet. The managed Flannel bridge
+   delegate uses CNI `forceAddress: true` to reconcile its gateway address.
+   A ConfigMap checksum on the DaemonSet pod template rolls the init container
+   whenever CNI configuration changes, installing the updated host CNI file.
 8. Verify versions, managed Node identities/roles/addresses/pod CIDRs, Ready,
    Flannel and CoreDNS. Run unprivileged temporary pods on each node to check
    Kubernetes service DNS and HTTP between every pair; clean up only owned probes.

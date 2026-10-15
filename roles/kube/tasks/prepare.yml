@@ -64,7 +64,7 @@
     owner: root
     group: root
     mode: '0755'
-  loop: [/usr/local/bin, /opt/cni/bin, /etc/kubernetes, /var/lib/kubelet, /var/lib/homelab]
+  loop: [/usr/local/bin, /opt/cni/bin, /etc/kubernetes, /etc/kubernetes/manifests, /var/lib/kubelet, /var/lib/homelab]
 
 - name: Install verified Kubernetes binaries and base CNI plugins
   ansible.builtin.copy:
