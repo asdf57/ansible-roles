@@ -1,0 +1,12 @@
+---
+- name: Install Node Exporter
+  kubernetes.core.helm:
+    name: node-exporter
+    chart_ref: "{{ role_path }}/helm"
+    kubeconfig: "{{ lookup('ansible.builtin.env', 'KUBECONFIG') }}"
+    release_namespace: default
+    create_namespace: true
+    state: present
+    atomic: true
+    wait: true
+    timeout: 5m

@@ -1,0 +1,9 @@
+---
+- name: Uninstall Node Exporter
+  kubernetes.core.helm:
+    name: node-exporter
+    kubeconfig: "{{ lookup('ansible.builtin.env', 'KUBECONFIG') }}"
+    release_namespace: default
+    state: absent
+    wait: true
+    timeout: 5m
