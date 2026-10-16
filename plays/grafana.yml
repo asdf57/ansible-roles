@@ -1,0 +1,21 @@
+- name: Grafana
+  hosts: localhost
+  tasks:
+    - name: Ensure mode is set
+      assert:
+        that:
+          - mode is defined
+          - mode in ["install", "uninstall"]
+        fail_msg: "Mode must be set to 'install' or 'uninstall'."
+
+    - name: Install Grafana
+      import_role:
+        name: grafana
+        tasks_from: install
+      when: mode == "install"
+
+    - name: Uninstall Grafana
+      import_role:
+        name: grafana
+        tasks_from: uninstall
+      when: mode == "uninstall"
