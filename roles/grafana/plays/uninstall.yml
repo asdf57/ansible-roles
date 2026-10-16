@@ -1,7 +1,13 @@
 - name: Uninstall grafana
   hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  vars:
+    ansible_become: false
+    ansible_connection: local
   tasks:
     - name: Uninstall grafana
-      include_role:
+      ansible.builtin.include_role:
         name: grafana
         tasks_from: uninstall

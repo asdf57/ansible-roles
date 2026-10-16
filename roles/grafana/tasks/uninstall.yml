@@ -1,8 +1,9 @@
-# Uninstall grafana helm
-
-- name: Uninstall Grafana helm
+---
+- name: Uninstall Grafana
   kubernetes.core.helm:
     name: grafana
-    state: absent
+    kubeconfig: "{{ lookup('ansible.builtin.env', 'KUBECONFIG') }}"
     release_namespace: grafana
+    state: absent
     wait: true
+    timeout: 5m
