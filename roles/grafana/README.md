@@ -9,6 +9,17 @@ Like node_exporter, run the role once on the unprivileged runner with Helm,
 Use `ansible.builtin.include_role` with `name: grafana` and `tasks_from: install`
 or `tasks_from: uninstall`. The supplied plays use local execution without become.
 
+The top-level installation playbook is `plays/configure_grafana.yml`; use this
+path in Configuration.spec.playbook.path. Configuration.values supplies its chart
+overrides through `configuration_values`. It requires the verified kubeconfig to
+be prepared in the execution environment first; it does not fetch credentials.
+
+From an initialized interactive homelabc shell, run:
+
+```sh
+ansible-playbook -i localhost, "$ANSIBLE_PLAYS_PATH/configure_grafana.yml"
+```
+
 Install is atomic and waits up to five minutes for readiness. Failed initial
 installs are removed; failed upgrades roll back. Uninstall waits up to five
 minutes and preserves the namespace and resources retained by chart policy.
