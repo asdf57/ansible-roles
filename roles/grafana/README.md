@@ -26,10 +26,24 @@ minutes and preserves the namespace and resources retained by chart policy.
 There is no runtime package installation, repository registration or shared
 temporary values file.
 
-`grafana_values` is a dictionary of chart overrides, defaulting to `{}`. The chart
-defaults to a ClusterIP Service and disabled persistence: explicitly configure
-persistence before relying on stored dashboards. No ingress, LoadBalancer,
-datasources or Prometheus installation is assumed.
+`grafana_values` supplies chart overrides. Defaults provision the default
+Prometheus datasource (UID `prometheus`) at
+`http://prometheus-server.prometheus.svc.cluster.local` and Node Exporter Full
+(dashboard 1860, pinned revision 45) in the **Infrastructure** folder. Both are
+file-provisioned and managed in Git, not edited through Grafana. The upstream
+dashboard JSON is bundled in the chart; startup does not fetch it from grafana.com.
+Its job selector discovers node_exporter metrics, including annotation-discovered
+targets with the `kubernetes-service-endpoints` job name.
+
+The matching `lab-grafana` Configuration depends on `kube-setup-lab`,
+`lab-prometheus` and `lab-node-exporter`. Reconciliation provisions the datasource
+and dashboard through Helm; no manual Grafana setup is required. This does not
+install Prometheus or exporters inside the Grafana release.
+
+The chart defaults to a ClusterIP Service and disabled persistence. Provisioned
+datasources/dashboards are recreated from Git after pod replacement; other UI
+changes are not durable without persistence. No ingress or LoadBalancer is added.
+For another Prometheus location, override the datasource URL in `grafana_values`.
 
 There is no hardcoded admin password. The chart generates credentials in a
 Kubernetes Secret by default; for managed credentials, use `grafana_values.admin`

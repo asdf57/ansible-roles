@@ -1,3 +1,30 @@
 #SPDX-License-Identifier: MIT-0
 ---
-grafana_values: {}
+grafana_values:
+  datasources:
+    datasources.yaml:
+      apiVersion: 1
+      datasources:
+        - name: Prometheus
+          uid: prometheus
+          type: prometheus
+          access: proxy
+          url: http://prometheus-server.prometheus.svc.cluster.local
+          isDefault: true
+          editable: false
+  dashboardProviders:
+    dashboardproviders.yaml:
+      apiVersion: 1
+      providers:
+        - name: default
+          orgId: 1
+          folder: Infrastructure
+          type: file
+          disableDeletion: false
+          allowUiUpdates: false
+          options:
+            path: /var/lib/grafana/dashboards/default
+  dashboards:
+    default:
+      node-exporter-full:
+        file: dashboards/node-exporter-full.json
