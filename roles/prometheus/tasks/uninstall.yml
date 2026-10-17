@@ -1,0 +1,9 @@
+---
+- name: Uninstall Prometheus
+  kubernetes.core.helm:
+    name: prometheus
+    kubeconfig: "{{ lookup('ansible.builtin.env', 'KUBECONFIG') }}"
+    release_namespace: prometheus
+    state: absent
+    wait: true
+    timeout: 5m

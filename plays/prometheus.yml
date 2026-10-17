@@ -1,0 +1,25 @@
+- name: Prometheus
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  tasks:
+    - name: Ensure mode is set
+      ansible.builtin.assert:
+        that:
+          - mode is defined
+          - mode in ["install", "uninstall"]
+        quiet: true
+        fail_msg: "Mode must be set to 'install' or 'uninstall'."
+
+    - name: Install Prometheus
+      ansible.builtin.import_role:
+        name: prometheus
+        tasks_from: install
+      when: mode == "install"
+
+    - name: Uninstall Prometheus
+      ansible.builtin.import_role:
+        name: prometheus
+        tasks_from: uninstall
+      when: mode == "uninstall"

@@ -1,0 +1,7 @@
+---
+galaxy_info:
+  author: homelab
+  description: Reconcile the standalone Prometheus Helm release from the runner.
+  license: MIT
+  min_ansible_version: '2.16'
+dependencies: []

@@ -1,0 +1,13 @@
+---
+- name: Install Prometheus
+  kubernetes.core.helm:
+    name: prometheus
+    chart_ref: "{{ role_path }}/helm"
+    kubeconfig: "{{ lookup('ansible.builtin.env', 'KUBECONFIG') }}"
+    release_namespace: prometheus
+    create_namespace: true
+    state: present
+    atomic: true
+    wait: true
+    timeout: 5m
+    values: "{{ prometheus_values }}"
