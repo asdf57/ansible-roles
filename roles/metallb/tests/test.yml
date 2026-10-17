@@ -1,5 +1,2 @@
 ---
-- hosts: localhost
-  remote_user: root
-  roles:
-    - metallb
+- ansible.builtin.import_playbook: ../../../plays/metallb.yml

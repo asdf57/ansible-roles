@@ -1,0 +1,9 @@
+---
+- name: Uninstall MetalLB
+  kubernetes.core.helm:
+    name: metallb
+    kubeconfig: "{{ lookup('ansible.builtin.env', 'KUBECONFIG') }}"
+    release_namespace: metallb-system
+    state: absent
+    wait: true
+    timeout: 5m

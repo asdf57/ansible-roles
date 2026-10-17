@@ -12,6 +12,17 @@ label-selected cluster through the shared Configuration operator. Kubernetes
 setup remains separate from OS provisioning; see `roles/kube/README.md` and
 Stigmergy's Kubernetes rollout guide.
 
+## Kubernetes components
+
+Component roles have install/uninstall tasks, a `plays/<component>.yml` entry
+point accepting `mode=install` or `mode=uninstall`, and a corresponding desired
+Configuration in `homelab-init/Configuration/`. The Configuration declares the
+verified Kubernetes context and depends on cluster setup. See
+[Prometheus](roles/prometheus/README.md), Grafana, node_exporter and Goldpinger.
+The [component role contract](docs/kubernetes-component-roles.md) documents the
+required structure; [MetalLB](roles/metallb/README.md) follows it with a suspended
+site Configuration while its address pool and advertisement are designed.
+
 ## Operator development
 
 ```sh

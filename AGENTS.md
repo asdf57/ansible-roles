@@ -2,6 +2,13 @@
 
 ## Code ownership and verification
 
+- A Kubernetes component role needs explicit install/uninstall tasks, a matching
+  `plays/<component>.yml` mode entry point, and a corresponding Configuration in
+  `homelab-init/Configuration/` with verified cluster context and setup dependency.
+  Follow `docs/kubernetes-component-roles.md` and `plays/metallb.yml`: local,
+  unprivileged execution; pinned bundled chart; explicit KUBECONFIG; atomic/waited
+  installs and waited uninstalls. No package installs, repo registration, shared
+  temporary manifests or role-local play/script entry points.
 - Run `make sync` for the uv-locked development environment; `make format`
   applies YAPF and `make check` gates formatting, ty, focused Pylint and tests.
   `make lint-report` shows all Pylint findings (and may exit nonzero); keep

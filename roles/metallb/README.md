@@ -1,38 +1,52 @@
-Role Name
-=========
+# MetalLB
 
-A brief description of the role goes here.
+Reconciles release `metallb` in namespace `metallb-system` using the bundled
+upstream chart **0.16.1** (MetalLB **v0.16.1**). Chart source:
+https://github.com/metallb/metallb/tree/metallb-chart-0.16.1/charts/metallb
 
-Requirements
-------------
+Archive SHA-256:
+`fb06bb584fcb7856f15733b2a6a2aff5b61b5c350687e341c163ae24a5938adc`.
 
-Any pre-requisites that may not be covered by Ansible itself or the role should be mentioned here. For instance, if the role uses the EC2 module, it may be a good idea to mention in this section that the boto package is required.
+Run locally in the unprivileged management container with Helm,
+`kubernetes.core` and an already verified private `KUBECONFIG`:
 
-Role Variables
---------------
+```sh
+ansible-playbook -i localhost, "$ANSIBLE_PLAYS_PATH/metallb.yml" -e mode=install
+ansible-playbook -i localhost, "$ANSIBLE_PLAYS_PATH/metallb.yml" -e mode=uninstall
+```
 
-A description of the settable variables for this role should go here, including any variables that are in defaults/main.yml, vars/main.yml, and any variables that can/should be set via parameters to the role. Any variables that are read from other roles and/or the global scope (ie. hostvars, group vars, etc.) should be mentioned here as well.
+Install uses `atomic: true`, waits for readiness and has a five-minute timeout.
+Uninstall uses the same release/namespace and waits for removal. These tasks do
+not install host packages, register Helm repositories, retrieve credentials,
+escalate the runner, or write shared temporary manifests.
 
-Dependencies
-------------
+`metallb_values` supplies chart overrides. The default disables the FRR-K8s BGP
+backend because the intended first exercise is L2 advertisement. Controller,
+speaker and CRDs remain enabled. Speaker pods necessarily use node networking
+and the upstream chart's network permissions; an unprivileged runner does not
+mean every installed Kubernetes workload is unprivileged.
 
-A list of other roles hosted on Galaxy should go here, plus any details in regards to parameters that may need to be set for other roles, or variables that are used from other roles.
+## Your network configuration
 
-Example Playbook
-----------------
+This role installs MetalLB only. It does **not** select addresses, create an
+`IPAddressPool` or `L2Advertisement`, change Services, configure DNS/TLS or open
+router ports. The old hardcoded pool and shell-based application path are removed.
 
-Including an example of how to use your role (for instance, with variables passed in as parameters) is always nice for users too:
+The next exercise is to choose unused LAN addresses reserved outside DHCP, write
+an `IPAddressPool` and an `L2Advertisement` referencing it, and reconcile those
+through reviewed Ansible tasks after Helm is ready. Start from your actual LAN
+and DHCP allocations; do not assume an address is free from a failed ping.
+Then a Service of type `LoadBalancer` can request an address from that pool.
 
-    - hosts: servers
-      roles:
-         - { role: username.rolename, x: 42 }
+`homelab-init/Configuration/configuration-metallb-lab.yaml` is a **suspended**
+scaffold with explicit `lab` context and cluster-setup dependency. Nothing has
+been applied. Review your network setup before enabling it. Do not make Grafana
+depend on the suspended scaffold yet.
 
-License
--------
+Uninstalling MetalLB can interrupt all Services using its advertised addresses.
+The bundled chart manages CRDs through its CRD subchart: removal can also delete
+those CRDs and their custom resources. Suspend/change any install Configuration
+before uninstalling; do not delete the namespace or cluster resources as a cleanup
+shortcut. Helm atomic mode is not a transaction over all cluster-side effects.
 
-BSD
-
-Author Information
-------------------
-
-An optional section for the role authors to include contact information, or a website (HTML is not allowed).
+See [the component role contract](../../docs/kubernetes-component-roles.md).
