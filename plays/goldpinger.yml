@@ -1,0 +1,21 @@
+- name: Goldpinger
+  hosts: localhost
+  tasks:
+    - name: Ensure mode is set
+      assert:
+        that:
+          - mode is defined
+          - mode in ["install", "uninstall"]
+        fail_msg: "Mode must be set to 'install' or 'uninstall'."
+
+    - name: Install Goldpinger
+      import_role:
+        name: goldpinger
+        tasks_from: install
+      when: mode == "install"
+
+    - name: Uninstall Goldpinger
+      import_role:
+        name: goldpinger
+        tasks_from: uninstall
+      when: mode == "uninstall"
