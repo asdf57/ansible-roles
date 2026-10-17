@@ -1,0 +1,9 @@
+---
+- name: Uninstall Goldpinger
+  kubernetes.core.helm:
+    name: goldpinger
+    kubeconfig: "{{ lookup('ansible.builtin.env', 'KUBECONFIG') }}"
+    release_namespace: default
+    state: absent
+    wait: true
+    timeout: 5m
