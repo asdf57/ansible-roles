@@ -211,3 +211,4 @@
     STIGMERGY_API_TOKEN: "{{ lookup('env', 'STIGMERGY_API_TOKEN') }}"
   register: homelab_init_upload
   changed_when: "'Applying ' in homelab_init_upload.stdout"
+  ignore_errors: true
