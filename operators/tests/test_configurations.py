@@ -6,13 +6,14 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import tarfile
 import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import configurations as executor
 from common import API, OperatorError
-from models import JSONObject, Resource
+from models import JSONObject, JSONValue, Resource
 
 
 def resource(kind: str, name: str, spec: JSONObject, status: JSONObject | None = None) -> Resource:
@@ -116,12 +117,14 @@ class ConfigurationTests(unittest.TestCase):
                 'inventoryCaptureGroupRef': {
                     'name': 'group',
                 },
-                'playbook': {
+                'source': {
                     'repositoryRef': {
                         'name': 'code',
                     },
-                    'revision': 'a' * 40,
-                    'path': 'plays/base.yml'
+                    'revision': 'a' * 40
+                },
+                'command': {
+                    'argv': ['ansible-playbook', 'plays/base.yml']
                 }
             })
         for collection, value in (('servers', self.server), ('inventory-capture-groups',
@@ -154,6 +157,74 @@ class ConfigurationTests(unittest.TestCase):
         self.server['status']['agent'] = {'lastSeenTime': '2026-10-13T00:00:00Z'}
         executor.refresh_claim_target(self.api, snapshot)
         self.assertEqual(snapshot['metadata']['resourceVersion'], '2')
+
+    def test_command_argv_preserves_literal_arguments_without_shell_expansion(self):
+        arguments: list[JSONValue] = ['printf', '%s', 'space and $VARIABLE; $(touch forbidden)']
+        self.configuration['spec']['command'] = {'argv': arguments}
+        self.assertEqual(executor.command_argv(self.configuration), arguments)
+        invalid_cases: list[JSONValue] = [[], 'echo hello', [''], ['echo', 5],
+                                          ['echo', 'bad\0argument']]
+        for invalid in invalid_cases:
+            self.configuration['spec']['command'] = {'argv': invalid}
+            with self.assertRaises(OperatorError):
+                executor.command_argv(self.configuration)
+
+    def test_command_changes_invalidate_verification(self):
+        prior = executor.plan(self.api, self.configuration).input_revision
+        self.configuration['spec']['command'] = {'argv': ['printf', 'changed']}
+        self.assertNotEqual(prior, executor.plan(self.api, self.configuration).input_revision)
+
+    def test_explicit_context_lifetime_and_settings_are_execution_inputs(self):
+        cluster = resource('KubeCluster', 'lab', {'kubernetesVersion': '1.37.1'})
+        self.api.values[('kube-clusters', 'lab')] = cluster
+        self.configuration['spec']['context'] = {'kubeClusterRef': {'name': 'lab'}}
+        prior = executor.plan(self.api, self.configuration)
+        self.assertEqual(prior.kube_cluster, cluster)
+        cluster['metadata']['uid'] = 'replaced-cluster'
+        self.assertNotEqual(prior.input_revision,
+                            executor.plan(self.api, self.configuration).input_revision)
+
+    def test_bootstrap_does_not_fetch_an_existing_cluster_context(self):
+        resolved = executor.plan(self.api, self.configuration)
+        with patch.object(executor, 'verified_context') as fetch:
+            self.assertEqual(executor.kubernetes_environment(self.api, resolved, Path('/fixture')),
+                             {})
+        fetch.assert_not_called()
+
+    def test_context_is_private_and_failed_fetch_cannot_reuse_an_old_context(self):
+        resolved = executor.plan(self.api, self.configuration)
+        resolved.kube_cluster = resource('KubeCluster', 'lab', {'kubernetesVersion': '1.37.1'})
+        with tempfile.TemporaryDirectory() as temporary, \
+                patch.object(executor, 'install_kubectl'), \
+                patch.object(executor, 'verified_context', return_value={'kind': 'Config'}):
+            directory = Path(temporary)
+            environment = executor.kubernetes_environment(self.api, resolved, directory)
+            self.assertEqual(environment['KUBECONFIG'], str(directory / 'kubeconfig'))
+            self.assertEqual((directory / 'kubeconfig').stat().st_mode & 0o777, 0o600)
+        with patch.object(executor, 'verified_context', side_effect=ValueError('private error')):
+            with self.assertRaisesRegex(OperatorError,
+                                        '^Verified Kubernetes context could not be prepared$'):
+                executor.kubernetes_environment(self.api, resolved, Path('/fixture'))
+
+    def test_direct_command_runs_between_guards_with_scoped_environment_and_cwd(self):
+        resolved = executor.plan(self.api, self.configuration)
+        with tempfile.TemporaryDirectory() as temporary, \
+                patch.dict(os.environ, {'KUBECONFIG': '/unrelated/admin', 'K8S_AUTH_KUBECONFIG': '/unrelated/admin'}), \
+                patch.object(executor, 'verify_claims'), \
+                patch.object(executor, 'operation_progress'), \
+                patch.object(executor, 'run_ansible', return_value=subprocess.CompletedProcess([], 0)) as guard, \
+                patch.object(executor, 'run_command', return_value=subprocess.CompletedProcess([], 0)) as command:
+            directory = Path(temporary)
+            executor.run_commands(self.api, resolved, Path('/trusted'), Path('/checkout'),
+                                  directory)
+            self.assertEqual(guard.call_count, 2)
+            self.assertEqual(command.call_args.args[0], ['ansible-playbook', 'plays/base.yml'])
+            self.assertEqual(command.call_args.kwargs['cwd'], Path('/checkout'))
+            environment = command.call_args.kwargs['environment']
+            self.assertNotIn('KUBECONFIG', environment)
+            self.assertNotIn('K8S_AUTH_KUBECONFIG', environment)
+            self.assertEqual(environment['ANSIBLE_INVENTORY'], str(directory / 'inventory.json'))
+            self.assertEqual(os.environ['KUBECONFIG'], '/unrelated/admin')
 
     def test_claim_refresh_refuses_changed_identity_or_transport(self):
         snapshot = copy.deepcopy(self.server)
@@ -243,7 +314,7 @@ class ConfigurationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory, \
                 patch.object(executor, 'checkout', return_value=Path('/fixture/plays/setup.yml')), \
                 patch.object(executor, 'prepare_execution'), \
-                patch.object(executor, 'run_plays', side_effect=verify_during_work):
+                patch.object(executor, 'run_commands', side_effect=verify_during_work):
             executor.execute(self.api, resolved, Path('/fixture'), Path(directory))
         self.assertEqual(self.configuration['status']['phase'], 'Ready')
         self.assertNotIn('operationRef', self.server['status'])
@@ -253,7 +324,7 @@ class ConfigurationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory, \
                 patch.object(executor, 'checkout', return_value=Path('/fixture/plays/setup.yml')), \
                 patch.object(executor, 'prepare_execution'), \
-                patch.object(executor, 'run_plays', side_effect=OperatorError('PlaybookFailed', 'fixture failed')):
+                patch.object(executor, 'run_commands', side_effect=OperatorError('CommandFailed', 'fixture failed')):
             with self.assertRaises(OperatorError):
                 executor.execute(self.api, resolved, Path('/fixture'), Path(directory))
         self.assertNotEqual(self.configuration['status']['phase'], 'Ready')
@@ -264,7 +335,7 @@ class ConfigurationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory, \
                 patch.object(executor, 'checkout', return_value=Path('/fixture/plays/setup.yml')), \
                 patch.object(executor, 'prepare_execution'), \
-                patch.object(executor, 'run_plays', side_effect=OperatorError('RemoteWorkUncertain', 'timeout')):
+                patch.object(executor, 'run_commands', side_effect=OperatorError('RemoteWorkUncertain', 'timeout')):
             with self.assertRaises(OperatorError):
                 executor.execute(self.api, resolved, Path('/fixture'), Path(directory))
         self.assertNotEqual(self.configuration['status']['phase'], 'Ready')
@@ -281,7 +352,7 @@ class ConfigurationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory, \
                 patch.object(executor, 'checkout', return_value=Path('/fixture/plays/setup.yml')), \
                 patch.object(executor, 'prepare_execution'), \
-                patch.object(executor, 'run_plays', side_effect=change_inputs):
+                patch.object(executor, 'run_commands', side_effect=change_inputs):
             with self.assertRaisesRegex(OperatorError, 'changed during execution'):
                 executor.execute(self.api, resolved, Path('/fixture'), Path(directory))
         self.assertNotEqual(self.configuration['status']['phase'], 'Ready')
@@ -306,12 +377,13 @@ class ConfigurationTests(unittest.TestCase):
                 'commit', '-q', '-m', 'fixture'
             ], check=True)
             executor.mapping(self.configuration['spec'],
-                             'playbook')['revision'] = subprocess.check_output(
+                             'source')['revision'] = subprocess.check_output(
                                  ['git', '-C', str(source), 'rev-parse', 'HEAD'],
                                  text=True).strip()
             play.write_text('# unreviewed\n', encoding='utf-8')
             selected = executor.checkout(self.api, self.configuration, source, root / 'checkout')
-            self.assertEqual(selected.read_text(encoding='utf-8'), '# reviewed\n')
+            self.assertEqual((selected / 'plays/base.yml').read_text(encoding='utf-8'),
+                             '# reviewed\n')
 
     def test_target_is_context_not_inventory_selection(self):
         cluster = resource('KubeCluster', 'lab', {})
@@ -353,7 +425,7 @@ class ConfigurationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory, \
                 patch.object(executor, 'checkout', return_value=Path('/fixture/plays/setup.yml')), \
                 patch.object(executor, 'prepare_execution'), \
-                patch.object(executor, 'run_plays', side_effect=OperatorError('PlaybookFailed', 'fixture')), \
+                patch.object(executor, 'run_commands', side_effect=OperatorError('CommandFailed', 'fixture')), \
                 patch.object(executor, 'publish_target_status') as publish:
             (Path(directory) / 'target-status.json').write_text('{}', encoding='utf-8')
             with self.assertRaises(OperatorError):
@@ -366,7 +438,7 @@ class ConfigurationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory, \
                 patch.object(executor, 'checkout', return_value=Path('/fixture/plays/setup.yml')), \
                 patch.object(executor, 'prepare_execution'), \
-                patch.object(executor, 'run_plays', side_effect=OperatorError('PlaybookFailed', 'fixture')):
+                patch.object(executor, 'run_commands', side_effect=OperatorError('CommandFailed', 'fixture')):
             (Path(directory) / 'target-observation.json').write_text(
                 '{"observation":{"membership":{"missingMembers":["node"]}}}', encoding='utf-8')
             (Path(directory) / 'target-status.json').write_text(
@@ -386,7 +458,7 @@ class ConfigurationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory, \
                 patch.object(executor, 'checkout', return_value=Path('/fixture/plays/setup.yml')), \
                 patch.object(executor, 'prepare_execution'), \
-                patch.object(executor, 'run_plays', side_effect=OperatorError('RemoteWorkUncertain', 'fixture')), \
+                patch.object(executor, 'run_commands', side_effect=OperatorError('RemoteWorkUncertain', 'fixture')), \
                 patch.object(executor, 'publish_target_status') as publish:
             (Path(directory) / 'target-observation.json').write_text('{}', encoding='utf-8')
             with self.assertRaises(OperatorError):
@@ -415,7 +487,7 @@ class ConfigurationTests(unittest.TestCase):
         resolved = executor.plan(self.api, self.configuration)
         executor.report(self.api, self.configuration, 'Ready', 'Verified', resolved.input_revision,
                         resolved)
-        self.assertEqual(self.configuration['status']['playbookRevision'], 'a' * 40)
+        self.assertEqual(self.configuration['status']['sourceRevision'], 'a' * 40)
         self.assertEqual(self.configuration['status']['resolvedReferences'],
                          resolved.resolved_references)
 
@@ -429,7 +501,7 @@ class ConfigurationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory, \
                 patch.object(executor, 'checkout', return_value=Path('/fixture/plays/setup.yml')), \
                 patch.object(executor, 'prepare_execution'), \
-                patch.object(executor, 'run_plays', side_effect=publish_result):
+                patch.object(executor, 'run_commands', side_effect=publish_result):
             executor.execute(self.api, resolved, Path('/fixture'), Path(directory))
         self.assertEqual(self.configuration['status']['outputs'],
                          {'clusterNamespaceUID': 'fixture'})
@@ -444,7 +516,7 @@ class ConfigurationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory, \
                 patch.object(executor, 'checkout', return_value=Path('/fixture/plays/setup.yml')), \
                 patch.object(executor, 'prepare_execution'), \
-                patch.object(executor, 'run_plays', side_effect=publish_result):
+                patch.object(executor, 'run_commands', side_effect=publish_result):
             with self.assertRaisesRegex(OperatorError, 'small regular JSON file'):
                 executor.execute(self.api, resolved, Path('/fixture'), Path(directory))
         self.assertNotEqual(self.configuration['status']['phase'], 'Ready')
@@ -456,8 +528,21 @@ class ConfigurationTests(unittest.TestCase):
                 patch.object(executor, 'operation_progress'), \
                 patch.object(executor, 'run_ansible', return_value=subprocess.CompletedProcess([], 4)):
             with self.assertRaisesRegex(OperatorError, 'SSH became unreachable'):
-                executor.run_plays(self.api, resolved, Path('/fixture'),
-                                   Path('/fixture/plays/setup.yml'), Path(directory))
+                executor.run_commands(self.api, resolved, Path('/fixture'),
+                                      Path('/fixture/plays/setup.yml'), Path(directory))
+
+    def test_missing_local_executable_is_a_completed_failure(self):
+        resolved = executor.plan(self.api, self.configuration)
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(executor, 'verify_claims'), \
+                patch.object(executor, 'operation_progress'), \
+                patch.object(executor, 'run_ansible', return_value=subprocess.CompletedProcess([], 0)), \
+                patch.object(executor, 'run_command', side_effect=FileNotFoundError('private argv')):
+            with self.assertRaises(OperatorError) as failure:
+                executor.run_commands(self.api, resolved, Path('/fixture'), Path('/checkout'),
+                                      Path(directory))
+        self.assertEqual(failure.exception.reason, 'CommandFailed')
+        self.assertNotIn('private argv', str(failure.exception))
 
     def test_preserves_capture_groups_and_namespaced_context(self):
         resolved = executor.plan(self.api, self.configuration)
@@ -474,12 +559,15 @@ class ConfigurationTests(unittest.TestCase):
         self.assertIn('node', inventory['selected']['hosts'])
         self.assertEqual(inventory['selected']['vars'], {'example': 'value'})
         self.assertEqual(inventory['all']['hosts']['node']['ansible_host'], '192.0.2.1')
+        self.assertEqual(inventory['all']['vars']['ansible_connection'], 'local')
+        self.assertFalse(inventory['all']['vars']['ansible_become'])
+        self.assertTrue(inventory['all']['hosts']['node']['ansible_become'])
         self.assertEqual(values['configuration_nodes'][0]['labels'],
                          {'example.io/service': 'database'})
 
     def test_unpinned_checkout_resolves_main_and_keeps_committed_content(self):
         patch.stopall()
-        playbook = executor.mapping(self.configuration['spec'], 'playbook')
+        playbook = executor.mapping(self.configuration['spec'], 'source')
         playbook.pop('revision')
         repository = self.api.get('git-repositories', 'code')
         with tempfile.TemporaryDirectory() as directory:
@@ -505,7 +593,8 @@ class ConfigurationTests(unittest.TestCase):
             play.write_text('# dirty\n', encoding='utf-8')
             selected = executor.checkout(self.api, self.configuration, source, root / 'checkout',
                                          commit)
-            self.assertEqual(selected.read_text(encoding='utf-8'), '# committed\n')
+            self.assertEqual((selected / 'plays/base.yml').read_text(encoding='utf-8'),
+                             '# committed\n')
             repository['spec']['ref'] = 'missing-branch'
             with self.assertRaisesRegex(OperatorError, 'missing from pipeline'):
                 executor.source_commit(repository, playbook, source)
@@ -528,21 +617,22 @@ class ConfigurationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory, \
                 patch.object(executor, 'checkout', return_value=Path('/fixture/plays/setup.yml')), \
                 patch.object(executor, 'prepare_execution'), \
-                patch.object(executor, 'run_plays', side_effect=replace_target):
+                patch.object(executor, 'run_commands', side_effect=replace_target):
             with self.assertRaisesRegex(OperatorError, 'changed during execution'):
                 executor.execute(self.api, resolved, Path('/fixture'), Path(directory))
         self.assertNotEqual(self.configuration['status']['phase'], 'Ready')
 
-    def test_pinned_checkout_refuses_path_escape(self):
+    def test_pinned_checkout_refuses_escaping_archive_link(self):
         patch.stopall()
-        playbook = executor.mapping(self.configuration['spec'], 'playbook')
-        playbook['path'] = '../outside.yml'
+        playbook = executor.mapping(self.configuration['spec'], 'source')
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             # An actual Git fixture validates archive handling, not just a mocked hash.
             source = root / 'source'
             source.mkdir()
+            (source / 'escape').symlink_to('/etc/passwd')
             subprocess.run(['git', 'init', '-q', str(source)], check=True)
+            subprocess.run(['git', '-C', str(source), 'add', 'escape'], check=True)
             subprocess.run([
                 'git', '-C',
                 str(source), 'remote', 'add', 'origin', 'https://example.test/code.git'
@@ -554,5 +644,5 @@ class ConfigurationTests(unittest.TestCase):
             ], check=True)
             playbook['revision'] = subprocess.check_output(
                 ['git', '-C', str(source), 'rev-parse', 'HEAD'], text=True).strip()
-            with self.assertRaisesRegex(OperatorError, 'reviewed plays directory'):
+            with self.assertRaises(tarfile.FilterError):
                 executor.checkout(self.api, self.configuration, source, root / 'checkout')

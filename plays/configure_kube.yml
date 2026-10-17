@@ -178,7 +178,7 @@
     - name: Persist successful identity only after cluster verification
       ansible.builtin.copy:
         dest: /var/lib/homelab/kube-cluster.json
-        content: "{{ {'identity': kube_expected_identity, 'phase': 'Ready', 'files': kube_installed_checksums, 'sandboxImage': containerd_sandbox_image, 'clusterNamespaceUID': hostvars[kube_cluster_plan.controlPlane.name].kube_namespace_uid, 'controllerRevision': configuration_playbook_revision, 'flannelManifestSHA': hostvars[kube_cluster_plan.controlPlane.name].kube_verified_flannel_file.stat.checksum} | to_nice_json }}\n"
+        content: "{{ {'identity': kube_expected_identity, 'phase': 'Ready', 'files': kube_installed_checksums, 'sandboxImage': containerd_sandbox_image, 'clusterNamespaceUID': hostvars[kube_cluster_plan.controlPlane.name].kube_namespace_uid, 'controllerRevision': configuration_source_revision, 'flannelManifestSHA': hostvars[kube_cluster_plan.controlPlane.name].kube_verified_flannel_file.stat.checksum} | to_nice_json }}\n"
         owner: root
         group: root
         mode: '0600'

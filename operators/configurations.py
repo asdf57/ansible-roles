@@ -1,4 +1,4 @@
-"""Reconcile coherent, ordered playbooks independently of OS provisioning.
+"""Reconcile repository-backed commands independently of OS provisioning.
 
 Configuration dependencies order setups; Ansible orders roles inside each setup.
 The executor never bootstraps, resets or upgrades Kubernetes on its own.
@@ -21,10 +21,11 @@ import tempfile
 from urllib.error import HTTPError
 
 from common import (API, OperatorError, capture_inventory, resolved_inventory_hosts, run_ansible,
-                    ssh_args, write_private, management_address)
+                    run_command, ssh_args, write_private, management_address)
 from models import JSONObject, Resource, json_object, json_string
 from runner_trust import prepare
 from server_operation import reservation, operation_progress, verify_operation
+from runner_kubernetes import verified_context, install_kubectl
 
 
 @dataclass
@@ -35,9 +36,25 @@ class Plan:
     servers: list[Resource]
     hosts: dict[str, JSONObject]
     input_revision: str
-    playbook_revision: str
+    source_revision: str
     resolved_references: list[JSONObject]
     inventory: JSONObject
+    kube_cluster: Resource | None = None
+
+
+def command_argv(configuration: Resource) -> list[str]:
+    """Validate the direct executable/arguments; never expand or implicitly invoke a shell."""
+    arguments = mapping(configuration['spec'], 'command').get('argv')
+    if not isinstance(arguments, list) or not arguments or len(arguments) > 256:
+        raise OperatorError('InvalidCommand', 'command.argv requires 1 to 256 arguments')
+    result = []
+    for argument in arguments:
+        if not isinstance(argument,
+                          str) or not argument or '\0' in argument or len(argument) > 8192:
+            raise OperatorError('InvalidCommand',
+                                'Command arguments must be nonempty strings without NUL')
+        result.append(argument)
+    return result
 
 
 def mapping(parent: JSONObject, field: str) -> JSONObject:
@@ -206,16 +223,15 @@ def observed_reference(value: Resource) -> JSONObject:
                 generation=value['metadata'].get('generation', 0))
 
 
-def source_commit(repository: Resource, playbook: JSONObject, source: Path) -> str:
+def source_commit(repository: Resource, source_spec: JSONObject, source: Path) -> str:
     """Resolve a local trusted Git input to a commit without fetching arbitrary code."""
     git = ['git', '-c', 'safe.directory=' + str(source), '-C', str(source)]
     origin = subprocess.check_output([*git, 'remote', 'get-url', 'origin'], text=True).strip()
     if origin != repository['spec'].get('url'):
-        raise OperatorError('SourceMismatch',
-                            'Playbook repository differs from pipeline code input')
-    revision = playbook.get('revision')
+        raise OperatorError('SourceMismatch', 'Source repository differs from pipeline code input')
+    revision = source_spec.get('revision')
     if revision is not None:
-        commit = json_string(revision, 'playbook revision')
+        commit = json_string(revision, 'source revision')
         if not re.fullmatch('[0-9a-f]{40}', commit):
             raise OperatorError('SourceMismatch', 'Revision must be a full immutable commit')
         candidates = [commit]
@@ -239,12 +255,18 @@ def plan(api: API, configuration: Resource, stack: tuple[str, ...] = ()) -> Plan
     if configuration['spec'].get('suspended') or configuration['metadata'].get('deletionTimestamp'):
         raise OperatorError('Suspended', 'Configuration is suspended or terminating')
     target, servers, group, hosts, inventory = resolve_targets(api, configuration)
+    command_argv(configuration)
     repository = fetch_reference(
-        api, 'git-repositories',
-        reference(mapping(configuration['spec'], 'playbook'), 'repositoryRef'))
-    commit = source_commit(repository, mapping(configuration['spec'], 'playbook'),
+        api, 'git-repositories', reference(mapping(configuration['spec'], 'source'),
+                                           'repositoryRef'))
+    commit = source_commit(repository, mapping(configuration['spec'], 'source'),
                            Path(__file__).resolve().parents[1])
     references = [observed_reference(value) for value in (target, group, repository, *servers)]
+    kube_cluster = None
+    context = json_object(configuration['spec'].get('context', {}), 'execution context')
+    if 'kubeClusterRef' in context:
+        kube_cluster = fetch_reference(api, 'kube-clusters', reference(context, 'kubeClusterRef'))
+        references.append(observed_reference(kube_cluster))
     references.extend(
         observed_reference(fetch_reference(api, 'configurations', ref))
         for ref in dependencies(configuration))
@@ -252,15 +274,19 @@ def plan(api: API, configuration: Resource, stack: tuple[str, ...] = ()) -> Plan
                               targetGeneration=target['metadata'].get('generation', 0),
                               targetSpec=target['spec'], groupUID=group['metadata']['uid'],
                               groupGeneration=group['metadata'].get('generation', 0),
-                              repositorySpec=repository['spec'], playbookRevision=commit,
+                              repositorySpec=repository['spec'], sourceRevision=commit,
                               inventory=inventory, dependencies=prerequisite_inputs(
                                   api, configuration,
                                   stack), members=[member_inputs(server) for server in servers])
     inputs['resolvedReferences'] = [ref for ref in references]
     inputs['hosts'] = {name: variables for name, variables in hosts.items()}
+    if kube_cluster is not None:
+        inputs['kubernetesContext'] = dict(uid=kube_cluster['metadata']['uid'],
+                                           spec=kube_cluster['spec'])
     revision = 'sha256:' + hashlib.sha256(
         json.dumps(inputs, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
-    return Plan(configuration, target, servers, hosts, revision, commit, references, inventory)
+    return Plan(configuration, target, servers, hosts, revision, commit, references, inventory,
+                kube_cluster)
 
 
 def report(api: API, configuration: Resource, phase: str, reason: str, revision: str | None = None,
@@ -289,7 +315,7 @@ def report(api: API, configuration: Resource, phase: str, reason: str, revision:
     if revision:
         status['inputRevision'] = revision
     if resolved:
-        status['playbookRevision'] = resolved.playbook_revision
+        status['sourceRevision'] = resolved.source_revision
         status['resolvedReferences'] = [ref for ref in resolved.resolved_references]
     if phase == 'Ready':
         status['lastVerifiedAt'] = datetime.now(timezone.utc).isoformat()
@@ -307,25 +333,17 @@ def checkout(api: API, configuration: Resource, source: Path, destination: Path,
     Optional pins and configured refs both resolve to immutable commits. No remote
     fetch or unsafe archive extraction; missing code is a visible prerequisite.
     """
-    playbook = mapping(configuration['spec'], 'playbook')
-    repository = fetch_reference(api, 'git-repositories', reference(playbook, 'repositoryRef'))
+    source_spec = mapping(configuration['spec'], 'source')
+    repository = fetch_reference(api, 'git-repositories', reference(source_spec, 'repositoryRef'))
     git = ['git', '-c', 'safe.directory=' + str(source), '-C', str(source)]
-    revision = source_commit(repository, playbook, source)
+    revision = source_commit(repository, source_spec, source)
     if expected_commit is not None and revision != expected_commit:
-        raise OperatorError('InputsChanged', 'Playbook source changed before checkout')
-    relative = json_string(playbook.get('path'), 'playbook path')
-    if not re.fullmatch(r'plays/[a-zA-Z0-9_/-]+\.ya?ml', relative):
-        raise OperatorError('SourceMismatch',
-                            'Playbook must be a file inside the reviewed plays directory')
+        raise OperatorError('InputsChanged', 'Configuration source changed before checkout')
     archive = subprocess.check_output([*git, 'archive', '--format=tar', revision])
     destination.mkdir()
     with tarfile.open(fileobj=io.BytesIO(archive)) as bundle:
         bundle.extractall(destination, filter='data')
-    play = (destination / relative).resolve()
-    if not play.is_relative_to((destination / 'plays').resolve()) or not play.is_file():
-        raise OperatorError('SourceMismatch',
-                            'Playbook must be a file inside the reviewed plays directory')
-    return play
+    return destination
 
 
 def prepare_execution(api: API, resolved: Plan, directory: Path) -> None:
@@ -341,6 +359,11 @@ def prepare_execution(api: API, resolved: Plan, directory: Path) -> None:
             group['hosts'] = {name: resolved.hosts[name] for name in mapping(group, 'hosts')}
     all_group = json_object(inventory.setdefault('all', {}), 'all inventory group')
     all_group['hosts'] = wire_hosts
+    # Implicit localhost is the unprivileged runner. Managed hosts receive
+    # explicit SSH/become host variables below, so capture-wide transport must
+    # not accidentally make a localhost-only Helm play SSH or escalate locally.
+    runner_defaults = json_object(all_group.setdefault('vars', {}), 'all group variables')
+    runner_defaults.update(ansible_connection='local', ansible_become=False)
     known = directory / 'known_hosts'
     write_private(known, prepare(api, inventory))
     for server in resolved.servers:
@@ -360,8 +383,8 @@ def prepare_execution(api: API, resolved: Plan, directory: Path) -> None:
             configuration['spec'].get('values', {}),
             'configuration_workspace':
             str(directory),
-            'configuration_playbook_revision':
-            resolved.playbook_revision,
+            'configuration_source_revision':
+            resolved.source_revision,
             'configuration_ref': {
                 'name': configuration['metadata']['name'],
                 'uid': configuration['metadata']['uid']
@@ -397,39 +420,96 @@ def verify_claims(api: API, servers: list[Resource]) -> None:
         verify_operation(api, latest)
 
 
-def run_plays(api: API, resolved: Plan, source: Path, play: Path, directory: Path) -> None:
-    """Run the installed-host guard around the reviewed playbook, streaming logs."""
-    paths = {
-        'ANSIBLE_ROLES_PATH': str(play.parent.parent / 'roles'),
-        'ANSIBLE_FILTER_PLUGINS': str(play.parent.parent / 'filter_plugins')
-    }
-    previous = {name: os.environ.get(name) for name in paths}
-    os.environ.update(paths)
+def require_completed_command(result: subprocess.CompletedProcess[str]) -> None:
+    """Separate known completed failure from transport loss or signal interruption."""
+    if result.returncode in (4, 6) or result.returncode < 0:
+        raise OperatorError(
+            'RemoteWorkUncertain', 'SSH became unreachable or command was interrupted; '
+            'inspect remote work before releasing claims')
+    if result.returncode:
+        raise OperatorError('CommandFailed',
+                            'Configuration command or installed-host verification failed')
+
+
+def kubernetes_environment(api: API, resolved: Plan, directory: Path) -> dict[str, str]:
+    """Prepare opt-in private cluster credentials only inside this execution workspace."""
+    cluster = resolved.kube_cluster
+    if cluster is None:
+        return {}
     try:
-        for selected_play in (source / 'plays/configuration_guard.yml', play,
-                              source / 'plays/configuration_guard.yml'):
+        context = verified_context(api, resolved.inventory, cluster)
+        path = directory / 'kubeconfig'
+        write_private(path, json.dumps(context))
+        binaries = directory / 'bin'
+        install_kubectl(json_string(cluster['spec'].get('kubernetesVersion'), 'Kubernetes version'),
+                        binaries)
+        return {
+            'KUBECONFIG': str(path),
+            'PATH': str(binaries) + os.pathsep + os.environ.get('PATH', '')
+        }
+    except Exception as error:
+        # Retrieval errors may include private subprocess data; report a fixed message.
+        raise OperatorError('ContextUnavailable',
+                            'Verified Kubernetes context could not be prepared') from error
+
+
+def run_commands(api: API, resolved: Plan, source: Path, checkout_directory: Path,
+                 directory: Path) -> None:
+    """Guard installed hosts around direct argv execution; preserve uncertain ownership."""
+    paths = {
+        'ANSIBLE_ROLES_PATH': str(checkout_directory / 'roles'),
+        'ANSIBLE_PLAYS_PATH': str(checkout_directory / 'plays'),
+        'ANSIBLE_FILTER_PLUGINS': str(checkout_directory / 'filter_plugins'),
+        'ANSIBLE_INVENTORY': str(directory / 'inventory.json'),
+        'ANSIBLE_DISPLAY_SKIPPED_HOSTS': 'false',
+        'ANSIBLE_CALLBACK_RESULT_FORMAT': 'yaml',
+        'ANSIBLE_INJECT_FACT_VARS': 'false',
+        'ANSIBLE_SSH_USETTY': 'false',
+        'CONFIGURATION_CONTEXT_FILE': str(directory / 'values.json'),
+        'CONFIGURATION_WORKSPACE': str(directory),
+    }
+    previous = {
+        name: os.environ.get(name)
+        for name in (*paths, 'KUBECONFIG', 'K8S_AUTH_KUBECONFIG', 'PATH')
+    }
+    os.environ.update(paths)
+    os.environ.pop('KUBECONFIG', None)
+    os.environ.pop('K8S_AUTH_KUBECONFIG', None)
+    try:
+        guard = [
+            'ansible-playbook',
+            str(source / 'plays/configuration_guard.yml'), '-e',
+            '@' + str(directory / 'values.json')
+        ]
+        for stage in ('Verify installed hosts', 'Execute command',
+                      'Verify installed hosts after command'):
             verify_claims(api, resolved.servers)
             for server in resolved.servers:
-                operation_progress(api, server, 'Execute ' + selected_play.name)
-            result = run_ansible([
-                'ansible-playbook', '-i',
-                str(directory / 'inventory.json'),
-                str(selected_play), '-e', '@' + str(directory / 'values.json')
-            ], directory / 'ansible.log', 3600)
-            if result.returncode in (4, 6):
-                # Transport loss does not prove a remote module/process stopped.
-                raise OperatorError(
-                    'RemoteWorkUncertain',
-                    'SSH became unreachable; inspect remote work before releasing claims')
-            if result.returncode:
-                raise OperatorError('PlaybookFailed',
-                                    'Reviewed configuration or verification play failed')
+                operation_progress(api, server, stage)
+            if stage == 'Execute command':
+                os.environ.update(kubernetes_environment(api, resolved, directory))
+                # Preparation can outlive desired edits; recheck before execution.
+                verify_claims(api, resolved.servers)
+                if plan(api, resolved.configuration).input_revision != resolved.input_revision:
+                    raise OperatorError('InputsChanged',
+                                        'Configuration changed during context preparation')
+                result = run_command(command_argv(resolved.configuration),
+                                     directory / 'command.log', 3600, environment=dict(os.environ),
+                                     cwd=checkout_directory)
+            else:
+                result = run_ansible(guard, directory / 'guard.log', 3600)
+            require_completed_command(result)
     except subprocess.TimeoutExpired as error:
         # Killing local SSH/Ansible cannot prove all remote work has stopped.
         # Retain every acquired host claim until an administrator inspects it.
         raise OperatorError(
             'RemoteWorkUncertain',
             'Timed out; inspect remote work before releasing host claims') from error
+    except OSError as error:
+        # Missing/unexecutable local tooling is a completed start failure, not
+        # evidence of an orphaned remote mutation. Never expose its raw argv.
+        raise OperatorError('CommandFailed',
+                            'Configuration command could not be executed') from error
     finally:
         for name, value in previous.items():
             if value is None:
@@ -455,12 +535,12 @@ def read_public_result(path: Path) -> JSONObject | None:
     if not path.exists() and not path.is_symlink():
         return None
     if path.is_symlink() or not path.is_file() or path.stat().st_size > 65536:
-        raise OperatorError('InvalidResult', 'Playbook result must be a small regular JSON file')
+        raise OperatorError('InvalidResult', 'Command result must be a small regular JSON file')
     try:
         return json_object(json.loads(path.read_text(encoding='utf-8')), 'public playbook result')
     except (ValueError, UnicodeError) as error:
         raise OperatorError('InvalidResult',
-                            'Playbook result must be a public JSON object') from error
+                            'Command result must be a public JSON object') from error
 
 
 def publish_target_status(api: API, resolved: Plan, status: JSONObject) -> None:
@@ -486,7 +566,8 @@ def publish_target_status(api: API, resolved: Plan, status: JSONObject) -> None:
 def execute(api: API, resolved: Plan, source: Path, directory: Path) -> None:
     """Claim all selected hosts, verify installed sessions, execute and recheck inputs."""
     configuration = resolved.configuration
-    play = checkout(api, configuration, source, directory / 'code', resolved.playbook_revision)
+    checkout_directory = checkout(api, configuration, source, directory / 'code',
+                                  resolved.source_revision)
     prepare_execution(api, resolved, directory)
     with ExitStack() as owners:
         for server in resolved.servers:
@@ -501,15 +582,15 @@ def execute(api: API, resolved: Plan, source: Path, directory: Path) -> None:
         refreshed = plan(api, configuration)
         if refreshed.input_revision != resolved.input_revision:
             raise OperatorError('InputsChanged', 'Configuration inputs changed before execution')
-        report(api, configuration, 'Reconciling', 'ExecutingPlaybook', resolved.input_revision,
+        report(api, configuration, 'Reconciling', 'ExecutingCommand', resolved.input_revision,
                resolved)
         try:
-            run_plays(api, resolved, source, play, directory)
+            run_commands(api, resolved, source, checkout_directory, directory)
         except OperatorError as error:
             # A completed failed play may still have useful public observations.
             # Never publish its success file, nor report after uncertain remote
             # work, ownership loss or changed inputs. Domain roles own payloads.
-            if error.reason == 'PlaybookFailed':
+            if error.reason == 'CommandFailed':
                 publish_observations(api, resolved, directory)
             raise
         verify_claims(api, resolved.servers)
@@ -520,7 +601,7 @@ def execute(api: API, resolved: Plan, source: Path, directory: Path) -> None:
         target_status = read_public_result(directory / 'target-status.json')
         if target_status is not None:
             publish_target_status(api, resolved, target_status)
-    report(api, configuration, 'Ready', 'PlaybookVerified', resolved.input_revision, resolved,
+    report(api, configuration, 'Ready', 'CommandVerified', resolved.input_revision, resolved,
            outputs)
 
 

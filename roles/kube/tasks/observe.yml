@@ -14,7 +14,7 @@
         configurationRef: "{{ configuration_ref }}"
         configurationGeneration: "{{ configuration_generation }}"
         inputRevision: "{{ configuration_input_revision }}"
-        playbookRevision: "{{ configuration_playbook_revision }}"
+        playbookRevision: "{{ configuration_source_revision }}"
         membership: "{{ kube_cluster_plan | kube_membership_observation(kube_observed_membership.stdout | from_json) }}"
 
 - name: Publish observations without claiming successful configuration or workload checks

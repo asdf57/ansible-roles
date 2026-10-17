@@ -123,18 +123,25 @@ def write_private(path: str | Path, content: str) -> None:
 def run_ansible(command: list[str], diagnostic: Path,
                 timeout: float) -> subprocess.CompletedProcess[str]:
     """Stream Ansible's standard, no_log-aware output and keep a private copy."""
-    diagnostic = Path(diagnostic)
-    write_private(diagnostic, '')
     environment = dict(os.environ)
     environment.update(ANSIBLE_STDOUT_CALLBACK='default', ANSIBLE_NOCOLOR='1',
                        ANSIBLE_DISPLAY_ARGS_TO_STDOUT='false', ANSIBLE_VERBOSITY='0',
                        ANSIBLE_DISPLAY_SKIPPED_HOSTS='false', ANSIBLE_SSH_USETTY='false',
                        ANSIBLE_INJECT_FACT_VARS='false', ANSIBLE_CALLBACK_RESULT_FORMAT='yaml')
+    return run_command(command, diagnostic, timeout, environment=environment)
+
+
+def run_command(command: list[str], diagnostic: Path, timeout: float, *,
+                environment: dict[str, str] | None = None,
+                cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
+    """Execute argv without a shell, streaming output into a private diagnostic log."""
+    diagnostic = Path(diagnostic)
+    write_private(diagnostic, '')
     with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                          bufsize=1, env=environment, start_new_session=True) as process:
+                          bufsize=1, env=environment, cwd=cwd, start_new_session=True) as process:
         output_stream = process.stdout
         if output_stream is None:
-            raise RuntimeError('Ansible output pipe was not created')
+            raise RuntimeError('Command output pipe was not created')
 
         def stream():
             """Drain continuously so a full pipe cannot stall the playbook."""

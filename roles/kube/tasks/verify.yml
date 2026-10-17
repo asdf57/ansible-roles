@@ -194,7 +194,7 @@
         'configurationRef': configuration_ref,
         'configurationGeneration': configuration_generation,
         'inputRevision': configuration_input_revision,
-        'playbookRevision': configuration_playbook_revision,
+        'playbookRevision': configuration_source_revision,
         'clusterNamespaceUID': kube_namespace_uid,
         'controlPlaneEndpoint': kube_actual_settings.controlPlaneEndpoint,
         'kubernetesVersion': kube_actual_settings.kubernetesVersion | regex_replace('^v', ''),

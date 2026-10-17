@@ -37,5 +37,6 @@ with `existingSecret`, `userKey` and `passwordKey` referencing an existing Secre
 Never commit credentials or place them in public Configuration values.
 
 Interactive homelabc environments can supply the verified Kubernetes context.
-Configuration/operator mode still needs explicit, identity-verified kubeconfig
-preparation; a KubeCluster targetRef alone does not provide credentials.
+Configurations opt in with `context.kubeClusterRef: {name: lab}`; the executor
+prepares a private, identity-verified kubeconfig before running command.argv.
+A KubeCluster targetRef alone does not provide credentials.

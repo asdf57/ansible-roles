@@ -192,20 +192,8 @@ def setup_context(api: API, group_name: str, home: Path) -> bool:
     cluster = api.get('kube-clusters', name)
     if cluster['metadata'].get('deletionTimestamp'):
         raise ValueError('Cluster is terminating')
-    server = control_plane(api, inventory, cluster)
-    config = validate_context(fetch_context(server, cluster), cluster)
-    current = api.get('kube-clusters', name)
-    if current['metadata']['uid'] != cluster['metadata']['uid'] or current['spec'] != cluster[
-            'spec']:
-        raise ValueError('Cluster changed during credential retrieval')
-    current_server = api.get('servers', server['metadata']['name'])
+    config = verified_context(api, inventory, cluster)
     current_group, _ = capture_inventory(api, group_name)
-    if (current_server['metadata']['uid'] != server['metadata']['uid']
-            or current_server['metadata'].get('labels') != server['metadata'].get('labels')
-            or current_server['metadata'].get('deletionTimestamp')
-            or current_server['status'].get('hostSSH') != server['status'].get('hostSSH')
-            or management_address(current_server) != management_address(server)):
-        raise ValueError('Control-plane identity changed during credential retrieval')
     if (current_group['metadata']['uid'] != group['metadata']['uid']
             or current_group['metadata'].get('generation') != group['metadata'].get('generation')
             or current_group['metadata'].get('labels') != group['metadata'].get('labels')):
@@ -217,6 +205,27 @@ def setup_context(api: API, group_name: str, home: Path) -> bool:
     write_private(ownership, json.dumps({'clusterUID': cluster['metadata']['uid']}))
     write_private(config_path, json.dumps(config))
     return True
+
+
+def verified_context(api: API, inventory: JSONObject, cluster: Resource) -> JSONObject:
+    """Retrieve context for an explicit cluster; recheck both resource lifetimes."""
+    if cluster['metadata'].get('deletionTimestamp'):
+        raise ValueError('Cluster is terminating')
+    server = control_plane(api, inventory, cluster)
+    config = validate_context(fetch_context(server, cluster), cluster)
+    name = cluster['metadata']['name']
+    current = api.get('kube-clusters', name)
+    if (current['metadata']['uid'] != cluster['metadata']['uid']
+            or current['metadata'].get('deletionTimestamp') or current['spec'] != cluster['spec']):
+        raise ValueError('Cluster changed during credential retrieval')
+    current_server = api.get('servers', server['metadata']['name'])
+    if (current_server['metadata']['uid'] != server['metadata']['uid']
+            or current_server['metadata'].get('labels') != server['metadata'].get('labels')
+            or current_server['metadata'].get('deletionTimestamp')
+            or current_server['status'].get('hostSSH') != server['status'].get('hostSSH')
+            or management_address(current_server) != management_address(server)):
+        raise ValueError('Control-plane identity changed during credential retrieval')
+    return config
 
 
 def main() -> int:

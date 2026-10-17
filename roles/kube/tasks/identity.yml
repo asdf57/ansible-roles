@@ -78,7 +78,7 @@
 
 - name: Select a completed installation from the same reviewed playbook commit
   ansible.builtin.set_fact:
-    kube_reuse_artifacts: "{{ kube_identity.get('phase', '') == 'Ready' and kube_identity.get('controllerRevision', '') == configuration_playbook_revision }}"
+    kube_reuse_artifacts: "{{ kube_identity.get('phase', '') == 'Ready' and kube_identity.get('controllerRevision', '') == configuration_source_revision }}"
 
 - name: Resolve the previous verified binary identities
   ansible.builtin.set_fact:
