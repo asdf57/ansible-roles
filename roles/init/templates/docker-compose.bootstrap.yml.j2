@@ -93,6 +93,7 @@ services:
       - --initial-advertise-peer-urls=http://etcd:2380
       - --initial-cluster=etcd=http://etcd:2380
       - --initial-cluster-state=new
+      - --quota-backend-bytes=2147483648
       - --auto-compaction-mode=periodic
       - --auto-compaction-retention=1h
     volumes:
@@ -105,6 +106,23 @@ services:
       timeout: 2s
       retries: 15
       start_period: 2s
+
+  etcd-maintenance:
+    build: ./stigmergy
+    entrypoint: [/etcd-maintenance]
+    user: "65532:65532"
+    restart: unless-stopped
+    depends_on:
+      etcd:
+        condition: service_started
+    environment:
+      ETCD_ENDPOINT: http://etcd:2379
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "3"
+        compress: "true"
 
   stigmergy:
     build: ./stigmergy

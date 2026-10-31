@@ -1,0 +1,61 @@
+---
+- name: Require explicit deployment paths and revision
+  ansible.builtin.assert:
+    that:
+      - platform_data_path is defined
+      - platform_env_file is defined
+      - stigmergy_revision is defined
+      - stigmergy_revision | length == 40
+
+- name: Fast-forward the deployed Stigmergy source
+  ansible.builtin.git:
+    repo: git@github.com:asdf57/stigmergy.git
+    dest: "{{ platform_data_path }}/stigmergy"
+    version: "{{ stigmergy_revision }}"
+    force: false
+
+- name: Read the current infrastructure definition
+  ansible.builtin.slurp:
+    src: "{{ platform_data_path }}/docker-compose.yml"
+  register: platform_compose
+
+- name: Define bounded container logs
+  ansible.builtin.set_fact:
+    platform_log_policy:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "3"
+        compress: "true"
+
+- name: Add storage policies to the existing service definitions
+  ansible.builtin.copy:
+    dest: "{{ platform_data_path }}/docker-compose.yml"
+    mode: "0644"
+    content: >-
+      {{ platform_compose.content | b64decode | from_yaml | combine({
+        'services': {
+          'concourse-worker': {'logging': platform_log_policy},
+          'etcd-maintenance': {
+            'build': './stigmergy',
+            'entrypoint': ['/etcd-maintenance'],
+            'user': '65532:65532',
+            'restart': 'unless-stopped',
+            'depends_on': {'etcd': {'condition': 'service_started'}},
+            'environment': {'ETCD_ENDPOINT': 'http://etcd:2379'},
+            'logging': platform_log_policy
+          }
+        }
+      }, recursive=true) | to_nice_yaml(indent=2) }}
+
+- name: Deploy only the API, maintenance service and worker
+  community.docker.docker_compose_v2:
+    project_src: "{{ platform_data_path }}"
+    project_name: infra
+    env_files: ["{{ platform_env_file }}"]
+    services: [stigmergy, etcd-maintenance, concourse-worker]
+    dependencies: false
+    build: always
+    state: present
+    wait: true
+    wait_timeout: 180

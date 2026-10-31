@@ -1,0 +1,10 @@
+---
+- name: Deploy bounded logs and etcd space maintenance
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Deploy platform storage policy
+      ansible.builtin.import_role:
+        name: init
+        tasks_from: storage_policy
