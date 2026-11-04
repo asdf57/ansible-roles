@@ -13,7 +13,7 @@ from server_operation import reservation, operation_progress
 
 from common import (API, OperatorError, alias, address, capture_inventory, fingerprint,
                     inventory_hosts, public_key, request_json, ssh_args, ssh_probe, write_private,
-                    run_ansible, management_address)
+                    run_ansible, management_address, raise_on_termination)
 
 
 def current(api, snapshot):
@@ -298,6 +298,7 @@ def main():
 
 
 if __name__ == "__main__":
+    raise_on_termination()
     try:
         sys.exit(main())
     except Exception:

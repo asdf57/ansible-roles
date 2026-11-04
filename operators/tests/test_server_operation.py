@@ -1,6 +1,15 @@
 """Ownership collisions and failures never permit overlapping mutations."""
+import contextlib
+import io
+import os
+from pathlib import Path
+import signal
+import sys
+import tempfile
+import threading
+import time
 import unittest
-from common import OperatorError
+from common import OperatorError, TerminationRequested, raise_on_termination, run_ansible
 from server_operation import reservation
 from test_operators import API
 
@@ -21,6 +30,33 @@ class ReservationTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'unclassified'):
             with reservation(api, api.get('servers', 'node')):
                 raise RuntimeError('unclassified')
+        self.assertTrue(api.server['status']['operationRef'])
+        self.assertEqual(next(iter(api.operations.values()))['status']['phase'], 'Uncertain')
+
+    def test_executor_termination_stops_local_play_and_marks_claim_uncertain(self):
+        api = API()
+        previous = {number: signal.getsignal(number) for number in (signal.SIGTERM, signal.SIGHUP)}
+        self.addCleanup(
+            lambda: [signal.signal(number, handler) for number, handler in previous.items()])
+        raise_on_termination()
+        with tempfile.TemporaryDirectory() as temporary:
+            started = Path(temporary) / 'child.pid'
+            play = ('import os,pathlib,time; pathlib.Path(%r).write_text(str(os.getpid())); '
+                    'time.sleep(60)' % str(started))
+
+            def terminate_after_start():
+                while not started.exists():
+                    time.sleep(0.05)
+                os.kill(os.getpid(), signal.SIGTERM)
+
+            threading.Thread(target=terminate_after_start, daemon=True).start()
+            began = time.monotonic()
+            with self.assertRaises(TerminationRequested), contextlib.redirect_stdout(io.StringIO()):
+                with reservation(api, api.get('servers', 'node')):
+                    run_ansible([sys.executable, '-c', play], Path(temporary) / 'play.log', 120)
+            self.assertLess(time.monotonic() - began, 10)
+            with self.assertRaises(ProcessLookupError):
+                os.kill(int(started.read_text()), 0)
         self.assertTrue(api.server['status']['operationRef'])
         self.assertEqual(next(iter(api.operations.values()))['status']['phase'], 'Uncertain')
 

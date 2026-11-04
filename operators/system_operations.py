@@ -8,7 +8,7 @@ import sys
 import tempfile
 
 from common import (API, OperatorError, address, capture_inventory, resolved_inventory_hosts,
-                    run_ansible, ssh_args, write_private)
+                    run_ansible, ssh_args, write_private, raise_on_termination)
 from runner_trust import prepare
 from server_operation import reservation, operation_progress
 
@@ -107,6 +107,7 @@ def main():
 
 
 if __name__ == '__main__':
+    raise_on_termination()
     try:
         main()
     except (RuntimeError, KeyError, OperatorError) as error:

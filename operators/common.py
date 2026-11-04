@@ -1,5 +1,6 @@
 """Small shared API/SSH primitives for bounded external operators and runners."""
 import base64
+import contextlib
 import hashlib
 import ipaddress
 import json
@@ -10,6 +11,7 @@ import signal
 import subprocess
 import tempfile
 import threading
+from types import FrameType
 from urllib.parse import quote, urlparse
 from urllib.request import Request, build_opener, HTTPRedirectHandler
 
@@ -30,6 +32,24 @@ class OperatorError(RuntimeError):
     def __init__(self, reason, message):
         super().__init__(message)
         self.reason = reason
+
+
+class TerminationRequested(BaseException):
+    """The executor was asked to stop; claim owners must still record the interruption."""
+
+
+def raise_on_termination() -> None:
+    """Unwind on SIGTERM/SIGHUP so held Operations become Uncertain, not stranded Running."""
+
+    def terminate(signal_number: int, _frame: FrameType | None) -> None:
+        # Concourse aborts and timeouts send SIGTERM before SIGKILL. A repeated
+        # signal must not interrupt the completion writes this unwinding performs.
+        for ignored in (signal.SIGTERM, signal.SIGHUP):
+            signal.signal(ignored, signal.SIG_IGN)
+        raise TerminationRequested(signal.Signals(signal_number).name)
+
+    for handled in (signal.SIGTERM, signal.SIGHUP):
+        signal.signal(handled, terminate)
 
 
 def request_json(url: str, token: str, method: str = "GET", body: JSONObject | None = None,
@@ -155,9 +175,12 @@ def run_command(command: list[str], diagnostic: Path, timeout: float, *,
         output.start()
         try:
             result = process.wait(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            # Kill the local process group, not an arbitrary managed-node process.
-            os.killpg(process.pid, signal.SIGKILL)
+        except BaseException:
+            # Timeout or termination: kill the local process group, not an arbitrary
+            # managed-node process. Otherwise Popen exit waits out the whole play and
+            # the executor is killed before it can record the interrupted claim.
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(process.pid, signal.SIGKILL)
             process.wait()
             raise
         finally:

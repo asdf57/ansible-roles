@@ -21,7 +21,7 @@ import tempfile
 from urllib.error import HTTPError
 
 from common import (API, OperatorError, capture_inventory, resolved_inventory_hosts, run_ansible,
-                    run_command, ssh_args, write_private, management_address)
+                    run_command, ssh_args, write_private, management_address, raise_on_termination)
 from models import JSONObject, Resource, json_object, json_string
 from runner_trust import prepare
 from server_operation import reservation, operation_progress, verify_operation
@@ -652,4 +652,5 @@ def main() -> int:
 
 
 if __name__ == '__main__':
+    raise_on_termination()
     sys.exit(main())

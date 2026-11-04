@@ -17,7 +17,7 @@ from urllib.request import Request, build_opener
 
 from common import (API, NoRedirect, OperatorError, address, alias, capture_inventory, fingerprint,
                     resolved_inventory_hosts, public_key, ssh_args, ssh_probe, write_private,
-                    run_ansible)
+                    run_ansible, raise_on_termination)
 import ssh_host_keys
 from models import JSONValue, Resource, json_object, json_string
 from ssh_host_keys import host_private_key
@@ -979,6 +979,7 @@ def main():
 
 
 if __name__ == "__main__":
+    raise_on_termination()
     try:
         sys.exit(main())
     except Exception:
