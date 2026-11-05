@@ -706,6 +706,27 @@ class KubernetesPlanTests(unittest.TestCase):
                 for key, value in mapping(plan['settings'], 'settings').items() if key != 'network'
             })
 
+    def test_every_task_condition_is_a_string_expression(self):
+        root = Path(__file__).resolve().parents[2]
+
+        def tasks(items: JSONValue) -> list[JSONObject]:
+            found: list[JSONObject] = []
+            for item in items if isinstance(items, list) else []:
+                task = mapping(item, 'task')
+                found.append(task)
+                for nested in ('block', 'rescue', 'always'):
+                    found.extend(tasks(task.get(nested, [])))
+            return found
+
+        for path in sorted((root / 'roles').glob('*/tasks/*.yml')):
+            for task in tasks(yaml.safe_load(path.read_text(encoding='utf-8'))):
+                condition = task.get('when')
+                conditions = condition if isinstance(condition, list) else [condition]
+                for entry in conditions:
+                    # A ': ' inside an unquoted item turns it into a mapping.
+                    self.assertTrue(entry is None or isinstance(entry, (str, bool)),
+                                    f'{path.relative_to(root)}: {task.get("name")}')
+
     def test_swap_policy_manages_definitions_not_active_device_aliases(self):
         root = Path(__file__).resolve().parents[2]
         tasks = yaml.safe_load((root / 'roles/kube/tasks/swap.yml').read_text(encoding='utf-8'))
