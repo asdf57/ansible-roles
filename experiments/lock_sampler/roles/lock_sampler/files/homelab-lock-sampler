@@ -1,0 +1,26 @@
+#!/bin/sh
+# Every 100 ms for 10 minutes after boot: who holds the legacy xtables lock, and how
+# many iptables processes are queued. Holders are attributed by walking parents.
+out=/var/log/homelab-lock-samples.log
+: > "$out"
+owner() {
+    p=$1
+    while [ "${p:-0}" -gt 1 ]; do
+        c=$(cat "/proc/$p/comm" 2>/dev/null) || return
+        case $c in kube-proxy|multus-daemon|flanneld|kubelet|containerd) echo "$c"; return ;; esac
+        p=$(sed -n 's/^PPid:[[:space:]]*//p' "/proc/$p/status" 2>/dev/null)
+    done
+    echo other
+}
+end=$(( $(cut -d. -f1 /proc/uptime) + 600 ))
+while [ "$(cut -d. -f1 /proc/uptime)" -lt "$end" ]; do
+    up=$(cut -d' ' -f1 /proc/uptime)
+    ino=$(stat -c %i /run/xtables.lock 2>/dev/null)
+    holder=none
+    if [ -n "$ino" ]; then
+        pid=$(awk -v i="$ino" '$2 == "FLOCK" { n = split($6, a, ":"); if (a[n] == i) { print $5; exit } }' /proc/locks)
+        [ -n "$pid" ] && holder="$(owner "$pid")/$(cat "/proc/$pid/comm" 2>/dev/null)"
+    fi
+    echo "$up $holder $(pgrep -c -x 'iptables|iptables-restor|ip6tables|ip6tables-resto')" >> "$out"
+    sleep 0.1
+done

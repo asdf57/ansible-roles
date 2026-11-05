@@ -1,0 +1,22 @@
+---
+- name: Install the sampler
+  ansible.builtin.copy:
+    src: homelab-lock-sampler
+    dest: /usr/local/sbin/homelab-lock-sampler
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Install the sampler unit
+  ansible.builtin.copy:
+    src: homelab-lock-sampler.service
+    dest: /etc/systemd/system/homelab-lock-sampler.service
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Enable the sampler for the next boot
+  ansible.builtin.systemd_service:
+    name: homelab-lock-sampler.service
+    enabled: true
+    daemon_reload: true

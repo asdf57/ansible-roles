@@ -1,0 +1,20 @@
+---
+- name: Stop and disable the sampler
+  ansible.builtin.systemd_service:
+    name: homelab-lock-sampler.service
+    state: stopped
+    enabled: false
+  failed_when: false
+
+- name: Remove the sampler, its unit and its log
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/systemd/system/homelab-lock-sampler.service
+    - /usr/local/sbin/homelab-lock-sampler
+    - /var/log/homelab-lock-samples.log
+
+- name: Forget the removed unit
+  ansible.builtin.systemd_service:
+    daemon_reload: true
