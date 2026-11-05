@@ -14,6 +14,7 @@
     - /etc/systemd/system/homelab-lock-sampler.service
     - /usr/local/sbin/homelab-lock-sampler
     - /var/log/homelab-lock-samples.log
+    - /var/log/homelab-runs
 
 - name: Forget the removed unit
   ansible.builtin.systemd_service:

@@ -1,8 +1,15 @@
 #!/bin/sh
 # Every 100 ms for 60 minutes after boot: who holds the legacy xtables lock, and how
 # many iptables processes are queued. Holders are attributed by walking parents.
-out=/var/log/homelab-lock-samples.log
+# Every 30 s: snapshot Flannel/kube-proxy/Multus pod logs and `crictl ps -a`, so
+# containers removed during the boot keep their logs. Everything goes into a
+# per-boot directory that is never overwritten.
+boot=$(cat /proc/sys/kernel/random/boot_id)
+dir=/var/log/homelab-runs/$boot
+mkdir -p "$dir/pod-logs"
+out=$dir/lock-samples.log
 : > "$out"
+ln -sfn "$out" /var/log/homelab-lock-samples.log
 owner() {
     p=$1
     while [ "${p:-0}" -gt 1 ]; do
@@ -12,7 +19,15 @@ owner() {
     done
     echo other
 }
+snapshot() {
+    up=$(cut -d' ' -f1 /proc/uptime)
+    for d in /var/log/pods/kube-flannel_* /var/log/pods/kube-system_kube-proxy-* /var/log/pods/kube-system_kube-multus-*; do
+        [ -d "$d" ] && cp -a "$d" "$dir/pod-logs/" 2>/dev/null
+    done
+    { echo "=== $up"; crictl ps -a 2>&1; } >> "$dir/crictl-ps.log"
+}
 end=$(( $(cut -d. -f1 /proc/uptime) + 3600 ))
+next_snap=0
 while [ "$(cut -d. -f1 /proc/uptime)" -lt "$end" ]; do
     up=$(cut -d' ' -f1 /proc/uptime)
     ino=$(stat -c %i /run/xtables.lock 2>/dev/null)
@@ -22,5 +37,7 @@ while [ "$(cut -d. -f1 /proc/uptime)" -lt "$end" ]; do
         [ -n "$pid" ] && holder="$(owner "$pid")/$(cat "/proc/$pid/comm" 2>/dev/null)"
     fi
     echo "$up $holder $(pgrep -c -x 'iptables|iptables-restor|ip6tables|ip6tables-resto')" >> "$out"
+    if [ "${up%.*}" -ge "$next_snap" ]; then snapshot; next_snap=$(( ${up%.*} + 30 )); fi
     sleep 0.1
 done
+snapshot
