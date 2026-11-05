@@ -1,0 +1,7 @@
+---
+galaxy_info:
+  author: homelab
+  description: Reconcile the bundled Multus CNI Helm release from the management runner.
+  license: MIT
+  min_ansible_version: '2.16'
+dependencies: []

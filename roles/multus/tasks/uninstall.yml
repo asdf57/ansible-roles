@@ -1,0 +1,24 @@
+---
+# Removing the DaemonSet alone leaves 00-multus.conf on every node, and new pod
+# sandboxes then fail against the absent daemon. Roll daemons that delete their
+# generated configuration on exit before removing the release.
+- name: Roll Multus daemons that remove their host configuration on exit
+  kubernetes.core.helm:
+    name: multus
+    chart_ref: "{{ role_path }}/helm"
+    kubeconfig: "{{ lookup('ansible.builtin.env', 'KUBECONFIG') }}"
+    release_namespace: kube-system
+    state: present
+    atomic: true
+    wait: true
+    timeout: 5m
+    values: "{{ multus_values | combine({'cleanupConfigOnExit': true}) }}"
+
+- name: Uninstall Multus
+  kubernetes.core.helm:
+    name: multus
+    kubeconfig: "{{ lookup('ansible.builtin.env', 'KUBECONFIG') }}"
+    release_namespace: kube-system
+    state: absent
+    wait: true
+    timeout: 5m

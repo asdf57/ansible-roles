@@ -1,0 +1,9 @@
+# Upstream deployments/multus-daemonset-thick.yml uses the mutable snapshot-thick tag;
+# this chart pins the v4.3.1-thick release index by digest.
+image: ghcr.io/k8snetworkplumbingwg/multus-cni:v4.3.1-thick@sha256:a357a79359b80ddd5f4699117946cacf3b54f5baecf7944535594863e875fc25
+# Remove the generated 00-multus.conf when the daemon exits. Upstream leaves it,
+# which keeps the multus-shim delegating to a daemon that may be absent.
+cleanupConfigOnExit: false
+resources:
+  requests: {cpu: 100m, memory: 50Mi}
+  limits: {cpu: 100m, memory: 50Mi}

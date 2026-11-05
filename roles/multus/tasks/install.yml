@@ -1,0 +1,13 @@
+---
+- name: Install Multus
+  kubernetes.core.helm:
+    name: multus
+    chart_ref: "{{ role_path }}/helm"
+    kubeconfig: "{{ lookup('ansible.builtin.env', 'KUBECONFIG') }}"
+    release_namespace: kube-system
+    create_namespace: true
+    state: present
+    atomic: true
+    wait: true
+    timeout: 5m
+    values: "{{ multus_values }}"
