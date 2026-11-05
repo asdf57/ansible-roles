@@ -8,7 +8,7 @@ for _ in $(seq 900); do
     [ -s /run/flannel/subnet.env ] && exit 0
     for name in kube-proxy multus-daemon; do
         pid=$(pgrep -xo "$name") || continue
-        cg=/sys/fs/cgroup$( [ $file = freezer.state ] && echo /freezer)$(awk -F: '$1 == 0 || $2 ~ /freezer/ {print $3}' "/proc/$pid/cgroup")
+        cg=/sys/fs/cgroup$(awk -F: -v f=$file '(f == "cgroup.freeze" && $1 == 0) { print $3 } (f == "freezer.state" && $2 ~ /(^|,)freezer(,|$)/) { print "/freezer" $3 }' "/proc/$pid/cgroup")
         case " $frozen " in *" $cg "*) ;; *) echo $on > "$cg/$file" && frozen="$frozen $cg" ;; esac
     done
     sleep 0.2

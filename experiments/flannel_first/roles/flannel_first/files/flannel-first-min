@@ -6,7 +6,7 @@ trap '[ -n "$cg" ] && echo $off > "$cg/$file"' EXIT
 for _ in $(seq 900); do
     [ -s /run/flannel/subnet.env ] && exit 0
     if [ -z "$cg" ] && pid=$(pgrep -xo kube-proxy); then
-        cg=/sys/fs/cgroup$( [ $file = freezer.state ] && echo /freezer)$(awk -F: '$1 == 0 || $2 ~ /freezer/ {print $3}' "/proc/$pid/cgroup")
+        cg=/sys/fs/cgroup$(awk -F: -v f=$file '(f == "cgroup.freeze" && $1 == 0) { print $3 } (f == "freezer.state" && $2 ~ /(^|,)freezer(,|$)/) { print "/freezer" $3 }' "/proc/$pid/cgroup")
         echo $on > "$cg/$file"
     fi
     sleep 0.2
