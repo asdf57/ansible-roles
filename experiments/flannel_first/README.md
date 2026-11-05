@@ -20,4 +20,5 @@ ansible-playbook experiments/flannel_first/play.yml -l <server> -e mode=install
 ansible-playbook experiments/flannel_first/play.yml -l <server> -e mode=uninstall
 ```
 
-Install only enables the unit; it takes effect on the next boot.
+Install only enables the unit; it takes effect on the next boot. Choose the
+script variant with `-e flannel_first_script=<file>` (see defaults/main.yml).

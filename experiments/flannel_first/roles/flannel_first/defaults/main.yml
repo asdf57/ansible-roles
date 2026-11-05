@@ -1,0 +1,6 @@
+---
+# Script variant under test (a file in this role's files/):
+#   flannel-first       freeze kube-proxy; v1/v2, lock back-off, restart handling
+#   flannel-first-min   freeze kube-proxy only, cgroup v1, minimal
+#   flannel-first-dels  also freeze the thick Multus daemon (holds back CNI DELs)
+flannel_first_script: flannel-first

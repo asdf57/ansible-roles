@@ -1,7 +1,7 @@
 ---
 - name: Install the boot-time kube-proxy gate
   ansible.builtin.copy:
-    src: flannel-first
+    src: "{{ flannel_first_script }}"
     dest: /usr/local/sbin/flannel-first
     owner: root
     group: root
