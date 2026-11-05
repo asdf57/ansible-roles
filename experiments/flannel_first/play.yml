@@ -1,4 +1,5 @@
-- name: Flannel-first boot gate
+# Experiment only; see README.md. Never referenced by provisioning or Configurations.
+- name: Flannel-first boot gate (experiment)
   hosts: all
   gather_facts: false
   become: true

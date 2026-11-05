@@ -636,6 +636,57 @@ class KubernetesPlanTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'must be "legacy" or "nft"'):
             self.plan()
 
+    def test_network_api_endpoint_can_keep_the_service_vip(self):
+        version = text(
+            mapping(mapping(self.plan()['settings'], 'settings')['network'], 'network')['version'],
+            'version')
+        documents: list[JSONValue] = [{
+            'kind': 'ConfigMap',
+            'metadata': {
+                'name': 'kube-flannel-cfg',
+                'namespace': 'kube-flannel'
+            },
+            'data': {
+                'net-conf.json': '{"Network":"10.244.0.0/16"}',
+                'cni-conf.json': json.dumps({'plugins': [{
+                    'type': 'flannel'
+                }]})
+            }
+        }, {
+            'kind': 'DaemonSet',
+            'metadata': {
+                'name': 'kube-flannel-ds',
+                'namespace': 'kube-flannel'
+            },
+            'spec': {
+                'template': {
+                    'spec': {
+                        'containers': [{
+                            'name': 'kube-flannel',
+                            'image': 'ghcr.io/flannel-io/flannel:v' + version
+                        }]
+                    }
+                }
+            }
+        }]
+
+        def environment(plan: JSONObject) -> JSONValue:
+            items = flannel_objects(copy.deepcopy(documents), plan)['items']
+            daemon = mapping(items[1] if isinstance(items, list) else {}, 'DaemonSet')
+            template = mapping(mapping(daemon['spec'], 'spec')['template'], 'template')
+            containers = mapping(template['spec'], 'pod')['containers']
+            first = containers[0] if isinstance(containers, list) else {}
+            return mapping(first, 'container').get('env', [])
+
+        self.assertTrue(environment(self.plan()))
+        metadata = mapping(self.target['metadata'], 'metadata')
+        metadata['annotations'] = {'homelab.io/network-api-endpoint': 'service'}
+        self.assertEqual(self.plan()['networkApiEndpoint'], 'service')
+        self.assertEqual(environment(self.plan()), [])
+        metadata['annotations'] = {'homelab.io/network-api-endpoint': 'vip'}
+        with self.assertRaisesRegex(ValueError, 'must be "direct" or "service"'):
+            self.plan()
+
     def test_stable_identity_excludes_only_the_flannel_release(self):
         plan = self.plan()
         identity: JSONObject = {'clusterUID': plan['uid'], 'settings': plan['settings']}

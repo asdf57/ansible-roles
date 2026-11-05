@@ -138,8 +138,16 @@ def cluster_plan(raw_target: JSONValue, nodes: JSONValue) -> JSONObject:
     network = ipv4_network(settings['podCIDR'], 'podCIDR')
     if network.prefixlen > 24 or 2**(24 - network.prefixlen) < len(members):
         raise ValueError('Pod network needs one /24 subnet per selected node')
+    # "service" keeps upstream in-cluster config (the kubernetes ClusterIP).
+    api_endpoint = text(
+        mapping(metadata.get('annotations', {}),
+                'cluster annotations').get('homelab.io/network-api-endpoint', 'direct'),
+        'homelab.io/network-api-endpoint')
+    if api_endpoint not in ('direct', 'service'):
+        raise ValueError('homelab.io/network-api-endpoint must be "direct" or "service"')
     return dict(name=name, uid=uid, settings=settings, members=[node for node in members],
-                controlPlane=next(node for node in members if node['role'] == 'control-plane'))
+                controlPlane=next(node for node in members if node['role'] == 'control-plane'),
+                networkApiEndpoint=api_endpoint)
 
 
 def validate_host_network(raw_plan: JSONValue, raw_facts: JSONValue) -> JSONObject:
@@ -337,8 +345,9 @@ def flannel_objects(raw_documents: JSONValue, raw_plan: JSONValue) -> JSONObject
         document = mapping(raw_document, 'Flannel resource')
         if document['kind'] == 'DaemonSet':
             annotate_cni_rollout(document, config_digest)
-            use_direct_api_endpoint(document, text(settings.get('controlPlaneEndpoint'),
-                                                   'endpoint'))
+            if plan.get('networkApiEndpoint', 'direct') == 'direct':
+                use_direct_api_endpoint(document,
+                                        text(settings.get('controlPlaneEndpoint'), 'endpoint'))
     return {'apiVersion': 'v1', 'kind': 'List', 'items': documents}
 
 

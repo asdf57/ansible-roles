@@ -1,4 +1,8 @@
-# flannel_first
+# flannel_first (experiment)
+
+Not part of provisioning or cluster setup: no Configuration, play or role in
+`plays/`/`roles/` references it. It exists to compare Flannel startup times on
+a test node and is installed and removed by hand.
 
 Boot-time experiment for nodes where kube-proxy's first full iptables restore
 delays Flannel. `flannel-first.service` starts after kubelet, freezes the
@@ -12,8 +16,8 @@ Flannel must reach the API without kube-proxy (the kube role injects the direct
 endpoint); otherwise the gate only waits out its timeout.
 
 ```sh
-ansible-playbook "$ANSIBLE_PLAYS_PATH/flannel_first.yml" -l <server> -e mode=install
-ansible-playbook "$ANSIBLE_PLAYS_PATH/flannel_first.yml" -l <server> -e mode=uninstall
+ansible-playbook experiments/flannel_first/play.yml -l <server> -e mode=install
+ansible-playbook experiments/flannel_first/play.yml -l <server> -e mode=uninstall
 ```
 
 Install only enables the unit; it takes effect on the next boot.

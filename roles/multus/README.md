@@ -33,6 +33,11 @@ Helm's own DaemonSet wait tolerates `maxUnavailable` crash-looping nodes. The
 kube role raises `fs.inotify.max_user_instances`, which the daemon's
 `/etc/cni/net.d` watcher otherwise exhausts on busy nodes.
 
+The daemon reaches the API through the verified context's server rather than
+the kubernetes ClusterIP; set `multus_direct_api_endpoint: false` (for example
+`-e multus_direct_api_endpoint=false` in its Configuration) for upstream
+in-cluster config.
+
 `multus_values` raises the upstream 50Mi daemon limit to 300Mi, which can OOM
 under bulk pod churn.
 

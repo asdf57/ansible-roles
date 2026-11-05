@@ -69,7 +69,12 @@ kubelet `failCgroupV1` through `/etc/kubernetes/kubelet.conf.d`. The role never
 reboots; the Server must be rebooted for a changed selection to take effect. Likewise
 homelab.io/kube-iptables-backend ("legacy" or "nft", default "nft") selects the
 Debian `iptables`/`ip6tables` alternatives; kubelet's KUBE-IPTABLES-HINT carries
-the choice to the kube-proxy and Flannel images on the next boot. A supplied
+the choice to the kube-proxy and Flannel images on the next boot.
+
+Flannel reaches the API through KubeCluster.spec.controlPlaneEndpoint (as kubelet
+and kube-proxy do) instead of the kubernetes ClusterIP, which exists only after
+kube-proxy programs the node. The KubeCluster annotation
+homelab.io/network-api-endpoint: service restores upstream in-cluster config. A supplied
 kube-cluster-uid annotation must match, but copying a UID is not required.
 
 Configuration supplies context, captured inventory, protected Server/run identities,
