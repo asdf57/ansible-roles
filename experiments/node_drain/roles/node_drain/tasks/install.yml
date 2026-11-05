@@ -1,0 +1,87 @@
+---
+- name: Create the minimal drain identity with the runner's verified context
+  kubernetes.core.k8s:
+    kubeconfig: "{{ lookup('ansible.builtin.env', 'KUBECONFIG') }}"
+    state: present
+    definition:
+      - {apiVersion: v1, kind: ServiceAccount, metadata: {name: homelab-node-drain, namespace: kube-system}}
+      - apiVersion: rbac.authorization.k8s.io/v1
+        kind: ClusterRole
+        metadata: {name: homelab-node-drain}
+        rules:
+          - {apiGroups: [""], resources: [nodes], verbs: [get, list, patch, update]}
+          - {apiGroups: [""], resources: [pods], verbs: [get, list, delete]}
+          - {apiGroups: [""], resources: [pods/eviction], verbs: [create]}
+          - {apiGroups: [apps], resources: [daemonsets, replicasets, statefulsets], verbs: [get, list]}
+          - {apiGroups: [batch], resources: [jobs], verbs: [get, list]}
+      - apiVersion: rbac.authorization.k8s.io/v1
+        kind: ClusterRoleBinding
+        metadata: {name: homelab-node-drain}
+        roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: homelab-node-drain}
+        subjects: [{kind: ServiceAccount, name: homelab-node-drain, namespace: kube-system}]
+      - apiVersion: v1
+        kind: Secret
+        type: kubernetes.io/service-account-token
+        metadata:
+          name: homelab-node-drain
+          namespace: kube-system
+          annotations: {kubernetes.io/service-account.name: homelab-node-drain}
+  delegate_to: localhost
+  become: false
+  run_once: true
+  vars:
+    ansible_become: false
+    ansible_python_interpreter: "{{ node_drain_runner_python }}"
+
+- name: Read the drain token once the token controller has filled it
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ lookup('ansible.builtin.env', 'KUBECONFIG') }}"
+    kind: Secret
+    namespace: kube-system
+    name: homelab-node-drain
+  register: node_drain_secret
+  until: node_drain_secret.resources | length == 1 and (node_drain_secret.resources[0].data | default({})).token is defined
+  retries: 10
+  delay: 3
+  delegate_to: localhost
+  become: false
+  run_once: true
+  no_log: true
+  vars:
+    ansible_become: false
+    ansible_python_interpreter: "{{ node_drain_runner_python }}"
+
+- name: Write the root-only drain kubeconfig
+  ansible.builtin.template:
+    src: kubeconfig.j2
+    dest: "{{ node_drain_kubeconfig }}"
+    owner: root
+    group: root
+    mode: '0600'
+  no_log: true
+  vars:
+    node_drain_token: "{{ node_drain_secret.resources[0].data.token | b64decode }}"
+    node_drain_server: "{{ (lookup('ansible.builtin.file', lookup('ansible.builtin.env', 'KUBECONFIG')) | from_yaml).clusters[0].cluster.server }}"
+
+- name: Install the drain and uncordon units
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/etc/systemd/system/{{ item }}"
+    owner: root
+    group: root
+    mode: '0644'
+  loop: [homelab-node-drain.service, homelab-node-uncordon.service]
+
+# The drain unit must be active now so that the next shutdown runs its ExecStop.
+- name: Enable the units and activate the shutdown drain
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    enabled: true
+    state: "{{ 'started' if item == 'homelab-node-drain.service' else omit }}"
+    daemon_reload: true
+  loop: [homelab-node-drain.service, homelab-node-uncordon.service]
+
+- name: Check that the drain identity can patch this node
+  ansible.builtin.command:
+    argv: [/usr/local/bin/kubectl, --kubeconfig, "{{ node_drain_kubeconfig }}", auth, can-i, patch, "node/{{ node_drain_node }}"]
+  changed_when: false

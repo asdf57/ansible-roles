@@ -1,0 +1,12 @@
+[Unit]
+Description=Test-only: uncordon this node after kubelet starts
+Wants=network-online.target
+After=network-online.target kubelet.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'until /usr/local/bin/kubectl --kubeconfig {{ node_drain_kubeconfig }} uncordon {{ node_drain_node }}; do sleep 5; done'
+TimeoutStartSec=600
+
+[Install]
+WantedBy=multi-user.target

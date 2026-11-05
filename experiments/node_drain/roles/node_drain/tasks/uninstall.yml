@@ -1,0 +1,48 @@
+---
+# Remove the kubeconfig first: the drain unit's ExecStop then exits without draining.
+- name: Remove the drain kubeconfig
+  ansible.builtin.file:
+    path: "{{ node_drain_kubeconfig }}"
+    state: absent
+
+- name: Inspect the units
+  ansible.builtin.stat:
+    path: "/etc/systemd/system/{{ item }}"
+  loop: [homelab-node-drain.service, homelab-node-uncordon.service]
+  register: node_drain_units
+
+- name: Stop and disable the units
+  ansible.builtin.systemd_service:
+    name: "{{ item.item }}"
+    state: stopped
+    enabled: false
+  loop: "{{ node_drain_units.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: item.stat.exists
+
+- name: Remove the units
+  ansible.builtin.file:
+    path: "/etc/systemd/system/{{ item }}"
+    state: absent
+  loop: [homelab-node-drain.service, homelab-node-uncordon.service]
+
+- name: Forget the removed units
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+
+- name: Remove the drain identity
+  kubernetes.core.k8s:
+    kubeconfig: "{{ lookup('ansible.builtin.env', 'KUBECONFIG') }}"
+    state: absent
+    definition:
+      - {apiVersion: v1, kind: Secret, metadata: {name: homelab-node-drain, namespace: kube-system}}
+      - {apiVersion: rbac.authorization.k8s.io/v1, kind: ClusterRoleBinding, metadata: {name: homelab-node-drain}}
+      - {apiVersion: rbac.authorization.k8s.io/v1, kind: ClusterRole, metadata: {name: homelab-node-drain}}
+      - {apiVersion: v1, kind: ServiceAccount, metadata: {name: homelab-node-drain, namespace: kube-system}}
+  delegate_to: localhost
+  become: false
+  run_once: true
+  vars:
+    ansible_become: false
+    ansible_python_interpreter: "{{ node_drain_runner_python }}"

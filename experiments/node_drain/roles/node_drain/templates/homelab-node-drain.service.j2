@@ -1,0 +1,15 @@
+[Unit]
+Description=Test-only: drain this node at shutdown, before kubelet stops
+Wants=network-online.target
+After=network-online.target containerd.service kubelet.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/true
+# Uninstall removes the kubeconfig first, so stopping this unit then never drains.
+ExecStop=/bin/sh -c 'test -f {{ node_drain_kubeconfig }} || exit 0; exec /usr/local/bin/kubectl --kubeconfig {{ node_drain_kubeconfig }} drain {{ node_drain_node }} {{ node_drain_args | join(' ') }}'
+TimeoutStopSec=660
+
+[Install]
+WantedBy=multi-user.target

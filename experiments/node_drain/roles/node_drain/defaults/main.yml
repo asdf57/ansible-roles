@@ -1,0 +1,6 @@
+---
+node_drain_node: "{{ inventory_hostname }}"
+node_drain_kubeconfig: /etc/kubernetes/homelab-drain.conf
+node_drain_args: [--ignore-daemonsets, --delete-emptydir-data, --grace-period=0, --timeout=600s]
+# The runner's verified context (KUBECONFIG) creates the drain identity.
+node_drain_runner_python: /homelab/.venv/bin/python

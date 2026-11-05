@@ -1,0 +1,25 @@
+# Experiment only; see README.md. Never referenced by provisioning or Configurations.
+- name: Shutdown drain and boot uncordon (experiment)
+  hosts: all
+  gather_facts: true
+  become: true
+  tasks:
+    - name: Ensure mode is set
+      ansible.builtin.assert:
+        that:
+          - mode is defined
+          - mode in ["install", "uninstall"]
+        quiet: true
+        fail_msg: "Mode must be set to 'install' or 'uninstall'."
+
+    - name: Install the drain units
+      ansible.builtin.import_role:
+        name: node_drain
+        tasks_from: install
+      when: mode == "install"
+
+    - name: Uninstall the drain units
+      ansible.builtin.import_role:
+        name: node_drain
+        tasks_from: uninstall
+      when: mode == "uninstall"

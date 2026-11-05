@@ -1,0 +1,7 @@
+---
+galaxy_info:
+  author: homelab
+  description: Test-only systemd drain at shutdown and uncordon at boot.
+  license: MIT
+  min_ansible_version: '2.16'
+dependencies: []
