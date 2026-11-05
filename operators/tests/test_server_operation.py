@@ -9,6 +9,8 @@ import tempfile
 import threading
 import time
 import unittest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from common import OperatorError, TerminationRequested, raise_on_termination, run_ansible
 from server_operation import reservation
 from test_operators import API
