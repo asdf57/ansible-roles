@@ -3,4 +3,5 @@
 #   flannel-first       freeze kube-proxy; v1/v2, lock back-off, restart handling
 #   flannel-first-min   freeze kube-proxy only, minimal (cgroup v1 or v2)
 #   flannel-first-dels  also freeze the thick Multus daemon (holds back CNI DELs)
+#   flannel-first-kill  stand-in for the prod script: kill non-flanneld iptables processes
 flannel_first_script: flannel-first

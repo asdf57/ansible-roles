@@ -1,0 +1,18 @@
+#!/bin/sh
+# Stand-in for the prod script: repeatedly kill iptables processes that flanneld did
+# not start, until Flannel writes subnet.env; give up after 180s.
+from_flanneld() {
+    p=$1
+    while [ "${p:-0}" -gt 1 ]; do
+        [ "$(cat "/proc/$p/comm" 2>/dev/null)" = flanneld ] && return 0
+        p=$(sed -n 's/^PPid:[[:space:]]*//p' "/proc/$p/status" 2>/dev/null)
+    done
+    return 1
+}
+for _ in $(seq 900); do
+    [ -s /run/flannel/subnet.env ] && exit 0
+    for pid in $(pgrep -x 'iptables|iptables-restor|iptables-save|ip6tables|ip6tables-resto|ip6tables-save'); do
+        from_flanneld "$pid" || kill -9 "$pid" 2>/dev/null
+    done
+    sleep 0.2
+done

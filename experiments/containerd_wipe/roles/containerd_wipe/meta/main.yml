@@ -1,0 +1,7 @@
+---
+galaxy_info:
+  author: homelab
+  description: Test-only boot sequence that wipes containerd state and prefetches Flannel images.
+  license: MIT
+  min_ansible_version: '2.16'
+dependencies: []

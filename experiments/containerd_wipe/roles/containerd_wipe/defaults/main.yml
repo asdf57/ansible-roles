@@ -1,0 +1,5 @@
+---
+# Images pulled after containerd starts and before kubelet (Flannel DaemonSet images).
+containerd_wipe_prefetch_images:
+  - ghcr.io/flannel-io/flannel-cni-plugin:v1.9.1-flannel3
+  - ghcr.io/flannel-io/flannel:v0.28.9

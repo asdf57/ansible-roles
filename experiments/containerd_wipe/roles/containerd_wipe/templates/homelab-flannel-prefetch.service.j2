@@ -1,0 +1,16 @@
+[Unit]
+Description=Test-only: pull Flannel images after containerd and before kubelet
+Requires=containerd.service
+After=containerd.service network-online.target
+Wants=network-online.target
+Before=kubelet.service
+
+[Service]
+Type=oneshot
+{% for image in containerd_wipe_prefetch_images %}
+ExecStart=/usr/local/bin/ctr --namespace k8s.io images pull {{ image }}
+{% endfor %}
+TimeoutStartSec=600
+
+[Install]
+WantedBy=kubelet.service

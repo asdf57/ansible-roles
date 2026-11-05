@@ -1,0 +1,25 @@
+# Experiment only; see README.md. Never referenced by provisioning or Configurations.
+- name: Containerd wipe and Flannel prefetch (experiment)
+  hosts: all
+  gather_facts: true
+  become: true
+  tasks:
+    - name: Ensure mode is set
+      ansible.builtin.assert:
+        that:
+          - mode is defined
+          - mode in ["install", "uninstall"]
+        quiet: true
+        fail_msg: "Mode must be set to 'install' or 'uninstall'."
+
+    - name: Install the boot sequence
+      ansible.builtin.import_role:
+        name: containerd_wipe
+        tasks_from: install
+      when: mode == "install"
+
+    - name: Uninstall the boot sequence
+      ansible.builtin.import_role:
+        name: containerd_wipe
+        tasks_from: uninstall
+      when: mode == "uninstall"

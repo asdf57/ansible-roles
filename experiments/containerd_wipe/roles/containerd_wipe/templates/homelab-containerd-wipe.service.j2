@@ -1,0 +1,12 @@
+[Unit]
+Description=Test-only: remove all containerd state before containerd starts
+DefaultDependencies=no
+After=local-fs.target
+Before=containerd.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/rm -rf --one-file-system /var/lib/containerd
+
+[Install]
+WantedBy=containerd.service
