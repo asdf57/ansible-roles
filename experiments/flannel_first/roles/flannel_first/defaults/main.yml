@@ -7,3 +7,6 @@
 flannel_first_script: flannel-first
 # Set for variants that use jq (e.g. operator-provided scripts copied in locally).
 flannel_first_needs_jq: false
+# systemd stops the gate after this; scripts that run longer (the prod guard
+# runs up to 3600s) need a larger value.
+flannel_first_runtime_max_seconds: 300

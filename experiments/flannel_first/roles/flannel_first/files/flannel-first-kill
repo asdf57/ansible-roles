@@ -9,7 +9,10 @@ from_flanneld() {
     done
     return 1
 }
-for _ in $(seq 900); do
+[ "${1:-}" = --thaw ] && exit 0  # nothing frozen; ExecStopPost must not start another kill loop
+trap 'exit 0' TERM INT
+end=$(( $(cut -d. -f1 /proc/uptime) + 180 ))
+while [ "$(cut -d. -f1 /proc/uptime)" -lt "$end" ]; do
     [ -s /run/flannel/subnet.env ] && exit 0
     for pid in $(pgrep -x 'iptables|iptables-restor|iptables-save|ip6tables|ip6tables-resto|ip6tables-save'); do
         from_flanneld "$pid" || kill -9 "$pid" 2>/dev/null

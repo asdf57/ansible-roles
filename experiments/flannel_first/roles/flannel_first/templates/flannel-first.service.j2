@@ -8,7 +8,7 @@ Type=simple
 ExecStart=/usr/local/sbin/flannel-first
 # Runs even if the gate is killed, so kube-proxy can never stay frozen.
 ExecStopPost=/usr/local/sbin/flannel-first --thaw
-RuntimeMaxSec=300
+RuntimeMaxSec={{ flannel_first_runtime_max_seconds }}
 
 [Install]
 WantedBy=multi-user.target

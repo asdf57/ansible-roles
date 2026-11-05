@@ -1,14 +1,27 @@
 #!/bin/sh
 # Freeze kube-proxy and the thick Multus daemon (which runs every CNI ADD/DEL,
 # portmap included) until Flannel writes subnet.env; give up after 180s. cgroup v1 or v2.
+# --thaw (systemd ExecStopPost) only thaws; TERM/INT exit through the thawing trap.
 if [ -f /sys/fs/cgroup/cgroup.controllers ]; then file=cgroup.freeze on=1 off=0; else file=freezer.state on=FROZEN off=THAWED; fi
+# Test hooks; defaults are the real targets.
+names=${FLANNEL_FIRST_NAMES:-kube-proxy multus-daemon}
+ready=${FLANNEL_FIRST_READY:-/run/flannel/subnet.env}
+cgroup_of() {
+    awk -F: -v f=$file '(f == "cgroup.freeze" && $1 == 0) { print "/sys/fs/cgroup" $3 } (f == "freezer.state" && $2 ~ /(^|,)freezer(,|$)/) { print "/sys/fs/cgroup/freezer" $3 }' "/proc/$1/cgroup"
+}
+if [ "${1:-}" = --thaw ]; then
+    for pid in $(pgrep -x "$(echo $names | tr ' ' '|')"); do echo $off > "$(cgroup_of "$pid")/$file"; done
+    exit 0
+fi
 frozen=
 trap 'for cg in $frozen; do echo $off > "$cg/$file"; done' EXIT
-for _ in $(seq 900); do
-    [ -s /run/flannel/subnet.env ] && exit 0
-    for name in kube-proxy multus-daemon; do
+trap 'exit 0' TERM INT
+end=$(( $(cut -d. -f1 /proc/uptime) + 180 ))
+while [ "$(cut -d. -f1 /proc/uptime)" -lt "$end" ]; do
+    [ -s "$ready" ] && exit 0
+    for name in $names; do
         pid=$(pgrep -xo "$name") || continue
-        cg=/sys/fs/cgroup$(awk -F: -v f=$file '(f == "cgroup.freeze" && $1 == 0) { print $3 } (f == "freezer.state" && $2 ~ /(^|,)freezer(,|$)/) { print "/freezer" $3 }' "/proc/$pid/cgroup")
+        cg=$(cgroup_of "$pid")
         case " $frozen " in *" $cg "*) ;; *) echo $on > "$cg/$file" && frozen="$frozen $cg" ;; esac
     done
     sleep 0.2

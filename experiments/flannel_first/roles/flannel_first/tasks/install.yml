@@ -15,8 +15,8 @@
     mode: '0755'
 
 - name: Install the gate's systemd unit
-  ansible.builtin.copy:
-    src: flannel-first.service
+  ansible.builtin.template:
+    src: flannel-first.service.j2
     dest: /etc/systemd/system/flannel-first.service
     owner: root
     group: root
