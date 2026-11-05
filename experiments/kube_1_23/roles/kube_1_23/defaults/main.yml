@@ -4,8 +4,10 @@ k123_binaries:
   kubeadm: 6d3f732fe1eabd91c98ff0ee66c6c8b4fcbdee9e99c2c8606f0fa5ff57b4ea65
   kubelet: 588dde06e2515601380787cb5fcb07ae3d3403130e1a5556b013b7b7fb4ab230
   kubectl: f09f7338b5a677f17a9443796c648d2b80feaec9d6a094ab79a77c8a01fde941
-k123_crictl_version: v1.23.0
-k123_crictl_sha256: b754f83c80acdc75f93aba191ff269da6be45d0fc2d3f4079704e7d1424f1ca8
+# crictl 1.23 only speaks CRI v1alpha2, which containerd 2.x removed; kubeadm 1.23
+# only shells out to crictl, so a v1-capable release is used.
+k123_crictl_version: v1.26.1
+k123_crictl_sha256: 0c1a0f9900c15ee7a55e757bcdc220faca5dd2e1cfc120459ad1f04f08598127
 k123_control_plane: zima
 k123_endpoint: kube-api.lab.ryuugu.dev:6443
 k123_pod_cidr: 172.28.0.0/16
