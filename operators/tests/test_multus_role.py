@@ -80,6 +80,8 @@ class MultusRoleTests(unittest.TestCase):
         install = (ROLE / 'tasks/install.yml').read_text(encoding='utf-8')
         self.assertIn("lookup('ansible.builtin.env', 'KUBECONFIG')", install)
         self.assertIn("'apiServer'", install)
+        # -e multus_direct_api_endpoint=false arrives as a string.
+        self.assertIn('multus_direct_api_endpoint | bool', install)
 
     def test_play_requires_an_explicit_mode_and_local_execution(self):
         """The ordinary component play is the sole entry point for both modes."""

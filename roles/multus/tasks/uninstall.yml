@@ -1,7 +1,7 @@
 ---
 - name: Use the verified context's API endpoint for the Multus daemon
   ansible.builtin.set_fact:
-    multus_api_server: "{{ (lookup('ansible.builtin.file', lookup('ansible.builtin.env', 'KUBECONFIG')) | from_yaml).clusters[0].cluster.server | ansible.builtin.urlsplit if multus_direct_api_endpoint else {'hostname': '', 'port': ''} }}"
+    multus_api_server: "{{ (lookup('ansible.builtin.file', lookup('ansible.builtin.env', 'KUBECONFIG')) | from_yaml).clusters[0].cluster.server | ansible.builtin.urlsplit if multus_direct_api_endpoint | bool else {'hostname': '', 'port': ''} }}"
 
 # Removing the DaemonSet alone leaves 00-multus.conf on every node, and new pod
 # sandboxes then fail against the absent daemon. Roll daemons that delete their
