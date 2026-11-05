@@ -1,6 +1,6 @@
 # lock_sampler (experiment)
 
-Test-only. `homelab-lock-sampler.service` starts before containerd and, for 10
+Test-only. `homelab-lock-sampler.service` starts before containerd and, for 60
 minutes after boot, records every 100 ms which process holds the legacy
 `/run/xtables.lock` (attributed to kube-proxy, multus-daemon, flanneld, kubelet,
 containerd or other by walking parent processes) and how many iptables processes

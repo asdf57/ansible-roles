@@ -1,5 +1,5 @@
 [Unit]
-Description=Test-only: sample xtables lock holders for 10 minutes after boot
+Description=Test-only: sample xtables lock holders for 60 minutes after boot
 DefaultDependencies=no
 After=local-fs.target
 Before=containerd.service

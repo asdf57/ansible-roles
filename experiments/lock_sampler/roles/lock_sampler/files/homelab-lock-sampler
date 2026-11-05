@@ -1,5 +1,5 @@
 #!/bin/sh
-# Every 100 ms for 10 minutes after boot: who holds the legacy xtables lock, and how
+# Every 100 ms for 60 minutes after boot: who holds the legacy xtables lock, and how
 # many iptables processes are queued. Holders are attributed by walking parents.
 out=/var/log/homelab-lock-samples.log
 : > "$out"
@@ -12,7 +12,7 @@ owner() {
     done
     echo other
 }
-end=$(( $(cut -d. -f1 /proc/uptime) + 600 ))
+end=$(( $(cut -d. -f1 /proc/uptime) + 3600 ))
 while [ "$(cut -d. -f1 /proc/uptime)" -lt "$end" ]; do
     up=$(cut -d' ' -f1 /proc/uptime)
     ino=$(stat -c %i /run/xtables.lock 2>/dev/null)
