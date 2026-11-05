@@ -1,0 +1,18 @@
+apiVersion: kubeadm.k8s.io/v1beta3
+kind: InitConfiguration
+nodeRegistration:
+  name: {{ inventory_hostname }}
+  criSocket: {{ k123_cri_socket }}
+---
+apiVersion: kubeadm.k8s.io/v1beta3
+kind: ClusterConfiguration
+kubernetesVersion: {{ k123_version }}
+imageRepository: registry.k8s.io
+controlPlaneEndpoint: {{ k123_endpoint }}
+networking:
+  podSubnet: {{ k123_pod_cidr }}
+  serviceSubnet: {{ k123_service_cidr }}
+---
+apiVersion: kubelet.config.k8s.io/v1beta1
+kind: KubeletConfiguration
+cgroupDriver: systemd

@@ -1,0 +1,7 @@
+---
+galaxy_info:
+  author: homelab
+  description: Test-only reset and reinstall of the lab cluster at Kubernetes 1.23.
+  license: MIT
+  min_ansible_version: '2.16'
+dependencies: []

@@ -1,0 +1,26 @@
+# Experiment only; see README.md. Never referenced by provisioning or Configurations.
+- name: Kubernetes 1.23 lab cluster (experiment)
+  hosts: all
+  gather_facts: false
+  become: true
+  serial: "{{ 1 if mode == 'reset' else 0 }}"
+  tasks:
+    - name: Ensure mode is set
+      ansible.builtin.assert:
+        that:
+          - mode is defined
+          - mode in ["reset", "install"]
+        quiet: true
+        fail_msg: "Mode must be 'reset' or 'install'."
+
+    - name: Reset the node
+      ansible.builtin.import_role:
+        name: kube_1_23
+        tasks_from: reset
+      when: mode == "reset"
+
+    - name: Install Kubernetes 1.23
+      ansible.builtin.import_role:
+        name: kube_1_23
+        tasks_from: install
+      when: mode == "install"

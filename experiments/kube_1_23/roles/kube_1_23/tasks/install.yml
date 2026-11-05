@@ -1,0 +1,154 @@
+---
+- name: Download the pinned binaries on the runner
+  ansible.builtin.get_url:
+    url: "https://dl.k8s.io/release/{{ k123_version }}/bin/linux/amd64/{{ item.key }}"
+    dest: "/tmp/k123-{{ item.key }}"
+    checksum: "sha256:{{ item.value }}"
+    # The runner also uses the matching kubectl against the 1.23 cluster.
+    mode: '0700'
+  loop: "{{ k123_binaries | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  vars:
+    ansible_become: false
+
+- name: Download crictl on the runner
+  ansible.builtin.get_url:
+    url: "https://github.com/kubernetes-sigs/cri-tools/releases/download/{{ k123_crictl_version }}/crictl-{{ k123_crictl_version }}-linux-amd64.tar.gz"
+    dest: /tmp/k123-crictl.tar.gz
+    checksum: "sha256:{{ k123_crictl_sha256 }}"
+    mode: '0600'
+  delegate_to: localhost
+  become: false
+  run_once: true
+  vars:
+    ansible_become: false
+
+- name: Install the Kubernetes binaries
+  ansible.builtin.copy:
+    src: "/tmp/k123-{{ item }}"
+    dest: "/usr/local/bin/{{ item }}"
+    owner: root
+    group: root
+    mode: '0755'
+  loop: [kubeadm, kubelet, kubectl]
+
+- name: Install crictl
+  ansible.builtin.unarchive:
+    src: /tmp/k123-crictl.tar.gz
+    dest: /usr/local/bin
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Point crictl at containerd
+  ansible.builtin.copy:
+    dest: /etc/crictl.yaml
+    content: "runtime-endpoint: {{ k123_cri_socket }}\nimage-endpoint: {{ k123_cri_socket }}\n"
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Install the 1.23-compatible kubelet unit
+  ansible.builtin.template:
+    src: kubelet.service.j2
+    dest: /etc/systemd/system/kubelet.service
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Enable kubelet
+  ansible.builtin.systemd_service:
+    name: kubelet
+    enabled: true
+    daemon_reload: true
+
+- name: Write the kubeadm configuration
+  ansible.builtin.template:
+    src: kubeadm-init.yml.j2
+    dest: /root/kubeadm-1.23.yml
+    owner: root
+    group: root
+    mode: '0600'
+  when: inventory_hostname == k123_control_plane
+
+# kubeadm prints bootstrap credentials; only credential-bearing tasks are hidden.
+- name: Initialise the 1.23 control plane
+  ansible.builtin.command:
+    argv: [/usr/local/bin/kubeadm, init, --config, /root/kubeadm-1.23.yml, --upload-certs]
+    creates: /etc/kubernetes/admin.conf
+  when: inventory_hostname == k123_control_plane
+  no_log: true
+
+- name: Create a join command
+  ansible.builtin.command:
+    argv: [/usr/local/bin/kubeadm, token, create, --ttl, 10m, --print-join-command]
+  register: k123_join
+  changed_when: true
+  when: inventory_hostname == k123_control_plane
+  no_log: true
+
+- name: Join workers
+  ansible.builtin.command:
+    argv: "{{ hostvars[k123_control_plane].k123_join.stdout.split() + ['--cri-socket', k123_cri_socket, '--node-name', inventory_hostname] }}"
+    creates: /etc/kubernetes/kubelet.conf
+  when: inventory_hostname != k123_control_plane
+  no_log: true
+
+- name: Read the admin kubeconfig
+  ansible.builtin.slurp:
+    src: /etc/kubernetes/admin.conf
+  register: k123_admin
+  when: inventory_hostname == k123_control_plane
+  no_log: true
+
+- name: Write the admin kubeconfig for the runner user
+  ansible.builtin.copy:
+    dest: "{{ k123_admin_kubeconfig }}"
+    content: "{{ hostvars[k123_control_plane].k123_admin.content | b64decode }}"
+    mode: '0600'
+  delegate_to: localhost
+  become: false
+  run_once: true
+  no_log: true
+  vars:
+    ansible_become: false
+
+- name: Apply the saved Flannel manifest
+  ansible.builtin.command:
+    argv: [/tmp/k123-kubectl, --kubeconfig, "{{ k123_admin_kubeconfig }}", apply, -f, "{{ k123_flannel_manifest }}"]
+  delegate_to: localhost
+  become: false
+  run_once: true
+  changed_when: true
+  vars:
+    ansible_become: false
+
+- name: Wait for every Node to be Ready
+  ansible.builtin.command:
+    argv: [/tmp/k123-kubectl, --kubeconfig, "{{ k123_admin_kubeconfig }}", wait, --for=condition=Ready, nodes, --all, --timeout=600s]
+  delegate_to: localhost
+  become: false
+  run_once: true
+  changed_when: false
+  vars:
+    ansible_become: false
+
+- name: Report versions
+  ansible.builtin.command:
+    argv: [/tmp/k123-kubectl, --kubeconfig, "{{ k123_admin_kubeconfig }}", get, nodes, -o, wide]
+  delegate_to: localhost
+  become: false
+  run_once: true
+  changed_when: false
+  register: k123_nodes
+  vars:
+    ansible_become: false
+
+- name: Show the nodes
+  ansible.builtin.debug:
+    msg: "{{ k123_nodes.stdout_lines }}"
+  run_once: true

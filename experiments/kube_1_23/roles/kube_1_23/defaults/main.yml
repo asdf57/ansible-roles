@@ -1,0 +1,16 @@
+---
+k123_version: v1.23.17
+k123_binaries:
+  kubeadm: 6d3f732fe1eabd91c98ff0ee66c6c8b4fcbdee9e99c2c8606f0fa5ff57b4ea65
+  kubelet: 588dde06e2515601380787cb5fcb07ae3d3403130e1a5556b013b7b7fb4ab230
+  kubectl: f09f7338b5a677f17a9443796c648d2b80feaec9d6a094ab79a77c8a01fde941
+k123_crictl_version: v1.23.0
+k123_crictl_sha256: b754f83c80acdc75f93aba191ff269da6be45d0fc2d3f4079704e7d1424f1ca8
+k123_control_plane: zima
+k123_endpoint: kube-api.lab.ryuugu.dev:6443
+k123_pod_cidr: 172.28.0.0/16
+k123_service_cidr: 172.29.0.0/16
+k123_cri_socket: unix:///run/containerd/containerd.sock
+# Runner-side, unprivileged: admin kubeconfig written here; Flannel manifest read from here.
+k123_admin_kubeconfig: "{{ lookup('ansible.builtin.env', 'HOME') }}/.kube/lab-1.23.conf"
+k123_flannel_manifest: /work/k123/flannel-0.28.9.json

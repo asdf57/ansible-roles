@@ -1,0 +1,28 @@
+---
+- name: Stop and disable kubelet so a reboot starts nothing until install
+  ansible.builtin.systemd_service:
+    name: kubelet
+    state: stopped
+    enabled: false
+
+- name: Reset kubeadm state
+  ansible.builtin.command:
+    argv: [/usr/local/bin/kubeadm, reset, --force, --cri-socket, "{{ k123_cri_socket }}"]
+  register: k123_reset
+  changed_when: true
+  failed_when: false
+
+- name: Keep the platform's protected cluster marker for the record
+  ansible.builtin.command:
+    argv: [mv, /var/lib/homelab/kube-cluster.json, "/var/lib/homelab/kube-cluster.json.before-1.23-{{ now(utc=true, fmt='%Y%m%dT%H%M%SZ') }}"]
+    removes: /var/lib/homelab/kube-cluster.json
+
+- name: Remove cluster state that kubeadm reset leaves behind
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop: [/etc/kubernetes, /var/lib/etcd, /var/lib/kubelet, /etc/cni/net.d, /var/lib/cni, /run/flannel, /run/cni]
+
+- name: Report the reset
+  ansible.builtin.debug:
+    msg: "reset rc={{ k123_reset.rc }}; reboot this node through the reviewed helper before install"
