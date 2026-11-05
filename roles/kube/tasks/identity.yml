@@ -2,12 +2,9 @@
 - name: Record concrete node identity and software pins
   ansible.builtin.set_fact:
     kube_arch: "{{ ({'x86_64': 'amd64', 'aarch64': 'arm64'})[ansible_facts.architecture] }}"
-    kube_expected_identity:
-      clusterUID: "{{ kube_cluster_plan.uid }}"
-      serverUID: "{{ configuration_server_uid }}"
-      nodeName: "{{ kube_node_name }}"
-      role: "{{ kube_node_role }}"
-      settings: "{{ kube_cluster_plan.settings }}"
+    # The Flannel release is reconciled through its manifest checksum, so it is
+    # excluded from the identity that guards against adopting another cluster.
+    kube_expected_identity: "{{ {'clusterUID': kube_cluster_plan.uid, 'serverUID': configuration_server_uid, 'nodeName': kube_node_name, 'role': kube_node_role, 'settings': kube_cluster_plan.settings} | kube_stable_identity }}"
 
 - name: Inspect the protected Kubernetes identity marker
   ansible.builtin.stat:
@@ -38,7 +35,7 @@
     quiet: true
     that:
       - kube_identity_file.stat.exists or kube_existing_installation.results | selectattr('stat.exists') | list | length == 0
-      - not kube_identity_file.stat.exists or kube_identity.identity == kube_expected_identity
+      - not kube_identity_file.stat.exists or (kube_identity.identity | kube_stable_identity) == kube_expected_identity
       - not kube_identity_file.stat.exists or kube_identity.phase in ['Prepared', 'Initialising', 'Joining', 'Ready']
       - kube_identity.get('phase', '') != 'Prepared' or kube_existing_installation.results[:3] | selectattr('stat.exists') | list | length == 0
       - kube_identity.get('phase', '') != 'Initialising' or kube_admin_config_exists

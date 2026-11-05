@@ -27,7 +27,7 @@
   ansible.builtin.assert:
     quiet: true
     that:
-      - (kube_member_marker.content | b64decode | from_json).identity == kube_expected_identity
+      - ((kube_member_marker.content | b64decode | from_json).identity | kube_stable_identity) == kube_expected_identity
       - (kube_member_marker.content | b64decode | from_json).phase in ['Initialising', 'Joining', 'Ready']
       - (kube_member_marker.content | b64decode | from_json).get('clusterNamespaceUID', '') in ['', hostvars[kube_cluster_plan.controlPlane.name].kube_namespace_uid]
 

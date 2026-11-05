@@ -36,7 +36,9 @@ assert marker['phase'] == 'Ready'
 assert identity['clusterUID'] == expected['clusterUID']
 assert identity['serverUID'] == expected['serverUID']
 assert identity['role'] == 'control-plane'
-assert all(identity['settings'].get(field) == value for field, value in expected['settings'].items())
+# The Flannel release is reconciled separately and is not part of node identity.
+installed = dict(identity['settings'], network={key: value for key, value in identity['settings']['network'].items() if key != 'version'})
+assert all(installed.get(field) == value for field, value in expected['settings'].items())
 command = ['/usr/local/bin/kubectl', '--kubeconfig=/etc/kubernetes/admin.conf', '--request-timeout=15s']
 namespace = json.loads(subprocess.check_output(command + ['get', 'namespace', 'kube-system', '-o', 'json']))
 assert namespace['metadata']['uid'] == marker['clusterNamespaceUID']
@@ -62,6 +64,14 @@ def control_plane(api: API, inventory: JSONObject, cluster: Resource) -> Resourc
     if bound_uid not in (None, cluster['metadata']['uid']):
         raise ValueError('Control plane belongs to a replaced cluster')
     return server
+
+
+def stable_settings(spec: JSONValue) -> JSONObject:
+    """Cluster settings that identify installed members; the Flannel release is reconciled."""
+    settings = dict(json_object(spec, 'KubeCluster spec'))
+    network = json_object(settings.get('network'), 'KubeCluster network')
+    settings['network'] = {key: value for key, value in network.items() if key != 'version'}
+    return settings
 
 
 def fetch_context(server: Resource, cluster: Resource) -> JSONObject:
@@ -90,7 +100,7 @@ def fetch_context(server: Resource, cluster: Resource) -> JSONObject:
             command, input=json.dumps({
                 'clusterUID': cluster['metadata']['uid'],
                 'serverUID': server['metadata']['uid'],
-                'settings': cluster['spec'],
+                'settings': stable_settings(cluster['spec']),
             }), capture_output=True, text=True, timeout=90, check=False)
         if result.returncode:
             raise ValueError('Verified control-plane credential retrieval failed')

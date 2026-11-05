@@ -102,6 +102,14 @@ def validated_settings(raw_spec: JSONValue) -> JSONObject:
     return settings
 
 
+def stable_identity(raw_identity: JSONValue) -> JSONObject:
+    """Drop the Flannel release: it is a reconciled add-on, not immutable node ownership."""
+    identity = deepcopy(mapping(raw_identity, 'Kubernetes member identity'))
+    settings = mapping(identity.get('settings'), 'identity settings')
+    mapping(settings.get('network'), 'identity network').pop('version', None)
+    return identity
+
+
 def cluster_plan(raw_target: JSONValue, nodes: JSONValue) -> JSONObject:
     """Validate cluster settings and return concrete role inputs for a playbook."""
     target = mapping(raw_target, 'configuration_target')
@@ -638,7 +646,7 @@ def probe_objects(raw_plan: JSONValue, raw_image: JSONValue) -> JSONObject:
 class FilterModule:
     """Expose only pure, typed planning functions to Ansible."""
 
-    def filters(self) -> dict[str, Callable[[JSONValue, JSONValue], JSONObject]]:
+    def filters(self) -> dict[str, Callable[..., JSONObject]]:
         """Ansible discovers these filters without API credentials or side effects."""
         return {
             'kube_cluster_plan': cluster_plan,
@@ -646,6 +654,7 @@ class FilterModule:
             'kube_changed_binaries': changed_binaries,
             'kube_installed_artifacts': installed_artifacts,
             'kube_flannel_objects': flannel_objects,
+            'kube_stable_identity': stable_identity,
             'kube_verify_nodes': verify_nodes,
             'kube_node_observations': node_observations,
             'kube_registration_action': registration_action,

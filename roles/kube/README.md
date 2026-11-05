@@ -77,8 +77,8 @@ Linux amd64/arm64 Debian/Arch hosts. Underlay firewalls must allow the normal
 Kubernetes ports and Flannel UDP 8472 between members.
 
 `/var/lib/homelab/kube-cluster.json` is a root-owned 0600 marker containing cluster
-and Server identity, desired settings, phase, verified file hashes, applied Git
-commit and installed namespace UID. Same-commit unchanged installations reuse
+and Server identity, desired settings except the reconciled Flannel release, phase,
+verified file hashes, applied Git commit and installed namespace UID. Same-commit unchanged installations reuse
 verified bytes rather than redownloading artifacts every five minutes. File drift
 or new code resolves releases again and still passes the workload-change guard.
 

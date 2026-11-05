@@ -12,7 +12,7 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'filter_plugins'))
 from kube_plan import JSONObject, JSONValue, cluster_plan, mapping, validate_host_network
 from kube_plan import changed_binaries, flannel_objects, installed_artifacts, node_observations, probe_objects, verify_nodes
-from kube_plan import registration_action, membership_observation
+from kube_plan import registration_action, membership_observation, stable_identity
 
 
 class KubernetesPlanTests(unittest.TestCase):
@@ -493,23 +493,40 @@ class KubernetesPlanTests(unittest.TestCase):
         tasks = yaml.safe_load((root / 'roles/kube/tasks/identity.yml').read_text(encoding='utf-8'))
         guard = next(task for task in tasks
                      if task['name'] == 'Refuse unowned, conflicting or incomplete bootstrap state')
+        expected: JSONObject = {
+            'clusterUID': 'fixture',
+            'serverUID': 'fixture-server',
+            'settings': {
+                'podCIDR': '172.28.0.0/16',
+                'network': {
+                    'provider': 'flannel'
+                }
+            }
+        }
+        # Markers written before the Flannel release left identity still record it.
+        older_release = copy.deepcopy(expected)
+        mapping(mapping(older_release['settings'], 'settings')['network'],
+                'network')['version'] = '0.28.10'
+        other_network = copy.deepcopy(expected)
+        mapping(other_network['settings'], 'settings')['podCIDR'] = '10.244.0.0/16'
         cases = [
-            ('fresh', False, '', False, False, True),
-            ('unowned', False, '', True, True, False),
-            ('prepared-with-foreign-state', True, 'Prepared', True, True, False),
-            ('interrupted-init', True, 'Initialising', False, False, False),
-            ('verified-existing', True, 'Ready', True, True, True),
+            ('fresh', False, '', False, False, expected, True),
+            ('unowned', False, '', True, True, expected, False),
+            ('prepared-with-foreign-state', True, 'Prepared', True, True, expected, False),
+            ('interrupted-init', True, 'Initialising', False, False, expected, False),
+            ('verified-existing', True, 'Ready', True, True, expected, True),
+            ('changed-flannel-release', True, 'Ready', True, True, older_release, True),
+            ('changed-pod-network', True, 'Ready', True, True, other_network, False),
         ]
-        for label, marker_exists, phase, admin_exists, kubelet_exists, valid in cases:
+        for label, marker_exists, phase, admin_exists, kubelet_exists, identity, valid in cases:
             with self.subTest(case=label), tempfile.TemporaryDirectory() as directory:
-                identity: JSONObject = {'clusterUID': 'fixture', 'serverUID': 'fixture-server'}
                 variables: JSONObject = {
                     'kube_identity_file': {
                         'stat': {
                             'exists': marker_exists
                         }
                     },
-                    'kube_expected_identity': identity,
+                    'kube_expected_identity': expected,
                     'kube_identity': {
                         'identity': identity,
                         'phase': phase
@@ -563,8 +580,29 @@ class KubernetesPlanTests(unittest.TestCase):
                     }]), encoding='utf-8')
                 result = subprocess.run(['ansible-playbook', '-i', 'localhost,',
                                          str(play)], capture_output=True, text=True, check=False,
-                                        timeout=60)
+                                        timeout=60, env=dict(
+                                            os.environ,
+                                            ANSIBLE_FILTER_PLUGINS=str(root / 'filter_plugins')))
                 self.assertEqual(result.returncode == 0, valid, result.stdout + result.stderr)
+
+    def test_stable_identity_excludes_only_the_flannel_release(self):
+        plan = self.plan()
+        identity: JSONObject = {'clusterUID': plan['uid'], 'settings': plan['settings']}
+        stable = stable_identity(identity)
+        self.assertEqual(mapping(mapping(stable['settings'], 'settings')['network'], 'network'),
+                         {'provider': 'flannel'})
+        self.assertEqual(
+            mapping(mapping(identity['settings'], 'settings')['network'], 'network')['version'],
+            mapping(mapping(plan['settings'], 'settings')['network'], 'network')['version'])
+        unchanged = {
+            key: value
+            for key, value in mapping(stable['settings'], 'settings').items() if key != 'network'
+        }
+        self.assertEqual(
+            unchanged, {
+                key: value
+                for key, value in mapping(plan['settings'], 'settings').items() if key != 'network'
+            })
 
     def test_swap_policy_manages_definitions_not_active_device_aliases(self):
         root = Path(__file__).resolve().parents[2]

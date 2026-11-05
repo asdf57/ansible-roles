@@ -231,6 +231,22 @@ class ContextTests(unittest.TestCase):
                 runner.setup_context(api, 'managed', home)
             self.assertFalse((directory / 'config').exists())
 
+    def test_credential_identity_ignores_only_the_flannel_release(self):
+        spec: JSONObject = {
+            'podCIDR': '172.28.0.0/16',
+            'network': {
+                'provider': 'flannel',
+                'version': '0.28.9'
+            }
+        }
+        self.assertEqual(runner.stable_settings(spec), {
+            'podCIDR': '172.28.0.0/16',
+            'network': {
+                'provider': 'flannel'
+            }
+        })
+        self.assertEqual(spec['network'], {'provider': 'flannel', 'version': '0.28.9'})
+
     def test_exact_client_checksum_is_required(self):
         binary = b'fake client binary'
         checksum = hashlib.sha256(binary).hexdigest().encode()
