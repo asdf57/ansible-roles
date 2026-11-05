@@ -11,7 +11,9 @@ The Kubernetes platform uses tasks/artifact_preflight.yml and tasks/artifacts.ym
 exact upstream releases are verified/staged by the kube role on the unprivileged
 runner, then installed through this role under Server operation claims. The
 preflight checks all existing runtime namespaces and refuses disruptive binary,
-configuration or unit changes with active consumers. Unchanged installed runtimes
+runtime configuration or containerd unit changes with active consumers. The
+role-templated kubelet unit may change: a kubelet restart leaves running
+containers untouched. Unchanged installed runtimes
 are not restarted. Native CRI configuration, sandbox image and systemd service
 are verified. See the kube role README and Stigmergy's Kubernetes rollout guide.
 

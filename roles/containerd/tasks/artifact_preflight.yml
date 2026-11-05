@@ -72,9 +72,10 @@
 - name: Compare desired service settings without changing them
   ansible.builtin.set_fact:
     kube_runtime_configuration_matches: "{{ kube_service_files.results[0].stat.get('checksum', '') == (lookup('template', 'config.toml.j2') | hash('sha256')) }}"
+    # Only the runtime unit is guarded: restarting kubelet for its role-templated unit
+    # leaves running containers untouched, while restarting containerd does not.
     kube_service_units_match: >-
-      {{ kube_service_files.results[1].stat.get('checksum', '') == (lookup('template', 'containerd.service.j2') | hash('sha256')) and
-         kube_service_files.results[2].stat.get('checksum', '') == (lookup('template', role_path ~ '/../kube/templates/kubelet.service.j2') | hash('sha256')) }}
+      {{ kube_service_files.results[1].stat.get('checksum', '') == (lookup('template', 'containerd.service.j2') | hash('sha256')) }}
     kube_consumers_active: "{{ (kube_kubelet_config_exists and ansible_facts.services.get('kubelet.service', {}).get('state', '') == 'running') or kube_runtime_has_tasks }}"
 
 - name: Refuse disruptive runtime or kubelet changes with active consumers
