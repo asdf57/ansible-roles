@@ -1,0 +1,108 @@
+---
+- name: Require a Debian node
+  ansible.builtin.assert:
+    quiet: true
+    that:
+      - ansible_facts.distribution == 'Debian'
+
+- name: Create a private download directory on the runner
+  ansible.builtin.tempfile:
+    state: directory
+    prefix: kernel-pin-
+  delegate_to: localhost
+  become: false
+  run_once: true
+  register: kernel_pin_download
+
+- name: Download the content-addressed kernel package on the runner
+  ansible.builtin.get_url:
+    url: "https://snapshot.debian.org/file/{{ kernel_pin_sha1 }}"
+    dest: "{{ kernel_pin_download.path }}/{{ kernel_pin_package }}_{{ kernel_pin_version }}_amd64.deb"
+    checksum: "sha1:{{ kernel_pin_sha1 }}"
+    mode: '0600'
+    timeout: 600
+  delegate_to: localhost
+  become: false
+  run_once: true
+  register: kernel_pin_fetch
+  retries: 5
+  delay: 20
+  until: kernel_pin_fetch is succeeded
+
+- name: Create the node staging directory
+  ansible.builtin.file:
+    path: /var/cache/homelab-kernel-pin
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Stage the verified package on the node
+  ansible.builtin.copy:
+    src: "{{ kernel_pin_fetch.dest }}"
+    dest: "/var/cache/homelab-kernel-pin/{{ kernel_pin_fetch.dest | basename }}"
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Read the installed version of the test kernel
+  ansible.builtin.command:
+    argv: [dpkg-query, -W, -f, '${Status} ${Version}', "{{ kernel_pin_package }}"]
+  register: kernel_pin_installed
+  changed_when: false
+  failed_when: false
+
+- name: Install the test kernel with its dependencies
+  ansible.builtin.command:
+    argv: [apt-get, install, -y, --no-install-recommends, "/var/cache/homelab-kernel-pin/{{ kernel_pin_fetch.dest | basename }}"]
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+  when: kernel_pin_installed.stdout != 'install ok installed ' ~ kernel_pin_version
+  changed_when: true
+
+- name: Remove the runner download
+  ansible.builtin.file:
+    path: "{{ kernel_pin_download.path }}"
+    state: absent
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+- name: Require the test kernel entry in the generated GRUB menu
+  ansible.builtin.command:
+    argv: [grep, -c, "with Linux {{ kernel_pin_release }}'", /boot/grub/grub.cfg]
+  changed_when: false
+
+- name: Read the running kernel
+  ansible.builtin.command:
+    argv: [uname, -r]
+  register: kernel_pin_running
+  changed_when: false
+
+# A first boot that fails returns to the existing default on the next power cycle.
+- name: Boot the test kernel once, without changing the default
+  ansible.builtin.command:
+    argv: [grub-reboot, "{{ kernel_pin_entry }}"]
+  when: kernel_pin_running.stdout != kernel_pin_release
+  changed_when: true
+
+- name: Make the test kernel the default only after it has booted successfully
+  ansible.builtin.copy:
+    dest: /etc/default/grub.d/92-homelab-kernel-pin.cfg
+    content: |
+      GRUB_DEFAULT="{{ kernel_pin_entry }}"
+    owner: root
+    group: root
+    mode: '0644'
+  register: kernel_pin_default
+  when: kernel_pin_running.stdout == kernel_pin_release
+
+- name: Regenerate GRUB for a changed default
+  ansible.builtin.command:
+    argv: [update-grub]
+  when: kernel_pin_default is changed
+  changed_when: true
+
+- name: Report the kernel state
+  ansible.builtin.debug:
+    msg: "running {{ kernel_pin_running.stdout }}; {{ 'test kernel is the default' if kernel_pin_running.stdout == kernel_pin_release else 'test kernel selected for the next boot only; re-run install after it boots to make it the default' }}"

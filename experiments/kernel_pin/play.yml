@@ -1,0 +1,25 @@
+# Experiment only; see README.md. Never referenced by provisioning or Configurations.
+- name: Pinned test kernel (experiment)
+  hosts: all
+  gather_facts: true
+  become: true
+  tasks:
+    - name: Ensure mode is set
+      ansible.builtin.assert:
+        that:
+          - mode is defined
+          - mode in ["install", "uninstall"]
+        quiet: true
+        fail_msg: "Mode must be set to 'install' or 'uninstall'."
+
+    - name: Install the test kernel
+      ansible.builtin.import_role:
+        name: kernel_pin
+        tasks_from: install
+      when: mode == "install"
+
+    - name: Uninstall the test kernel
+      ansible.builtin.import_role:
+        name: kernel_pin
+        tasks_from: uninstall
+      when: mode == "uninstall"

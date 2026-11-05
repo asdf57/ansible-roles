@@ -1,0 +1,7 @@
+---
+# Test kernel (snapshot.debian.org content hash is the SHA-1 of the .deb).
+kernel_pin_package: linux-image-6.1.0-45-amd64
+kernel_pin_version: 6.1.170-1
+kernel_pin_release: 6.1.0-45-amd64
+kernel_pin_sha1: 0412a9dd748609b3c437adef1e438f56137c13b9
+kernel_pin_entry: "Advanced options for Debian GNU/Linux>Debian GNU/Linux, with Linux {{ kernel_pin_release }}"

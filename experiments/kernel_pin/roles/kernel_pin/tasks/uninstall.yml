@@ -1,0 +1,37 @@
+---
+- name: Remove the test kernel default
+  ansible.builtin.file:
+    path: /etc/default/grub.d/92-homelab-kernel-pin.cfg
+    state: absent
+  register: kernel_pin_default
+
+- name: Read the running kernel
+  ansible.builtin.command:
+    argv: [uname, -r]
+  register: kernel_pin_running
+  changed_when: false
+
+# The running kernel cannot be removed; reboot onto the distro kernel and re-run.
+- name: Remove the test kernel package when it is not running
+  ansible.builtin.command:
+    argv: [apt-get, purge, -y, "{{ kernel_pin_package }}"]
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+  when: kernel_pin_running.stdout != kernel_pin_release
+  register: kernel_pin_purge
+  changed_when: "'Removing' in kernel_pin_purge.stdout"
+
+- name: Remove the staged package
+  ansible.builtin.file:
+    path: /var/cache/homelab-kernel-pin
+    state: absent
+
+- name: Regenerate GRUB for the restored default
+  ansible.builtin.command:
+    argv: [update-grub]
+  when: kernel_pin_default is changed or kernel_pin_purge is changed
+  changed_when: true
+
+- name: Report the kernel state
+  ansible.builtin.debug:
+    msg: "{{ 'default restored; reboot onto the distro kernel and run uninstall again to remove the test package' if kernel_pin_running.stdout == kernel_pin_release else 'test kernel removed' }}"

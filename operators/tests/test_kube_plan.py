@@ -719,7 +719,10 @@ class KubernetesPlanTests(unittest.TestCase):
                     found.extend(tasks(task.get(nested, [])))
             return found
 
-        for path in sorted((root / 'roles').glob('*/tasks/*.yml')):
+        for path in sorted([
+                *(root / 'roles').glob('*/tasks/*.yml'),
+                *(root / 'experiments').glob('*/roles/*/tasks/*.yml')
+        ]):
             for task in tasks(yaml.safe_load(path.read_text(encoding='utf-8'))):
                 condition = task.get('when')
                 conditions = condition if isinstance(condition, list) else [condition]
