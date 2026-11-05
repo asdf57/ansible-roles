@@ -255,6 +255,34 @@ def annotate_cni_rollout(document: JSONObject, config_digest: str) -> None:
     annotations['homelab.io/cni-config-sha256'] = config_digest
 
 
+def use_direct_api_endpoint(document: JSONObject, endpoint: str) -> None:
+    """Reach the API like kubelet and kube-proxy do, not through the kubernetes ClusterIP.
+
+    In-cluster config targets the Service VIP, which exists only after kube-proxy
+    has programmed the node. After a reboot that full sync can take minutes, and
+    every pod waits for the network plugin in the meantime.
+    """
+    host, _, port = endpoint.rpartition(':')
+    pod = mapping(
+        mapping(mapping(document['spec'], 'daemon spec')['template'], 'pod template')['spec'],
+        'pod spec')
+    containers = pod.get('containers')
+    if not isinstance(containers, list):
+        raise ValueError('Flannel containers must be an array')
+    for raw_container in containers:
+        container = mapping(raw_container, 'Flannel container')
+        environment = container.setdefault('env', [])
+        if not isinstance(environment, list):
+            raise ValueError('Flannel container env must be an array')
+        overrides = {'KUBERNETES_SERVICE_HOST': host, 'KUBERNETES_SERVICE_PORT': port}
+        kept: list[JSONValue] = [
+            entry for entry in environment
+            if mapping(entry, 'Flannel env').get('name') not in overrides
+        ]
+        kept.extend({'name': name, 'value': value} for name, value in overrides.items())
+        container['env'] = kept
+
+
 def flannel_objects(raw_documents: JSONValue, raw_plan: JSONValue) -> JSONObject:
     """Adapt the verified release and roll its init containers when CNI data changes."""
     plan = mapping(raw_plan, 'cluster plan')
@@ -294,6 +322,8 @@ def flannel_objects(raw_documents: JSONValue, raw_plan: JSONValue) -> JSONObject
         document = mapping(raw_document, 'Flannel resource')
         if document['kind'] == 'DaemonSet':
             annotate_cni_rollout(document, config_digest)
+            use_direct_api_endpoint(document, text(settings.get('controlPlaneEndpoint'),
+                                                   'endpoint'))
     return {'apiVersion': 'v1', 'kind': 'List', 'items': documents}
 
 

@@ -51,10 +51,13 @@ class MultusRoleTests(unittest.TestCase):
         """Removing the release must not leave nodes delegating to an absent daemon."""
         install = yaml.safe_load((ROLE / 'tasks/install.yml').read_text(encoding='utf-8'))
         uninstall = yaml.safe_load((ROLE / 'tasks/uninstall.yml').read_text(encoding='utf-8'))
-        install_helm = install[0]['kubernetes.core.helm']
+        install_helm = next(task['kubernetes.core.helm'] for task in install
+                            if 'kubernetes.core.helm' in task)
+        readiness = next(task for task in install if 'kubernetes.core.k8s_info' in task)
         self.assertIn('numberReady == multus_daemonset.resources[0].status.desiredNumberScheduled',
-                      install[1]['until'])
-        cleanup_helm, remove_helm = (task['kubernetes.core.helm'] for task in uninstall)
+                      readiness['until'])
+        cleanup_helm, remove_helm = (task['kubernetes.core.helm'] for task in uninstall
+                                     if 'kubernetes.core.helm' in task)
         for helm in (cleanup_helm, remove_helm):
             for field in ('name', 'release_namespace', 'kubeconfig', 'wait', 'timeout'):
                 self.assertEqual(install_helm[field], helm[field])
@@ -63,6 +66,20 @@ class MultusRoleTests(unittest.TestCase):
         self.assertIn("'cleanupConfigOnExit': true", cleanup_helm['values'])
         self.assertEqual(remove_helm['state'], 'absent')
         self.assertTrue(daemon_config(render({'cleanupConfigOnExit': True}))['cleanupConfigOnExit'])
+
+    def test_daemon_reaches_the_api_without_the_service_vip(self):
+        """The API endpoint comes from the verified context, not kube-proxy's ClusterIP."""
+        manifests = render({'apiServer': {'host': 'kube-api.example', 'port': '6443'}})
+        daemon = next(manifest for manifest in manifests if manifest['kind'] == 'DaemonSet')
+        environment = {
+            entry['name']: entry.get('value')
+            for entry in daemon['spec']['template']['spec']['containers'][0]['env']
+        }
+        self.assertEqual(environment['KUBERNETES_SERVICE_HOST'], 'kube-api.example')
+        self.assertEqual(environment['KUBERNETES_SERVICE_PORT'], '6443')
+        install = (ROLE / 'tasks/install.yml').read_text(encoding='utf-8')
+        self.assertIn("lookup('ansible.builtin.env', 'KUBECONFIG')", install)
+        self.assertIn("'apiServer'", install)
 
     def test_play_requires_an_explicit_mode_and_local_execution(self):
         """The ordinary component play is the sole entry point for both modes."""

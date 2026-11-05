@@ -1,0 +1,23 @@
+---
+- name: Install the boot-time kube-proxy gate
+  ansible.builtin.copy:
+    src: flannel-first
+    dest: /usr/local/sbin/flannel-first
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Install the gate's systemd unit
+  ansible.builtin.copy:
+    src: flannel-first.service
+    dest: /etc/systemd/system/flannel-first.service
+    owner: root
+    group: root
+    mode: '0644'
+  register: flannel_first_unit
+
+- name: Enable the gate for the next boot without running it now
+  ansible.builtin.systemd_service:
+    name: flannel-first.service
+    enabled: true
+    daemon_reload: "{{ flannel_first_unit.changed }}"

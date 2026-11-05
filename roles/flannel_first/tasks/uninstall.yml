@@ -1,0 +1,24 @@
+---
+- name: Inspect the gate's systemd unit
+  ansible.builtin.stat:
+    path: /etc/systemd/system/flannel-first.service
+  register: flannel_first_unit
+
+# Stopping runs ExecStopPost, which thaws kube-proxy if the gate is active.
+- name: Stop and disable the gate
+  ansible.builtin.systemd_service:
+    name: flannel-first.service
+    state: stopped
+    enabled: false
+  when: flannel_first_unit.stat.exists
+
+- name: Remove the gate's unit and script
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop: [/etc/systemd/system/flannel-first.service, /usr/local/sbin/flannel-first]
+
+- name: Forget the removed unit
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+  when: flannel_first_unit.stat.exists

@@ -1,0 +1,7 @@
+---
+galaxy_info:
+  author: homelab
+  description: Boot-time gate that freezes kube-proxy until Flannel has written subnet.env.
+  license: MIT
+  min_ansible_version: '2.16'
+dependencies: []

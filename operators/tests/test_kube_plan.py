@@ -10,7 +10,7 @@ import unittest
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'filter_plugins'))
-from kube_plan import JSONObject, JSONValue, cluster_plan, mapping, validate_host_network
+from kube_plan import JSONObject, JSONValue, cluster_plan, mapping, text, validate_host_network
 from kube_plan import changed_binaries, flannel_objects, installed_artifacts, node_observations, probe_objects, verify_nodes
 from kube_plan import registration_action, membership_observation, stable_identity
 
@@ -461,6 +461,19 @@ class KubernetesPlanTests(unittest.TestCase):
             mapping(template['metadata'], 'metadata')['annotations'], 'annotations')
         digest = annotations['homelab.io/cni-config-sha256']
         self.assertEqual(len(str(digest)), 64)
+        pod = mapping(template['spec'], 'pod spec')
+        container = mapping(
+            next(iter(pod['containers'] if isinstance(pod['containers'], list) else [])),
+            'container')
+        environment = {
+            mapping(entry, 'env')['name']: mapping(entry, 'env')['value']
+            for entry in (container['env'] if isinstance(container['env'], list) else [])
+        }
+        host, _, port = text(
+            mapping(self.plan()['settings'], 'settings')['controlPlaneEndpoint'],
+            'endpoint').rpartition(':')
+        self.assertEqual(environment['KUBERNETES_SERVICE_HOST'], host)
+        self.assertEqual(environment['KUBERNETES_SERVICE_PORT'], port)
         source_data = mapping(mapping(documents[0], 'ConfigMap')['data'], 'data')
         source_data['cni-conf.json'] = json.dumps(
             {'plugins': [{

@@ -1,4 +1,8 @@
 ---
+- name: Use the verified context's API endpoint for the Multus daemon
+  ansible.builtin.set_fact:
+    multus_api_server: "{{ (lookup('ansible.builtin.file', lookup('ansible.builtin.env', 'KUBECONFIG')) | from_yaml).clusters[0].cluster.server | ansible.builtin.urlsplit }}"
+
 - name: Install Multus
   kubernetes.core.helm:
     name: multus
@@ -10,7 +14,7 @@
     atomic: true
     wait: true
     timeout: 5m
-    values: "{{ multus_values }}"
+    values: "{{ multus_values | combine({'apiServer': {'host': multus_api_server.hostname, 'port': multus_api_server.port | string}}) }}"
 
 # Helm's DaemonSet wait accepts numberReady >= desired - maxUnavailable, so one
 # crash-looping node daemon still passes. Every scheduled daemon must be ready.

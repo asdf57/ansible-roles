@@ -1,0 +1,119 @@
+#!/usr/bin/env bash
+# Boot-time gate: keep kube-proxy frozen until Flannel has written subnet.env, so
+# Flannel's few iptables-legacy calls are not stuck behind kube-proxy's full
+# multi-minute restore. Nothing is killed. Every failure path thaws and exits 0.
+# Works with the cgroup v1 freezer controller and with cgroup v2.
+#
+#   flannel-first          run the gate (systemd ExecStart, right after kubelet)
+#   flannel-first --thaw   thaw kube-proxy if frozen (systemd ExecStopPost safety net)
+set -uo pipefail
+
+TIMEOUT=${FLANNEL_FIRST_TIMEOUT:-180}          # seconds; then kube-proxy runs regardless
+SUBNET_ENV=${FLANNEL_SUBNET_ENV:-/run/flannel/subnet.env}
+LOCK=${XTABLES_LOCKFILE:-/run/xtables.lock}
+
+log() { echo "flannel-first: $*"; }
+
+if [[ -f /sys/fs/cgroup/cgroup.controllers ]]; then
+    MODE=v2; CGROOT=/sys/fs/cgroup
+elif [[ -f /sys/fs/cgroup/freezer/freezer.state || -d /sys/fs/cgroup/freezer ]]; then
+    MODE=v1; CGROOT=/sys/fs/cgroup/freezer
+else
+    MODE=none; CGROOT=
+fi
+
+# kube-proxy's freezer cgroup directory.
+kube_proxy_cgroup() {
+    local pid path
+    pid=$(pgrep -xo kube-proxy) || return 1
+    case $MODE in
+        v2) path=$(sed -n 's/^0:://p' "/proc/$pid/cgroup" 2>/dev/null) ;;
+        v1) path=$(awk -F: '$2 ~ /(^|,)freezer(,|$)/ { print $3 }' "/proc/$pid/cgroup" 2>/dev/null) ;;
+        *) return 1 ;;
+    esac
+    [[ -n $path && $path != / && -d $CGROOT$path ]] || return 1
+    echo "$CGROOT$path"
+}
+
+is_frozen() {
+    case $MODE in
+        v2) [[ $(cat "$1/cgroup.freeze" 2>/dev/null) == 1 ]] ;;
+        v1) [[ $(cat "$1/freezer.state" 2>/dev/null) == FROZEN ]] ;;
+    esac
+}
+
+# Freeze and wait until it takes effect (v1 passes through FREEZING).
+freeze() {
+    local tries
+    case $MODE in
+        v2) echo 1 > "$1/cgroup.freeze" 2>/dev/null || return 1 ;;
+        v1) echo FROZEN > "$1/freezer.state" 2>/dev/null || return 1 ;;
+    esac
+    for tries in 1 2 3 4 5 6 7 8 9 10; do
+        is_frozen "$1" && return 0
+        sleep 0.1
+    done
+    return 1
+}
+
+unfreeze() {
+    case $MODE in
+        v2) echo 0 > "$1/cgroup.freeze" 2>/dev/null ;;
+        v1) echo THAWED > "$1/freezer.state" 2>/dev/null ;;
+    esac
+}
+
+# True if any process in cgroup $1 currently holds the xtables flock.
+cgroup_holds_lock() {
+    local inode holder
+    inode=$(stat -c %i "$LOCK" 2>/dev/null) || return 1
+    # /proc/locks: "N: FLOCK ADVISORY WRITE PID MAJ:MIN:INODE START END"; "->" lines are waiters.
+    while read -r holder; do
+        grep -qx "$holder" "$1/cgroup.procs" 2>/dev/null && return 0
+    done < <(awk -v inode="$inode" '$2 == "FLOCK" { n = split($6, id, ":"); if (id[n] == inode) print $5 }' /proc/locks)
+    return 1
+}
+
+frozen=""
+thaw() {
+    [[ -n $frozen ]] || return 0
+    unfreeze "$frozen" && log "thawed kube-proxy"
+    frozen=""
+}
+
+if [[ ${1:-} == --thaw ]]; then
+    cg=$(kube_proxy_cgroup) && is_frozen "$cg" && unfreeze "$cg" && log "safety thaw of kube-proxy"
+    exit 0
+fi
+
+[[ $MODE != none ]] || { log "no freezer cgroup available; not gating"; exit 0; }
+[[ -s $SUBNET_ENV ]] && { log "flannel already up; not gating"; exit 0; }
+trap thaw EXIT
+trap 'exit 0' TERM INT
+log "gating kube-proxy (cgroup $MODE, timeout ${TIMEOUT}s)"
+
+start=$SECONDS
+while (( SECONDS - start < TIMEOUT )); do
+    if [[ -s $SUBNET_ENV ]]; then
+        log "flannel ready after $((SECONDS - start))s"
+        exit 0
+    fi
+    # A restarted kube-proxy container has a new cgroup; forget the old one.
+    [[ -n $frozen && ! -d $frozen ]] && frozen=""
+    if [[ -z $frozen ]] && cg=$(kube_proxy_cgroup); then
+        if freeze "$cg"; then
+            frozen=$cg
+            # Freezing a lock holder would block Flannel as well: back off and retry.
+            if cgroup_holds_lock "$cg"; then
+                thaw
+            else
+                log "froze kube-proxy ($cg)"
+            fi
+        else
+            # Did not reach FROZEN (e.g. a task in uninterruptible sleep): never leave it half-frozen.
+            unfreeze "$cg"
+        fi
+    fi
+    sleep 0.2
+done
+log "flannel not ready after ${TIMEOUT}s; releasing kube-proxy"

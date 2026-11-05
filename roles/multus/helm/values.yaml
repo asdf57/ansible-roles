@@ -7,3 +7,8 @@ cleanupConfigOnExit: false
 resources:
   requests: {cpu: 100m, memory: 50Mi}
   limits: {cpu: 100m, memory: 50Mi}
+# Reach the API directly (like kubelet/kube-proxy) instead of through the
+# kubernetes ClusterIP, which exists only after kube-proxy programs the node.
+apiServer:
+  host: ""
+  port: ""

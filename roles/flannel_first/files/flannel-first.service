@@ -1,0 +1,14 @@
+[Unit]
+Description=Let Flannel program iptables before kube-proxy's full restore
+After=kubelet.service
+Wants=kubelet.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/flannel-first
+# Runs even if the gate is killed, so kube-proxy can never stay frozen.
+ExecStopPost=/usr/local/sbin/flannel-first --thaw
+RuntimeMaxSec=300
+
+[Install]
+WantedBy=multi-user.target
