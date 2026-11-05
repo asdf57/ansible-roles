@@ -34,6 +34,8 @@ Neither role queries Stigmergy or creates a separate reconciliation controller.
    no bootstrap replay, reset, certificate deletion or manual Node fabrication.
    Re-registration can allocate a new pod subnet. The managed Flannel bridge
    delegate uses CNI `forceAddress: true` to reconcile its gateway address.
+   Its host-local IPAM keeps pod IP reservations under /run, so reservations
+   leaked by interrupted ADDs cannot outlive a reboot and exhaust the node /24.
    A ConfigMap checksum on the DaemonSet pod template rolls the init container
    whenever CNI configuration changes, installing the updated host CNI file.
 8. Verify versions, managed Node identities/roles/addresses/pod CIDRs, Ready,

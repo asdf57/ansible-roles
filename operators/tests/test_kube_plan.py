@@ -452,6 +452,7 @@ class KubernetesPlanTests(unittest.TestCase):
         data = mapping(mapping(items[0], 'ConfigMap')['data'], 'data')
         cni = json.loads(str(data['cni-conf.json']))
         self.assertTrue(cni['plugins'][0]['delegate']['forceAddress'])
+        self.assertEqual(cni['plugins'][0]['ipam']['dataDir'], '/run/cni/flannel-networks')
         self.assertTrue(cni['plugins'][0]['delegate']['hairpinMode'])
         self.assertEqual(cni['plugins'][1]['type'], 'portmap')
         self.assertEqual(result, flannel_objects(documents, self.plan()))

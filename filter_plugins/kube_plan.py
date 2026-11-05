@@ -265,6 +265,11 @@ def configure_flannel_cni(data: JSONObject) -> str:
     # Kubernetes may allocate a different pod CIDR when a Node is re-registered.
     # The bridge plugin, not an out-of-band cleanup script, owns its gateway IP.
     delegate['forceAddress'] = True
+    # host-local records each pod IP as a file and frees it only on a completed
+    # DEL. Sandboxes never survive a reboot, so on-disk records can only leak
+    # (e.g. ADDs killed mid-flight) and eventually exhaust the node's /24.
+    ipam = mapping(delegates[0].setdefault('ipam', {}), 'Flannel IPAM')
+    ipam['dataDir'] = '/run/cni/flannel-networks'
     data['cni-conf.json'] = json.dumps(config, sort_keys=True)
     return hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()
 
