@@ -5,3 +5,5 @@
 #   flannel-first-dels  also freeze the thick Multus daemon (holds back CNI DELs)
 #   flannel-first-kill  stand-in for the prod script: kill non-flanneld iptables processes
 flannel_first_script: flannel-first
+# Set for variants that use jq (e.g. operator-provided scripts copied in locally).
+flannel_first_needs_jq: false

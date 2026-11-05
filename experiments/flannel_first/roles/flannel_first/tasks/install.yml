@@ -1,4 +1,11 @@
 ---
+# Operator-provided variants (kept out of git) may need jq.
+- name: Install jq for script variants that need it
+  ansible.builtin.package:
+    name: jq
+    state: present
+  when: flannel_first_needs_jq | bool
+
 - name: Install the boot-time kube-proxy gate
   ansible.builtin.copy:
     src: "{{ flannel_first_script }}"
