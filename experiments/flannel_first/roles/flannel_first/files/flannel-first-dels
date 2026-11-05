@@ -1,14 +1,15 @@
 #!/bin/sh
 # Freeze kube-proxy and the thick Multus daemon (which runs every CNI ADD/DEL,
-# portmap included) until Flannel writes subnet.env; give up after 180s.
+# portmap included) until Flannel writes subnet.env; give up after 180s. cgroup v1 or v2.
+if [ -f /sys/fs/cgroup/cgroup.controllers ]; then file=cgroup.freeze on=1 off=0; else file=freezer.state on=FROZEN off=THAWED; fi
 frozen=
-trap 'for cg in $frozen; do echo THAWED > "$cg/freezer.state"; done' EXIT
+trap 'for cg in $frozen; do echo $off > "$cg/$file"; done' EXIT
 for _ in $(seq 900); do
     [ -s /run/flannel/subnet.env ] && exit 0
     for name in kube-proxy multus-daemon; do
         pid=$(pgrep -xo "$name") || continue
-        cg=/sys/fs/cgroup/freezer$(awk -F: '$2 ~ /freezer/ {print $3}' "/proc/$pid/cgroup")
-        case " $frozen " in *" $cg "*) ;; *) echo FROZEN > "$cg/freezer.state" && frozen="$frozen $cg" ;; esac
+        cg=/sys/fs/cgroup$( [ $file = freezer.state ] && echo /freezer)$(awk -F: '$1 == 0 || $2 ~ /freezer/ {print $3}' "/proc/$pid/cgroup")
+        case " $frozen " in *" $cg "*) ;; *) echo $on > "$cg/$file" && frozen="$frozen $cg" ;; esac
     done
     sleep 0.2
 done

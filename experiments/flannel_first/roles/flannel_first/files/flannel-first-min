@@ -1,12 +1,13 @@
 #!/bin/sh
-# Freeze kube-proxy (cgroup v1 freezer) until Flannel writes subnet.env; give up after 180s.
+# Freeze kube-proxy until Flannel writes subnet.env; give up after 180s. cgroup v1 or v2.
+if [ -f /sys/fs/cgroup/cgroup.controllers ]; then file=cgroup.freeze on=1 off=0; else file=freezer.state on=FROZEN off=THAWED; fi
 cg=
-trap '[ -n "$cg" ] && echo THAWED > "$cg/freezer.state"' EXIT
+trap '[ -n "$cg" ] && echo $off > "$cg/$file"' EXIT
 for _ in $(seq 900); do
     [ -s /run/flannel/subnet.env ] && exit 0
     if [ -z "$cg" ] && pid=$(pgrep -xo kube-proxy); then
-        cg=/sys/fs/cgroup/freezer$(awk -F: '$2 ~ /freezer/ {print $3}' "/proc/$pid/cgroup")
-        echo FROZEN > "$cg/freezer.state"
+        cg=/sys/fs/cgroup$( [ $file = freezer.state ] && echo /freezer)$(awk -F: '$1 == 0 || $2 ~ /freezer/ {print $3}' "/proc/$pid/cgroup")
+        echo $on > "$cg/$file"
     fi
     sleep 0.2
 done
