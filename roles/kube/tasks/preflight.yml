@@ -17,6 +17,13 @@
       - kube_node_cgroup_version == '2' or ansible_facts.distribution == 'Debian'
     fail_msg: cgroup v1 (homelab.io/kube-cgroup-version) is supported on Debian nodes only.
 
+- name: Allow the legacy iptables selection only where Debian alternatives provide it
+  ansible.builtin.assert:
+    quiet: true
+    that:
+      - kube_node_iptables_backend == 'nft' or ansible_facts.distribution == 'Debian'
+    fail_msg: Legacy iptables (homelab.io/kube-iptables-backend) is supported on Debian nodes only.
+
 - name: Inspect the live-image identity
   ansible.builtin.stat:
     path: /etc/homelabd/live-build-id

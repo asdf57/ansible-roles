@@ -66,7 +66,10 @@ An optional kube-node-name annotation overrides the Server name. An optional
 homelab.io/kube-cgroup-version annotation ("1" or "2", default "2") selects the
 cgroup hierarchy for that Debian node's next boot through a GRUB drop-in, and sets
 kubelet `failCgroupV1` through `/etc/kubernetes/kubelet.conf.d`. The role never
-reboots; the Server must be rebooted for a changed selection to take effect. A supplied
+reboots; the Server must be rebooted for a changed selection to take effect. Likewise
+homelab.io/kube-iptables-backend ("legacy" or "nft", default "nft") selects the
+Debian `iptables`/`ip6tables` alternatives; kubelet's KUBE-IPTABLES-HINT carries
+the choice to the kube-proxy and Flannel images on the next boot. A supplied
 kube-cluster-uid annotation must match, but copying a UID is not required.
 
 Configuration supplies context, captured inventory, protected Server/run identities,

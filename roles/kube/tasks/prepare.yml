@@ -167,6 +167,28 @@
   ansible.builtin.debug:
     msg: "cgroup v{{ kube_node_cgroup_version }} selected; active: {{ 'v2' if ansible_facts.mounts | selectattr('mount', 'equalto', '/sys/fs/cgroup') | selectattr('fstype', 'equalto', 'cgroup2') | list else 'v1' }}; reboot required if they differ"
 
+# kubelet creates KUBE-IPTABLES-HINT with the host binary; the iptables-wrapper in
+# the kube-proxy and Flannel images follows that hint, and portmap uses the host
+# binary directly. Rules already written to the other backend remain until reboot.
+- name: Read the selected iptables backends
+  ansible.builtin.command:
+    argv: [update-alternatives, --query, "{{ item }}"]
+  loop: [iptables, ip6tables]
+  register: kube_iptables_alternatives
+  changed_when: false
+  when: ansible_facts.distribution == 'Debian'
+
+- name: Select the node's iptables backend for the next boot
+  ansible.builtin.command:
+    argv: [update-alternatives, --set, "{{ item.item }}", "/usr/sbin/{{ item.item }}-{{ kube_node_iptables_backend }}"]
+  loop: "{{ kube_iptables_alternatives.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when:
+    - ansible_facts.distribution == 'Debian'
+    - ('Value: /usr/sbin/' ~ item.item ~ '-' ~ kube_node_iptables_backend) not in item.stdout_lines
+  changed_when: true
+
 - name: Install the native kubeadm-compatible kubelet unit
   ansible.builtin.template:
     src: kubelet.service.j2

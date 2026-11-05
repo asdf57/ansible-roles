@@ -40,6 +40,20 @@ def ipv4_network(value: JSONValue, context: str) -> IPv4Network:
     return network
 
 
+def host_options(annotations: JSONObject) -> JSONObject:
+    """Opt-in per-Server host settings, for nodes that must match older hosts."""
+    options: JSONObject = {}
+    for field, annotation, default, allowed in (
+        ('cgroupVersion', 'homelab.io/kube-cgroup-version', '2', ('1', '2')),
+        ('iptablesBackend', 'homelab.io/kube-iptables-backend', 'nft', ('legacy', 'nft')),
+    ):
+        value = text(annotations.get(annotation, default), annotation)
+        if value not in allowed:
+            raise ValueError(annotation + ' must be ' + ' or '.join(f'"{v}"' for v in allowed))
+        options[field] = value
+    return options
+
+
 def selected_members(nodes: JSONValue, cluster_name: str, cluster_uid: str) -> list[JSONObject]:
     """Select labeled members, not every host in the execution capture group."""
     if not isinstance(nodes, list):
@@ -64,14 +78,9 @@ def selected_members(nodes: JSONValue, cluster_name: str, cluster_uid: str) -> l
         if not dns_name(node_name) or node_name in names:
             raise ValueError('Kubernetes node names must be valid and unique')
         names.add(node_name)
-        # cgroup v1 is opt-in per Server, for nodes that must match older hosts.
-        cgroup_version = text(annotations.get('homelab.io/kube-cgroup-version', '2'),
-                              'cgroup version')
-        if cgroup_version not in ('1', '2'):
-            raise ValueError('homelab.io/kube-cgroup-version must be "1" or "2"')
         members.append(
             dict(name=name, uid=text(node.get('uid'), 'Server UID'), nodeName=node_name, role=role,
-                 cgroupVersion=cgroup_version))
+                 **host_options(annotations)))
     control_planes = [node for node in members if node['role'] == 'control-plane']
     if len(control_planes) != 1:
         raise ValueError('V1 requires exactly one control-plane Server')

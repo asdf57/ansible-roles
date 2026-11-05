@@ -618,6 +618,24 @@ class KubernetesPlanTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'must be "1" or "2"'):
             self.plan()
 
+    def test_iptables_backend_is_an_opt_in_per_server_annotation(self):
+        members = self.plan()['members']
+        self.assertTrue(
+            isinstance(members, list)
+            and all(mapping(member, 'member')['iptablesBackend'] == 'nft' for member in members))
+        node = mapping(self.nodes[0], 'node')
+        annotations = mapping(node.setdefault('annotations', {}), 'annotations')
+        annotations['homelab.io/kube-iptables-backend'] = 'legacy'
+        members = self.plan()['members']
+        backends = {
+            mapping(member, 'member')['name']: mapping(member, 'member')['iptablesBackend']
+            for member in (members if isinstance(members, list) else [])
+        }
+        self.assertEqual(backends[text(node['name'], 'name')], 'legacy')
+        annotations['homelab.io/kube-iptables-backend'] = 'iptables-legacy'
+        with self.assertRaisesRegex(ValueError, 'must be "legacy" or "nft"'):
+            self.plan()
+
     def test_stable_identity_excludes_only_the_flannel_release(self):
         plan = self.plan()
         identity: JSONObject = {'clusterUID': plan['uid'], 'settings': plan['settings']}
