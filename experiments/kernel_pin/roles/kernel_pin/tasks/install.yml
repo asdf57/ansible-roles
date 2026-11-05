@@ -11,6 +11,9 @@
     prefix: kernel-pin-
   delegate_to: localhost
   become: false
+  vars:
+    # Inventory sets ansible_become; runner files must belong to the runner user.
+    ansible_become: false
   run_once: true
   register: kernel_pin_download
 
@@ -23,6 +26,9 @@
     timeout: 600
   delegate_to: localhost
   become: false
+  vars:
+    # Inventory sets ansible_become; runner files must belong to the runner user.
+    ansible_become: false
   run_once: true
   register: kernel_pin_fetch
   retries: 5
@@ -66,6 +72,9 @@
     state: absent
   delegate_to: localhost
   become: false
+  vars:
+    # Inventory sets ansible_become; runner files must belong to the runner user.
+    ansible_become: false
   run_once: true
 
 - name: Require the test kernel entry in the generated GRUB menu
