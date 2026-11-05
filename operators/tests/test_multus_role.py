@@ -39,7 +39,7 @@ class MultusRoleTests(unittest.TestCase):
         pod = daemon['spec']['template']['spec']
         for container in pod['containers'] + pod['initContainers']:
             self.assertRegex(container['image'], r':v4\.3\.1-thick@sha256:[0-9a-f]{64}$')
-        self.assertEqual(pod['containers'][0]['resources']['limits']['memory'], '300Mi')
+        self.assertEqual(pod['containers'][0]['resources']['limits']['memory'], '1Gi')
         self.assertIn('checksum/daemon-config',
                       daemon['spec']['template']['metadata']['annotations'])
         self.assertFalse(daemon_config(manifests)['cleanupConfigOnExit'])

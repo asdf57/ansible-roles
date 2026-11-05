@@ -1,11 +1,12 @@
 ---
-# The upstream 50Mi limit can OOM the thick daemon while many pods are created
-# or torn down at once (for example after a node reboot).
 # Reach the API through the verified context's endpoint rather than the
 # kubernetes ClusterIP, which exists only after kube-proxy programs the node.
 multus_direct_api_endpoint: true
 
+# The thick daemon runs every CNI ADD/DEL delegate (flannel, bridge, portmap,
+# iptables) inside its own cgroup. After a reboot kubelet runs ~30 at once, which
+# measured ~255MiB and OOM-killed a 300Mi limit in a crash loop.
 multus_values:
   resources:
     requests: {cpu: 100m, memory: 50Mi}
-    limits: {cpu: 500m, memory: 300Mi}
+    limits: {cpu: "1", memory: 1Gi}

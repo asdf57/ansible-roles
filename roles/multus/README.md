@@ -38,8 +38,10 @@ the kubernetes ClusterIP; set `multus_direct_api_endpoint: false` (for example
 `-e multus_direct_api_endpoint=false` in its Configuration) for upstream
 in-cluster config.
 
-`multus_values` raises the upstream 50Mi daemon limit to 300Mi, which can OOM
-under bulk pod churn.
+`multus_values` raises the upstream 50Mi daemon limit to 1Gi. The thick daemon
+runs every CNI delegate (flannel, bridge, portmap, iptables) in its own cgroup;
+about 30 concurrent sandbox operations after a reboot measured ~255MiB and
+OOM-killed a 300Mi limit repeatedly, which blocks every pod on the node.
 
 ## Uninstall
 
