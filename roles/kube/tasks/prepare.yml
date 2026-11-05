@@ -43,6 +43,23 @@
     sysctl_file: /etc/sysctl.d/90-kubernetes.conf
   loop: [net.ipv4.ip_forward, net.bridge.bridge-nf-call-iptables, net.bridge.bridge-nf-call-ip6tables]
 
+# Kubelet, containerd and node agents each hold inotify instances; the distro
+# default of 128 per user is exhausted on a busy node and CNI daemons then fail
+# to watch /etc/cni/net.d.
+- name: Configure inotify capacity for node agents
+  ansible.posix.sysctl:
+    name: "{{ item.name }}"
+    value: "{{ item.value }}"
+    state: present
+    sysctl_set: true
+    reload: true
+    sysctl_file: /etc/sysctl.d/90-kubernetes.conf
+  loop:
+    - {name: fs.inotify.max_user_instances, value: '8192'}
+    - {name: fs.inotify.max_user_watches, value: '524288'}
+  loop_control:
+    label: "{{ item.name }}"
+
 - name: Keep NetworkManager away from CNI-created interfaces
   ansible.builtin.copy:
     dest: /etc/NetworkManager/conf.d/90-kubernetes.conf

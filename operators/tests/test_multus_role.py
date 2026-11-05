@@ -52,6 +52,8 @@ class MultusRoleTests(unittest.TestCase):
         install = yaml.safe_load((ROLE / 'tasks/install.yml').read_text(encoding='utf-8'))
         uninstall = yaml.safe_load((ROLE / 'tasks/uninstall.yml').read_text(encoding='utf-8'))
         install_helm = install[0]['kubernetes.core.helm']
+        self.assertIn('numberReady == multus_daemonset.resources[0].status.desiredNumberScheduled',
+                      install[1]['until'])
         cleanup_helm, remove_helm = (task['kubernetes.core.helm'] for task in uninstall)
         for helm in (cleanup_helm, remove_helm):
             for field in ('name', 'release_namespace', 'kubeconfig', 'wait', 'timeout'):

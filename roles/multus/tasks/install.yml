@@ -11,3 +11,20 @@
     wait: true
     timeout: 5m
     values: "{{ multus_values }}"
+
+# Helm's DaemonSet wait accepts numberReady >= desired - maxUnavailable, so one
+# crash-looping node daemon still passes. Every scheduled daemon must be ready.
+- name: Require a ready Multus daemon on every scheduled node
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ lookup('ansible.builtin.env', 'KUBECONFIG') }}"
+    kind: DaemonSet
+    namespace: kube-system
+    name: kube-multus-ds
+  register: multus_daemonset
+  until: >-
+    multus_daemonset.resources | length == 1
+    and multus_daemonset.resources[0].status.observedGeneration == multus_daemonset.resources[0].metadata.generation
+    and multus_daemonset.resources[0].status.updatedNumberScheduled | default(0) == multus_daemonset.resources[0].status.desiredNumberScheduled
+    and multus_daemonset.resources[0].status.numberReady == multus_daemonset.resources[0].status.desiredNumberScheduled
+  retries: 30
+  delay: 10

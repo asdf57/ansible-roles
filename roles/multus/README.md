@@ -28,6 +28,11 @@ Every pod sandbox ADD/DEL on a node then goes through the shim to the node's
 after a reboot) sandbox creation and teardown fail and retry. The role does not
 create any `NetworkAttachmentDefinition`; pods get only the Flannel network.
 
+Install then requires every scheduled `kube-multus-ds` daemon to be ready;
+Helm's own DaemonSet wait tolerates `maxUnavailable` crash-looping nodes. The
+kube role raises `fs.inotify.max_user_instances`, which the daemon's
+`/etc/cni/net.d` watcher otherwise exhausts on busy nodes.
+
 `multus_values` raises the upstream 50Mi daemon limit to 300Mi, which can OOM
 under bulk pod churn.
 
