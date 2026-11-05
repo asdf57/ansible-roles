@@ -64,8 +64,14 @@ def selected_members(nodes: JSONValue, cluster_name: str, cluster_uid: str) -> l
         if not dns_name(node_name) or node_name in names:
             raise ValueError('Kubernetes node names must be valid and unique')
         names.add(node_name)
+        # cgroup v1 is opt-in per Server, for nodes that must match older hosts.
+        cgroup_version = text(annotations.get('homelab.io/kube-cgroup-version', '2'),
+                              'cgroup version')
+        if cgroup_version not in ('1', '2'):
+            raise ValueError('homelab.io/kube-cgroup-version must be "1" or "2"')
         members.append(
-            dict(name=name, uid=text(node.get('uid'), 'Server UID'), nodeName=node_name, role=role))
+            dict(name=name, uid=text(node.get('uid'), 'Server UID'), nodeName=node_name, role=role,
+                 cgroupVersion=cgroup_version))
     control_planes = [node for node in members if node['role'] == 'control-plane']
     if len(control_planes) != 1:
         raise ValueError('V1 requires exactly one control-plane Server')

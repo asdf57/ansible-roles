@@ -598,6 +598,26 @@ class KubernetesPlanTests(unittest.TestCase):
                                             ANSIBLE_FILTER_PLUGINS=str(root / 'filter_plugins')))
                 self.assertEqual(result.returncode == 0, valid, result.stdout + result.stderr)
 
+    def test_cgroup_version_is_an_opt_in_per_server_annotation(self):
+        members = self.plan()['members']
+        self.assertTrue(
+            isinstance(members, list)
+            and all(mapping(member, 'member')['cgroupVersion'] == '2' for member in members))
+        mapping(self.nodes[0], 'node').setdefault('annotations', {})
+        mapping(mapping(self.nodes[0], 'node')['annotations'],
+                'annotations')['homelab.io/kube-cgroup-version'] = '1'
+        name = mapping(self.nodes[0], 'node')['name']
+        members = self.plan()['members']
+        versions = {
+            mapping(member, 'member')['name']: mapping(member, 'member')['cgroupVersion']
+            for member in (members if isinstance(members, list) else [])
+        }
+        self.assertEqual(versions[text(name, 'name')], '1')
+        mapping(mapping(self.nodes[0], 'node')['annotations'],
+                'annotations')['homelab.io/kube-cgroup-version'] = 'v1'
+        with self.assertRaisesRegex(ValueError, 'must be "1" or "2"'):
+            self.plan()
+
     def test_stable_identity_excludes_only_the_flannel_release(self):
         plan = self.plan()
         identity: JSONObject = {'clusterUID': plan['uid'], 'settings': plan['settings']}

@@ -62,7 +62,11 @@ KubeCluster selects Kubernetes/containerd/Flannel versions, API endpoint and CID
 Optional runcVersion and cniPluginsVersion pins default to the reviewed role
 versions (1.5.2 and 1.9.1); the site manifest pins both explicitly.
 Server labels homelab.io/kube-cluster and homelab.io/kube-role select members.
-An optional kube-node-name annotation overrides the Server name. A supplied
+An optional kube-node-name annotation overrides the Server name. An optional
+homelab.io/kube-cgroup-version annotation ("1" or "2", default "2") selects the
+cgroup hierarchy for that Debian node's next boot through a GRUB drop-in, and sets
+kubelet `failCgroupV1` through `/etc/kubernetes/kubelet.conf.d`. The role never
+reboots; the Server must be rebooted for a changed selection to take effect. A supplied
 kube-cluster-uid annotation must match, but copying a UID is not required.
 
 Configuration supplies context, captured inventory, protected Server/run identities,

@@ -108,6 +108,65 @@
   loop_control:
     label: "{{ item.item.dest }}"
 
+- name: Create the managed kubelet configuration drop-in directory
+  ansible.builtin.file:
+    path: /etc/kubernetes/kubelet.conf.d
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+# kubeadm owns /var/lib/kubelet/config.yaml; node-specific settings are drop-ins.
+- name: Allow kubelet on cgroup v1 only for Servers that opt into it
+  ansible.builtin.copy:
+    dest: /etc/kubernetes/kubelet.conf.d/50-homelab-cgroup.conf
+    content: |
+      apiVersion: kubelet.config.k8s.io/v1beta1
+      kind: KubeletConfiguration
+      failCgroupV1: {{ kube_node_cgroup_version == '2' }}
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart the changed managed kubelet service
+
+- name: Create the GRUB defaults drop-in directory for a cgroup v1 selection
+  ansible.builtin.file:
+    path: /etc/default/grub.d
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  when: kube_node_cgroup_version == '1'
+
+- name: Select the cgroup hierarchy for the next boot
+  ansible.builtin.copy:
+    dest: /etc/default/grub.d/90-homelab-cgroup.cfg
+    # systemd 256+ refuses cgroup v1 unless legacy mode is forced explicitly.
+    content: |
+      GRUB_CMDLINE_LINUX="$GRUB_CMDLINE_LINUX systemd.unified_cgroup_hierarchy=0 SYSTEMD_CGROUP_ENABLE_LEGACY_FORCE=1"
+    owner: root
+    group: root
+    mode: '0644'
+  register: kube_cgroup_boot_v1
+  when: kube_node_cgroup_version == '1'
+
+- name: Remove the cgroup v1 boot selection from cgroup v2 Servers
+  ansible.builtin.file:
+    path: /etc/default/grub.d/90-homelab-cgroup.cfg
+    state: absent
+  register: kube_cgroup_boot_v2
+  when: kube_node_cgroup_version == '2'
+
+- name: Regenerate the GRUB configuration for a changed cgroup selection
+  ansible.builtin.command:
+    argv: [update-grub]
+  when: (kube_cgroup_boot_v1 is changed) or (kube_cgroup_boot_v2 is changed)
+  changed_when: true
+
+- name: Report a cgroup hierarchy that takes effect only after a reboot
+  ansible.builtin.debug:
+    msg: "cgroup v{{ kube_node_cgroup_version }} selected; active: {{ 'v2' if ansible_facts.mounts | selectattr('mount', 'equalto', '/sys/fs/cgroup') | selectattr('fstype', 'equalto', 'cgroup2') | list else 'v1' }}; reboot required if they differ"
+
 - name: Install the native kubeadm-compatible kubelet unit
   ansible.builtin.template:
     src: kubelet.service.j2

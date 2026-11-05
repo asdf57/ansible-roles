@@ -22,6 +22,7 @@
     kube_cluster_plan: "{{ kube_plan }}"
     kube_node_name: "{{ item.nodeName }}"
     kube_node_role: "{{ item.role }}"
+    kube_node_cgroup_version: "{{ item.cgroupVersion }}"
   loop: "{{ kube_plan.members }}"
   loop_control:
     label: "{{ item.name }}: {{ item.role }}"
