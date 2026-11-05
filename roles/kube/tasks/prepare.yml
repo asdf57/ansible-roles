@@ -163,9 +163,16 @@
   when: (kube_cgroup_boot_v1 is changed) or (kube_cgroup_boot_v2 is changed)
   changed_when: true
 
+# Mount facts omit /sys/fs/cgroup, so read its filesystem type directly.
+- name: Read the active cgroup hierarchy
+  ansible.builtin.command:
+    argv: [stat, -f, -c, '%T', /sys/fs/cgroup]
+  register: kube_active_cgroup
+  changed_when: false
+
 - name: Report a cgroup hierarchy that takes effect only after a reboot
   ansible.builtin.debug:
-    msg: "cgroup v{{ kube_node_cgroup_version }} selected; active: {{ 'v2' if ansible_facts.mounts | selectattr('mount', 'equalto', '/sys/fs/cgroup') | selectattr('fstype', 'equalto', 'cgroup2') | list else 'v1' }}; reboot required if they differ"
+    msg: "cgroup v{{ kube_node_cgroup_version }} selected; active: {{ 'v2' if kube_active_cgroup.stdout == 'cgroup2fs' else 'v1' }}; reboot required if they differ"
 
 # kubelet creates KUBE-IPTABLES-HINT with the host binary; the iptables-wrapper in
 # the kube-proxy and Flannel images follows that hint, and portmap uses the host
