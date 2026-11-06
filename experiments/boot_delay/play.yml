@@ -1,0 +1,40 @@
+# Experiment only; see README.md. Never referenced by provisioning or Configurations.
+- name: Boot delay standing in for server firmware time (experiment)
+  hosts: all
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Ensure mode is set
+      ansible.builtin.assert:
+        that:
+          - mode is defined
+          - mode in ["install", "uninstall"]
+          - mode == "uninstall" or (boot_delay_seconds | int) > 0
+        quiet: true
+        fail_msg: "mode=install needs boot_delay_seconds > 0; mode=uninstall removes the delay."
+
+    - name: Set the GRUB countdown
+      ansible.builtin.copy:
+        dest: /etc/default/grub.d/93-homelab-boot-delay.cfg
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          # Written by experiments/boot_delay (test-only): stands in for server firmware/POST time.
+          GRUB_TIMEOUT_STYLE=countdown
+          GRUB_TIMEOUT={{ boot_delay_seconds | int }}
+      register: boot_delay_set
+      when: mode == "install"
+
+    - name: Remove the GRUB countdown
+      ansible.builtin.file:
+        path: /etc/default/grub.d/93-homelab-boot-delay.cfg
+        state: absent
+      register: boot_delay_removed
+      when: mode == "uninstall"
+
+    - name: Regenerate the GRUB configuration
+      ansible.builtin.command:
+        argv: [update-grub]
+      when: boot_delay_set is changed or boot_delay_removed is changed
+      changed_when: true
