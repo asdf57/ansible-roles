@@ -10,7 +10,11 @@
 
 - name: Enable the units for the next boot without running them now
   ansible.builtin.systemd_service:
-    name: "{{ item }}"
-    enabled: true
+    name: "{{ item.name }}"
+    enabled: "{{ item.enabled }}"
     daemon_reload: true
-  loop: [homelab-containerd-wipe.service, homelab-flannel-prefetch.service]
+  loop:
+    - {name: homelab-containerd-wipe.service, enabled: true}
+    - {name: homelab-flannel-prefetch.service, enabled: "{{ containerd_wipe_prefetch | bool }}"}
+  loop_control:
+    label: "{{ item.name }}"

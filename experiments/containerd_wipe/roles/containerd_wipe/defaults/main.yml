@@ -3,3 +3,5 @@
 containerd_wipe_prefetch_images:
   - ghcr.io/flannel-io/flannel-cni-plugin:v1.9.1-flannel3
   - ghcr.io/flannel-io/flannel:v0.28.9
+# false = no Flannel prefetch at boot (Flannel then pulls its images after the wipe, starting later).
+containerd_wipe_prefetch: true
