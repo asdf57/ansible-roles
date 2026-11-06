@@ -1,0 +1,64 @@
+# Experiment only; see README.md. Never referenced by provisioning or Configurations.
+- name: Multus thick 2022-03 build (experiment)
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  vars:
+    manifest: "{{ playbook_dir }}/files/multus-daemonset-thick-plugin.yml"
+    kubectl: "{{ lookup('ansible.builtin.env', 'KUBECTL') | default('kubectl', true) }}"
+  tasks:
+    - name: Ensure mode is set
+      ansible.builtin.assert:
+        that:
+          - mode is defined
+          - mode in ["install", "uninstall"]
+        quiet: true
+
+    - name: Remove the managed Multus release (its uninstall makes daemons drop their config)
+      ansible.builtin.command:
+        argv: [ansible-playbook, -i, "localhost,", "{{ playbook_dir }}/../../plays/multus.yml", -e, mode=uninstall, -e, "ansible_python_interpreter={{ ansible_playbook_python }}"]
+      when: mode == "install"
+      changed_when: true
+
+    - name: Apply the 2022-03 thick-plugin manifest
+      ansible.builtin.command:
+        argv: ["{{ kubectl }}", apply, -f, "{{ manifest }}"]
+      when: mode == "install"
+      changed_when: true
+
+    - name: Wait for every 2022 Multus daemon
+      ansible.builtin.command:
+        argv: ["{{ kubectl }}", -n, kube-system, rollout, status, daemonset/kube-multus-ds, --timeout=600s]
+      when: mode == "install"
+      changed_when: false
+
+    - name: Delete the 2022 objects (the CRD stays, as with Helm)
+      ansible.builtin.command:
+        argv: ["{{ kubectl }}", -n, kube-system, delete, daemonset/kube-multus-ds, serviceaccount/multus, clusterrolebinding/multus, clusterrole/multus, --ignore-not-found, --wait=true]
+      when: mode == "uninstall"
+      changed_when: true
+
+- name: Remove the configuration the 2022 daemon leaves on nodes
+  hosts: all
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Remove generated Multus CNI config and kubeconfig
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop: [/etc/cni/net.d/00-multus.conf, /etc/cni/net.d/multus.d]
+      when: mode == "uninstall"
+
+- name: Restore the managed Multus release
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  tasks:
+    - name: Reinstall Multus through its normal play
+      ansible.builtin.command:
+        argv: [ansible-playbook, -i, "localhost,", "{{ playbook_dir }}/../../plays/multus.yml", -e, mode=install, -e, "ansible_python_interpreter={{ ansible_playbook_python }}"]
+      when: mode == "uninstall"
+      changed_when: true
