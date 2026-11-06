@@ -8,6 +8,9 @@ apiVersion: kubeadm.k8s.io/v1beta3
 kind: ClusterConfiguration
 kubernetesVersion: {{ k123_version }}
 imageRepository: registry.k8s.io
+# kubeadm before 1.23.10 only adds CoreDNS's coredns/ path for its old default registry.
+dns:
+  imageRepository: registry.k8s.io/coredns
 controlPlaneEndpoint: {{ k123_endpoint }}
 networking:
   podSubnet: {{ k123_pod_cidr }}
