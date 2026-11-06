@@ -20,7 +20,8 @@
         for f in /var/lib/cni/networks/*/*; do
           [ -f "$f" ] || continue
           case "$(basename "$f")" in last_reserved_ip*|lock) continue ;; esac
-          id=$(head -n 1 "$f")
+          # host-local writes "<sandbox id>\r\n<ifname>".
+          id=$(head -n 1 "$f" | tr -d '\r')
           if [ -n "$id" ] && printf '%s\n' "$sandboxes" | grep -qx "$id"; then kept=$((kept + 1))
           else rm -f "$f"; removed=$((removed + 1)); fi
         done
