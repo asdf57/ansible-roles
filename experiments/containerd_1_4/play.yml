@@ -28,11 +28,15 @@
       vars:
         ansible_become: false
 
-    - name: Stop kubelet and containerd
+    - name: Read installed services
+      ansible.builtin.service_facts:
+
+    - name: Stop kubelet and containerd where installed
       ansible.builtin.systemd_service:
         name: "{{ item }}"
         state: stopped
       loop: [kubelet, containerd]
+      when: (item ~ '.service') in ansible_facts.services
 
     - name: Install the release binaries (containerd, shims, ctr)
       ansible.builtin.unarchive:

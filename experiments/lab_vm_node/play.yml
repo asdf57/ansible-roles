@@ -1,0 +1,110 @@
+# Experiment only; see README.md. Never referenced by provisioning or Configurations.
+- name: Prepare a lab VM as a Kubernetes 1.23 node (experiment)
+  hosts: all
+  gather_facts: false
+  become: true
+  vars:
+    vm_runc_version: v1.5.2
+    vm_runc_sha256: 599f6f94ff8c5057241eff0d54c3c74f95c34935b6457b33fe545defc61e9488
+    vm_cni_plugins_version: v1.9.1
+    vm_cni_plugins_sha256: b98f74a0f8522f0a83867178729c1aa70f2158f90c45a2ca8fa791db1c76b303
+  tasks:
+    - name: Ensure mode is set
+      ansible.builtin.assert:
+        that:
+          - mode is defined
+          - mode == "install"
+        quiet: true
+        fail_msg: "Only mode=install exists; remove a lab VM by deleting it (README.md)."
+
+    - name: Install host prerequisites
+      ansible.builtin.apt:
+        name: [iptables, socat, conntrack, ebtables, ethtool, iproute2, jq, libseccomp2, ca-certificates]
+        update_cache: true
+
+    - name: Use iptables-legacy, as the reproduced prod nodes do
+      community.general.alternatives:
+        name: "{{ item.name }}"
+        path: "{{ item.path }}"
+      loop:
+        - {name: iptables, path: /usr/sbin/iptables-legacy}
+        - {name: ip6tables, path: /usr/sbin/ip6tables-legacy}
+
+    - name: Persist required kernel modules
+      ansible.builtin.copy:
+        dest: /etc/modules-load.d/kubernetes.conf
+        content: "overlay\nbr_netfilter\n"
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Load required kernel modules
+      community.general.modprobe:
+        name: "{{ item }}"
+      loop: [overlay, br_netfilter]
+
+    - name: Configure forwarding, bridge filtering and inotify capacity
+      ansible.posix.sysctl:
+        name: "{{ item.name }}"
+        value: "{{ item.value }}"
+        sysctl_file: /etc/sysctl.d/90-kubernetes.conf
+        sysctl_set: true
+      loop:
+        - {name: net.ipv4.ip_forward, value: '1'}
+        - {name: net.bridge.bridge-nf-call-iptables, value: '1'}
+        - {name: net.bridge.bridge-nf-call-ip6tables, value: '1'}
+        - {name: fs.inotify.max_user_instances, value: '8192'}
+        - {name: fs.inotify.max_user_watches, value: '524288'}
+
+    - name: Download runc and the CNI plugins on the runner
+      ansible.builtin.get_url:
+        url: "{{ item.url }}"
+        dest: "{{ item.dest }}"
+        checksum: "sha256:{{ item.sha256 }}"
+        mode: '0600'
+      loop:
+        - {url: "https://github.com/opencontainers/runc/releases/download/{{ vm_runc_version }}/runc.amd64", dest: "/tmp/vm-runc-{{ vm_runc_version }}", sha256: "{{ vm_runc_sha256 }}"}
+        - {url: "https://github.com/containernetworking/plugins/releases/download/{{ vm_cni_plugins_version }}/cni-plugins-linux-amd64-{{ vm_cni_plugins_version }}.tgz", dest: "/tmp/vm-cni-{{ vm_cni_plugins_version }}.tgz", sha256: "{{ vm_cni_plugins_sha256 }}"}
+      delegate_to: localhost
+      become: false
+      run_once: true
+      vars:
+        ansible_become: false
+
+    - name: Install runc
+      ansible.builtin.copy:
+        src: "/tmp/vm-runc-{{ vm_runc_version }}"
+        dest: /usr/local/sbin/runc
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Create the CNI and containerd directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+      loop: [/opt/cni/bin, /etc/cni/net.d, /etc/containerd]
+
+    - name: Install the base CNI plugins
+      ansible.builtin.unarchive:
+        src: "/tmp/vm-cni-{{ vm_cni_plugins_version }}.tgz"
+        dest: /opt/cni/bin
+        owner: root
+        group: root
+
+    - name: Install the containerd unit used by the managed nodes
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../../roles/containerd/templates/containerd.service.j2"
+        dest: /etc/systemd/system/containerd.service
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Enable containerd (binaries come from experiments/containerd_1_4)
+      ansible.builtin.systemd_service:
+        name: containerd
+        enabled: true
+        daemon_reload: true
