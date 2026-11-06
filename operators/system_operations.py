@@ -12,6 +12,9 @@ from common import (API, OperatorError, address, capture_inventory, resolved_inv
 from runner_trust import prepare
 from server_operation import reservation, operation_progress
 
+# Bounds the whole play; the reboot role waits up to 600 s for a slow-booting server.
+ANSIBLE_TIMEOUT_SECONDS = 660
+
 
 def selected_server(api, name, uid, machine_uid):
     """Recheck current identity and lifecycle gates; discovery is not SSH trust."""
@@ -97,7 +100,7 @@ def main():
                 'ansible-playbook', '-i',
                 str(directory / 'inventory.json'),
                 str(play), '-e', '@' + str(directory / 'variables.json')
-            ], directory / (play_name + '.log'), 660)
+            ], directory / (play_name + '.log'), ANSIBLE_TIMEOUT_SECONDS)
             if result.returncode:
                 raise OperatorError(
                     'RemoteWorkUncertain' if result.returncode in (4,

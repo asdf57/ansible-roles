@@ -28,6 +28,15 @@ def fixture():
 class SystemOperationTests(unittest.TestCase):
     """Exercise selection and trust without executing a playbook."""
 
+    def test_reboot_waits_for_slow_servers_within_the_play_timeout(self):
+        root = Path(__file__).resolve().parents[2]
+        tasks = yaml.safe_load(
+            (root / 'roles/system_operations/tasks/reboot.yml').read_text(encoding='utf-8'))
+        wait = next(task['ansible.builtin.reboot']['reboot_timeout'] for task in tasks
+                    if 'ansible.builtin.reboot' in task)
+        self.assertGreaterEqual(wait, 600)
+        self.assertLessEqual(wait + 60, system_operations.ANSIBLE_TIMEOUT_SECONDS)
+
     def test_agent_update_preserves_enrollment_and_does_not_reboot(self):
         """Only the checksum-pinned binary and agent service are changed."""
         play = yaml.safe_load(
