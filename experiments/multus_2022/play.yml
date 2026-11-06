@@ -17,7 +17,10 @@
 
     - name: Remove the managed Multus release (its uninstall makes daemons drop their config)
       ansible.builtin.command:
-        argv: ["{{ ansible_playbook_python | dirname }}/ansible-playbook", -i, "localhost,", "{{ playbook_dir }}/../../plays/multus.yml", -e, mode=uninstall, -e, "ansible_python_interpreter={{ ansible_playbook_python }}"]
+        chdir: "{{ playbook_dir }}/../.."
+        argv: ["{{ ansible_playbook_python | dirname }}/ansible-playbook", -i, "localhost,", plays/multus.yml, -e, mode=uninstall, -e, "ansible_python_interpreter={{ ansible_playbook_python }}"]
+      environment:
+        ANSIBLE_ROLES_PATH: "{{ playbook_dir }}/../../roles"
       when: mode == "install"
       changed_when: true
 
@@ -59,6 +62,9 @@
   tasks:
     - name: Reinstall Multus through its normal play
       ansible.builtin.command:
-        argv: ["{{ ansible_playbook_python | dirname }}/ansible-playbook", -i, "localhost,", "{{ playbook_dir }}/../../plays/multus.yml", -e, mode=install, -e, "ansible_python_interpreter={{ ansible_playbook_python }}"]
+        chdir: "{{ playbook_dir }}/../.."
+        argv: ["{{ ansible_playbook_python | dirname }}/ansible-playbook", -i, "localhost,", plays/multus.yml, -e, mode=install, -e, "ansible_python_interpreter={{ ansible_playbook_python }}"]
+      environment:
+        ANSIBLE_ROLES_PATH: "{{ playbook_dir }}/../../roles"
       when: mode == "uninstall"
       changed_when: true
