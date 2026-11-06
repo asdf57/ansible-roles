@@ -2,6 +2,14 @@
 
 The `init` role is a task library used by the phase playbooks in `plays/`.
 
+Initialization runs against an explicit localhost inventory; it does not need
+the managed-node inventory to exist yet. Platform variables are loaded explicitly
+from the API capture group.
+
+Source checkouts and shared artifact storage must be created by the unprivileged
+runner, not root. Init does not elevate privileges to repair their ownership.
+Git updates refuse to discard local tracked edits.
+
 ## Lifecycle boundary
 
 The bootstrap phase starts the minimum control plane:

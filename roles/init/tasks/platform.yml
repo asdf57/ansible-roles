@@ -124,14 +124,14 @@
     repo: "{{ git_webhook_repo }}"
     dest: "{{ mounted_data_path }}/webhook"
     version: "{{ git_webhook_branch }}"
-    force: true
+    force: false
 
 - name: Clone the Stigmergy web console source
   ansible.builtin.git:
     repo: "{{ git_stigmergy_web_repo }}"
     dest: "{{ mounted_data_path }}/stigmergy-web"
     version: "{{ git_stigmergy_web_branch }}"
-    force: true
+    force: false
 
 - name: Create service build directories
   ansible.builtin.file:
@@ -180,6 +180,7 @@
     group: "1000"
     mode: "0750"
     recurse: true
+    follow: false
 
 - name: Create or reuse the Vikunja service secret
   ansible.builtin.set_fact:

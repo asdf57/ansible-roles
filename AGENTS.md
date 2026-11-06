@@ -26,6 +26,8 @@
   `operators/common.py` contains shared API, SSH and live Ansible output helpers.
 - Managed-node mutations run through `plays/provision_stage.yml` and roles.
   Keep disk-changing commands out of Python operator code and ad hoc SSH.
+- Separate every sibling Ansible task with a blank line, including tasks inside
+  block/rescue/always sections. Preserve hand-written spacing for readability.
 - Test with `python3 -m unittest discover -s operators/tests` and syntax-check
   changed plays with the project's Ansible runner image. Syntax checks and the
   GRUB VM fixture are not full installation acceptance tests.

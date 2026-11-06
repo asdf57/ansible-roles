@@ -16,3 +16,5 @@ ansible-playbook experiments/multus_2022/play.yml -l <nodes> -e mode=uninstall
 
 Uninstall deletes the 2022 objects, removes the `00-multus.conf` and `multus.d/`
 the 2022 daemon leaves behind, and reinstalls the managed release.
+
+`localhost` must be in the limit: the cluster-side steps run there.

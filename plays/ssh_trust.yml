@@ -12,5 +12,6 @@
   post_tasks:
     - name: Reconnect using the resulting SSH trust policy
       ansible.builtin.meta: reset_connection
+
     - name: Verify certificate-authenticated management access
       ansible.builtin.ping:

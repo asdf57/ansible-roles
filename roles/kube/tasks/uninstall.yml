@@ -28,6 +28,7 @@
 # There's a chance the cluster was destroyed while the node was in it.
 # If that's the case, we can skip this logic and just remove the k3s
 # configuration data.
+
 - name: Uninstall logic
   block:
   - name: Cluster uninstall logic

@@ -38,7 +38,7 @@
     repo: "{{ lookup('env', 'GIT_STIGMERGY_REPO') }}"
     dest: "{{ mounted_data_path }}/stigmergy"
     version: "{{ lookup('env', 'GIT_STIGMERGY_REF') }}"
-    force: true
+    force: false
 
 - name: Create the OpenBao configuration directory
   ansible.builtin.file:
@@ -200,7 +200,7 @@
     repo: "{{ homelab_init_repo }}"
     dest: "{{ mounted_data_path }}/homelab-init"
     version: "{{ homelab_init_ref }}"
-    force: true
+    force: false
 
 - name: Apply the static Stigmergy configuration
   ansible.builtin.command:
