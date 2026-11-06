@@ -5,6 +5,10 @@
   gather_facts: false
   become: false
   vars:
+    # Inventory sets ansible_become, which overrides the keyword; sudo would drop the
+    # runner's environment (KUBECONFIG, PATH, role path).
+    ansible_become: false
+  vars:
     manifest: "{{ playbook_dir }}/files/multus-daemonset-thick-plugin.yml"
     kubectl: "{{ lookup('ansible.builtin.env', 'KUBECTL') | default('kubectl', true) }}"
   tasks:
@@ -17,10 +21,7 @@
 
     - name: Remove the managed Multus release (its uninstall makes daemons drop their config)
       ansible.builtin.command:
-        chdir: "{{ playbook_dir }}/../.."
-        argv: ["{{ ansible_playbook_python | dirname }}/ansible-playbook", -i, "localhost,", plays/multus.yml, -e, mode=uninstall, -e, "ansible_python_interpreter={{ ansible_playbook_python }}"]
-      environment:
-        ANSIBLE_ROLES_PATH: "{{ playbook_dir }}/../../roles"
+        argv: [ansible-playbook, -i, "localhost,", "{{ playbook_dir }}/../../plays/multus.yml", -e, mode=uninstall, -e, "ansible_python_interpreter={{ ansible_playbook_python }}"]
       when: mode == "install"
       changed_when: true
 
@@ -59,12 +60,11 @@
   connection: local
   gather_facts: false
   become: false
+  vars:
+    ansible_become: false
   tasks:
     - name: Reinstall Multus through its normal play
       ansible.builtin.command:
-        chdir: "{{ playbook_dir }}/../.."
-        argv: ["{{ ansible_playbook_python | dirname }}/ansible-playbook", -i, "localhost,", plays/multus.yml, -e, mode=install, -e, "ansible_python_interpreter={{ ansible_playbook_python }}"]
-      environment:
-        ANSIBLE_ROLES_PATH: "{{ playbook_dir }}/../../roles"
+        argv: [ansible-playbook, -i, "localhost,", "{{ playbook_dir }}/../../plays/multus.yml", -e, mode=install, -e, "ansible_python_interpreter={{ ansible_playbook_python }}"]
       when: mode == "uninstall"
       changed_when: true
