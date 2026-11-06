@@ -18,3 +18,6 @@ ansible-playbook experiments/containerd_wipe/play.yml -l <server> -e mode=uninst
 
 Install only enables the units; they act on the next boot. Every image other than
 the prefetched ones is pulled again after each boot.
+
+The wipe unit also removes `/var/lib/cni/networks` (host-local IP reservations), as the prod wipe script does:
+after the containerd wipe no sandbox survives, so every reservation is stale.
