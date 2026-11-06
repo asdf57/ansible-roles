@@ -731,6 +731,27 @@ class KubernetesPlanTests(unittest.TestCase):
                     self.assertTrue(entry is None or isinstance(entry, (str, bool)),
                                     f'{path.relative_to(root)}: {task.get("name")}')
 
+    def test_no_ansible_yaml_mapping_repeats_a_key(self):
+        root = Path(__file__).resolve().parents[2]
+
+        class UniqueKeyLoader(yaml.SafeLoader):
+            pass
+
+        def construct_mapping(loader: yaml.SafeLoader, node: yaml.MappingNode, deep: bool = False):
+            keys = [loader.construct_object(key, deep=deep) for key, _ in node.value]
+            repeated = sorted({str(key) for key in keys if keys.count(key) > 1})
+            # YAML keeps only the last of repeated keys, silently dropping the others.
+            if repeated:
+                raise AssertionError(f'line {node.start_mark.line + 1}: repeated {repeated}')
+            return yaml.SafeLoader.construct_mapping(loader, node, deep)
+
+        UniqueKeyLoader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG,
+                                        construct_mapping)
+        for base in ('roles', 'plays', 'experiments'):
+            for path in sorted((root / base).rglob('*.yml')):
+                with self.subTest(path=str(path.relative_to(root))):
+                    list(yaml.load_all(path.read_text(encoding='utf-8'), Loader=UniqueKeyLoader))
+
     def test_swap_policy_manages_definitions_not_active_device_aliases(self):
         root = Path(__file__).resolve().parents[2]
         tasks = yaml.safe_load((root / 'roles/kube/tasks/swap.yml').read_text(encoding='utf-8'))

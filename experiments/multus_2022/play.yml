@@ -8,7 +8,6 @@
     # Inventory sets ansible_become, which overrides the keyword; sudo would drop the
     # runner's environment (KUBECONFIG, PATH, role path).
     ansible_become: false
-  vars:
     manifest: "{{ playbook_dir }}/files/multus-daemonset-thick-plugin.yml"
     kubectl: "{{ lookup('ansible.builtin.env', 'KUBECTL') | default('kubectl', true) }}"
   tasks:
