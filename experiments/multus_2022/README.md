@@ -10,8 +10,8 @@ as it was in early March 2022, to match a prod cluster running a `20220315` buil
 - Manifest: that commit's `deployments/multus-daemonset-thick-plugin.yml`, image swapped only.
 
 ```sh
-ansible-playbook experiments/multus_2022/play.yml -l <nodes> -e mode=install
-ansible-playbook experiments/multus_2022/play.yml -l <nodes> -e mode=uninstall
+ansible-playbook experiments/multus_2022/play.yml -l localhost,<nodes> -e mode=install
+ansible-playbook experiments/multus_2022/play.yml -l localhost,<nodes> -e mode=uninstall
 ```
 
 Uninstall deletes the 2022 objects, removes the `00-multus.conf` and `multus.d/`
