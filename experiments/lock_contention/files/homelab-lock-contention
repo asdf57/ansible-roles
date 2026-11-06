@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# homelab-lock-contention <loops> <seconds>: synthetic xtables lock contention from boot (test-only). Each loop
+# repeatedly runs one read-only rule check, which takes the xtables lock and reads the whole NAT table, like the
+# many portmap/kubelet commands that queue on a busy node.
+set -u
+loops=$1; seconds=$2; end=$((SECONDS + seconds))
+logger -t homelab-lock-contention "starting $loops loops for ${seconds}s"
+for i in $(seq 1 "$loops"); do
+  ( while (( SECONDS < end )); do iptables -w -t nat -C POSTROUTING -s "192.0.2.$i/32" -j RETURN 2>/dev/null; done ) &
+done
+wait
+logger -t homelab-lock-contention "done"

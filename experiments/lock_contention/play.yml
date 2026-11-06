@@ -1,0 +1,69 @@
+# Experiment only; see README.md. Never referenced by provisioning or Configurations.
+- name: Synthetic xtables lock contention from boot (experiment)
+  hosts: all
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Ensure mode is set
+      ansible.builtin.assert:
+        that:
+          - mode is defined
+          - mode in ["install", "uninstall"]
+          - mode == "uninstall" or (lock_contention_loops | int) > 0
+        quiet: true
+        fail_msg: "mode=install needs lock_contention_loops > 0; mode=uninstall removes the unit."
+
+    - name: Install the contention script
+      ansible.builtin.copy:
+        src: homelab-lock-contention
+        dest: /usr/local/sbin/homelab-lock-contention
+        owner: root
+        group: root
+        mode: '0755'
+      when: mode == "install"
+
+    - name: Install the boot unit (starts before kubelet)
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/homelab-lock-contention.service
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          [Unit]
+          Description=Synthetic xtables lock contention from boot (lab experiment)
+          Before=kubelet.service
+
+          [Service]
+          Type=simple
+          ExecStart=/usr/local/sbin/homelab-lock-contention {{ lock_contention_loops | int }} {{ lock_contention_seconds | default(1200) | int }}
+
+          [Install]
+          WantedBy=multi-user.target
+      when: mode == "install"
+
+    - name: Enable the unit for the next boot only (never start it now)
+      ansible.builtin.systemd_service:
+        name: homelab-lock-contention
+        enabled: true
+        daemon_reload: true
+      when: mode == "install"
+
+    - name: Disable and stop the unit
+      ansible.builtin.systemd_service:
+        name: homelab-lock-contention
+        enabled: false
+        state: stopped
+      failed_when: false
+      when: mode == "uninstall"
+
+    - name: Remove the unit and script
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop: [/etc/systemd/system/homelab-lock-contention.service, /usr/local/sbin/homelab-lock-contention]
+      when: mode == "uninstall"
+
+    - name: Reload systemd after removal
+      ansible.builtin.systemd_service:
+        daemon_reload: true
+      when: mode == "uninstall"
