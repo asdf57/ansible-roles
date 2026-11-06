@@ -11,3 +11,6 @@ matches the prod profile; then startup-script versions are compared under it. Th
 ansible-playbook experiments/lock_contention/play.yml -l <node> -e mode=install -e lock_contention_loops=8
 ansible-playbook experiments/lock_contention/play.yml -l <node> -e mode=uninstall
 ```
+
+With `-e lock_contention_decay_target=<ready pod sandboxes expected>` the number of active loops shrinks in
+proportion to the pods still pending, so contention dies down as pods come up (as with prod's pod-churn contenders).

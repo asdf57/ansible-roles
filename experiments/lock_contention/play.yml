@@ -35,7 +35,7 @@
 
           [Service]
           Type=simple
-          ExecStart=/usr/local/sbin/homelab-lock-contention {{ lock_contention_loops | int }} {{ lock_contention_seconds | default(1200) | int }}
+          ExecStart=/usr/local/sbin/homelab-lock-contention {{ lock_contention_loops | int }} {{ lock_contention_seconds | default(1200) | int }} {{ lock_contention_decay_target | default(0) | int }}
 
           [Install]
           WantedBy=multi-user.target

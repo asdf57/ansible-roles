@@ -1,12 +1,27 @@
 #!/usr/bin/env bash
-# homelab-lock-contention <loops> <seconds>: synthetic xtables lock contention from boot (test-only). Each loop
-# repeatedly runs one read-only rule check, which takes the xtables lock and reads the whole NAT table, like the
-# many portmap/kubelet commands that queue on a busy node.
+# homelab-lock-contention <loops> <seconds> [decay-target]: synthetic xtables lock contention from boot (test-only).
+# Each loop repeatedly runs one read-only rule check, which takes the xtables lock and reads the whole NAT table,
+# like the many portmap/kubelet commands that queue on a busy node. With a decay target T (ready pod sandboxes
+# expected on the node), loop i only runs while (pending pods) / T > (i - 1) / loops, so contention dies down as
+# pods come up - like prod, where most contenders are pod setups and teardowns.
 set -u
-loops=$1; seconds=$2; end=$((SECONDS + seconds))
-logger -t homelab-lock-contention "starting $loops loops for ${seconds}s"
+loops=$1; seconds=$2; target=${3:-0}; end=$((SECONDS + seconds)); state=/run/homelab-lock-contention.allowed
+echo "$loops" > "$state"
+logger -t homelab-lock-contention "starting $loops loops for ${seconds}s (decay target ${target})"
+if (( target > 0 )); then
+  ( while (( SECONDS < end )); do
+      ready=$(crictl pods --state ready -q 2>/dev/null | wc -l)
+      pending=$(( target > ready ? target - ready : 0 ))
+      echo $(( (loops * pending + target - 1) / target )) > "$state.tmp" && mv "$state.tmp" "$state"
+      sleep 5
+    done ) &
+fi
 for i in $(seq 1 "$loops"); do
-  ( while (( SECONDS < end )); do iptables -w -t nat -C POSTROUTING -s "192.0.2.$i/32" -j RETURN 2>/dev/null; done ) &
+  ( while (( SECONDS < end )); do
+      if (( i <= $(cat "$state" 2>/dev/null || echo "$loops") )); then
+        iptables -w -t nat -C POSTROUTING -s "192.0.2.$i/32" -j RETURN 2>/dev/null
+      else sleep 1; fi
+    done ) &
 done
 wait
 logger -t homelab-lock-contention "done"
