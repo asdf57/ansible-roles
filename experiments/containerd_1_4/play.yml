@@ -1,0 +1,91 @@
+# Experiment only; see README.md. Never referenced by provisioning or Configurations.
+- name: containerd 1.4 runtime (experiment)
+  hosts: all
+  gather_facts: false
+  become: true
+  vars:
+    c14_version: "1.4.6"
+    c14_sha256: 8cbd2cb9df387568207628203a7b94dee937a738e01224ef0ebb7d8c29cf6ac4
+    c14_sandbox_image: registry.k8s.io/pause:3.6
+  tasks:
+    - name: Ensure mode is set
+      ansible.builtin.assert:
+        that:
+          - mode is defined
+          - mode == "install"
+        quiet: true
+        fail_msg: "Only mode=install exists; restore the managed runtime with its Configuration (README.md)."
+
+    - name: Download the containerd release on the runner
+      ansible.builtin.get_url:
+        url: "https://github.com/containerd/containerd/releases/download/v{{ c14_version }}/containerd-{{ c14_version }}-linux-amd64.tar.gz"
+        dest: "/tmp/c14-containerd-{{ c14_version }}.tar.gz"
+        checksum: "sha256:{{ c14_sha256 }}"
+        mode: '0600'
+      delegate_to: localhost
+      become: false
+      run_once: true
+      vars:
+        ansible_become: false
+
+    - name: Stop kubelet and containerd
+      ansible.builtin.systemd_service:
+        name: "{{ item }}"
+        state: stopped
+      loop: [kubelet, containerd]
+
+    - name: Install the release binaries (containerd, shims, ctr)
+      ansible.builtin.unarchive:
+        src: "/tmp/c14-containerd-{{ c14_version }}.tar.gz"
+        dest: /usr/local
+        owner: root
+        group: root
+
+    - name: Write a version 2 configuration (systemd cgroups, pinned sandbox image)
+      ansible.builtin.copy:
+        dest: /etc/containerd/config.toml
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          # Written by experiments/containerd_1_4 (test-only).
+          version = 2
+
+          [grpc]
+            address = "/run/containerd/containerd.sock"
+
+          [plugins."io.containerd.grpc.v1.cri"]
+            sandbox_image = "{{ c14_sandbox_image }}"
+
+          [plugins."io.containerd.grpc.v1.cri".containerd]
+            default_runtime_name = "runc"
+
+          [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc]
+            runtime_type = "io.containerd.runc.v2"
+
+          [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc.options]
+            SystemdCgroup = true
+
+    - name: Remove state written by the newer runtime (its metadata is not readable by 1.4)
+      ansible.builtin.file:
+        path: /var/lib/containerd
+        state: absent
+
+    - name: Start containerd
+      ansible.builtin.systemd_service:
+        name: containerd
+        state: started
+        daemon_reload: true
+
+    - name: Read the running containerd version
+      ansible.builtin.command:
+        argv: [/usr/local/bin/ctr, version]
+      register: c14_ctr_version
+      changed_when: false
+
+    - name: Verify the server runs the pinned version
+      ansible.builtin.assert:
+        that:
+          - c14_ctr_version.stdout is search('Server:\\s+Version:\\s+v' ~ (c14_version | regex_escape))
+        quiet: true
+        fail_msg: "{{ c14_ctr_version.stdout }}"
