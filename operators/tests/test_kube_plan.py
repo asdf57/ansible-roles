@@ -742,11 +742,10 @@ class KubernetesPlanTests(unittest.TestCase):
             repeated = sorted({str(key) for key in keys if keys.count(key) > 1})
             # YAML keeps only the last of repeated keys, silently dropping the others.
             if repeated:
-                raise AssertionError(f'line {node.start_mark.line + 1}: repeated {repeated}')
+                raise AssertionError(f'{node.start_mark}: repeated {repeated}')
             return yaml.SafeLoader.construct_mapping(loader, node, deep)
 
-        UniqueKeyLoader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG,
-                                        construct_mapping)
+        UniqueKeyLoader.add_constructor(UniqueKeyLoader.DEFAULT_MAPPING_TAG, construct_mapping)
         for base in ('roles', 'plays', 'experiments'):
             for path in sorted((root / base).rglob('*.yml')):
                 with self.subTest(path=str(path.relative_to(root))):
