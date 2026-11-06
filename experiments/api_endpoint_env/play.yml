@@ -1,0 +1,46 @@
+# Experiment only; see README.md. Never referenced by provisioning or Configurations.
+- name: Direct API endpoint for Flannel and Multus (experiment)
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  vars:
+    # Inventory sets ansible_become, which overrides the keyword.
+    ansible_become: false
+    kubectl: "{{ lookup('ansible.builtin.env', 'KUBECTL') | default('kubectl', true) }}"
+    daemonsets:
+      - {namespace: kube-flannel, name: kube-flannel-ds}
+      - {namespace: kube-system, name: kube-multus-ds}
+  tasks:
+    - name: Ensure mode is set
+      ansible.builtin.assert:
+        that:
+          - mode is defined
+          - mode in ["install", "uninstall"]
+          - mode == "uninstall" or (api_endpoint_host | default('') | length > 0)
+        quiet: true
+        fail_msg: "mode=install needs api_endpoint_host (and optional api_endpoint_port, default 6443)."
+
+    - name: Point every container and init container at the API endpoint (client-go in-cluster config)
+      ansible.builtin.command:
+        argv: ["{{ kubectl }}", -n, "{{ item.namespace }}", set, env, "daemonset/{{ item.name }}", "--containers=*",
+               "KUBERNETES_SERVICE_HOST={{ api_endpoint_host }}", "KUBERNETES_SERVICE_PORT={{ api_endpoint_port | default(6443) }}"]
+      loop: "{{ daemonsets }}"
+      register: api_env_set
+      changed_when: "'updated' in api_env_set.stdout"
+      when: mode == "install"
+
+    - name: Remove the variables again (back to the kubelet-injected ClusterIP)
+      ansible.builtin.command:
+        argv: ["{{ kubectl }}", -n, "{{ item.namespace }}", set, env, "daemonset/{{ item.name }}", "--containers=*",
+               KUBERNETES_SERVICE_HOST-, KUBERNETES_SERVICE_PORT-]
+      loop: "{{ daemonsets }}"
+      register: api_env_unset
+      changed_when: "'updated' in api_env_unset.stdout"
+      when: mode == "uninstall"
+
+    - name: Wait for both DaemonSets to roll out
+      ansible.builtin.command:
+        argv: ["{{ kubectl }}", -n, "{{ item.namespace }}", rollout, status, "daemonset/{{ item.name }}", --timeout=900s]
+      loop: "{{ daemonsets }}"
+      changed_when: false
